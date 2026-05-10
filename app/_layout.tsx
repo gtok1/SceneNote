@@ -59,11 +59,15 @@ function AuthRedirect() {
     const routeSegments = segments as readonly string[];
     const inAuthGroup = routeSegments[0] === "(auth)";
     const inPasswordReset = inAuthGroup && routeSegments[1] === "reset-password";
-    if (!session && !inAuthGroup) {
-      router.replace("/onboarding");
-    } else if (session && inAuthGroup && !inPasswordReset) {
-      router.replace("/");
-    }
+    const nextPath = !session && !inAuthGroup ? "/onboarding" : session && inAuthGroup && !inPasswordReset ? "/" : null;
+
+    if (!nextPath) return;
+
+    const redirectTimer = setTimeout(() => {
+      router.replace(nextPath);
+    }, 0);
+
+    return () => clearTimeout(redirectTimer);
   }, [isLoading, rootNavigationState?.key, router, segments, session]);
 
   return null;

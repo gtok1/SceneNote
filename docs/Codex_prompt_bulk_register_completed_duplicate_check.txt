@@ -1,0 +1,179 @@
+Codex 작업 요청: 1차 추출 완료본으로 Netflix/TMDB 작품 일괄 등록 기능 구현
+
+배경:
+- Netflix 시청 기록 원본 CSV에서 작품 단위 정규화 1차 추출은 이미 완료했다.
+- 이번 작업의 입력 파일은 `Netflix_TMDB_443Works_For_Codex_BulkRegister.xlsx` 하나다.
+- 이 엑셀은 단일 시트 `Works_To_Register`만 가지고 있으며, 443개 작품 단위 row가 들어 있다.
+- 원본 Netflix 시청기록 5천여 개 row를 다시 처리하지 말 것.
+- 이 엑셀의 각 row는 "작품 1개"로 보고 처리한다.
+- 앱에는 이미 등록된 작품도 일부 섞여 있으므로, 반드시 중복 체크 후 기존 작품은 새로 만들지 말고 기존 작품에 연결/업데이트해야 한다.
+- 최종적으로 선택된 모든 작품은 사용자의 시청 상태를 `시청완료/completed/watched` 상태로 등록 또는 업데이트해야 한다.
+
+입력 파일:
+- 파일명: `Netflix_TMDB_443Works_For_Codex_BulkRegister.xlsx`
+- 시트명: `Works_To_Register`
+- 데이터 row 수: 443
+- 주요 컬럼:
+  - `import_selected`: TRUE인 row만 처리
+  - `desired_watch_status`: 기본값 completed
+  - `duplicate_check_required`: TRUE
+  - `duplicate_policy`: 기본값 dedupe_then_update_or_create
+  - `normalized_title`: 1차 추출된 작품명
+  - `title_override`: 수동 보정 제목. 값이 있으면 normalized_title보다 우선 사용
+  - `tmdb_search_query`: TMDB 검색에 사용할 추천 검색어
+  - `media_hint`: tv/movie/unknown
+  - `view_count`: Netflix 시청 기록에서 해당 작품으로 묶인 row 수
+  - `first_watched_date`: 최초 시청일
+  - `last_watched_date`: 마지막 시청일
+  - `needs_manual_title_review`, `review_flag`, `sample_titles`: 매칭 검토 참고 정보
+  - `existing_app_content_id`, `duplicate_check_result`, `import_result`: 결과 기록용으로 비어 있을 수 있음
+  - `tmdb_id`, `tmdb_media_type`, `tmdb_match_status`: 아직 비어 있거나 pending일 수 있음
+
+작업 목표:
+1. 이 엑셀을 읽어 443개 작품을 일괄 처리하는 importer를 구현한다.
+2. 기존 앱 DB에 이미 등록된 작품이 있으면 중복 생성하지 않는다.
+3. 기존 등록 작품이면 해당 작품에 사용자의 상태만 `시청완료/completed/watched`로 업데이트한다.
+4. 기존 등록 작품이 아니면 TMDB와 매칭한 뒤 새 작품을 생성하고 사용자의 상태를 `시청완료/completed/watched`로 저장한다.
+5. 동일 작업을 여러 번 실행해도 중복 작품이나 중복 상태 row가 생기지 않도록 idempotent하게 만든다.
+
+중요한 처리 순서:
+1. 엑셀 row 읽기
+   - `import_selected`가 TRUE인 row만 처리한다.
+   - `title_override`가 있으면 표시명/검색명으로 우선 사용한다.
+   - 없으면 `normalized_title`을 사용한다.
+   - `tmdb_search_query`가 있으면 TMDB 검색어로 사용한다.
+   - 날짜는 ISO 문자열로 읽고, 필요하면 Date 타입으로 변환한다.
+
+2. TMDB 호출 전 기존 앱 DB 중복 체크
+   - 이미 앱에 등록된 작품이 섞여 있으므로 TMDB 호출 전에 먼저 앱 DB에서 후보를 찾는다.
+   - 가능한 경우 아래 기준으로 기존 작품을 찾는다:
+     - 기존 content/movie/show 테이블의 tmdb_id + media_type
+     - normalized_title 또는 title_override와 기존 제목의 정확 일치
+     - tmdb_search_query와 기존 제목의 정확 일치
+     - 기존 한국어 제목, 원제, 별칭/alias/title_variants가 있다면 같이 비교
+     - media_hint가 tv/movie이면 같은 타입을 우선한다
+   - 명확한 단일 기존 작품을 찾으면:
+     - 새 작품을 생성하지 않는다.
+     - 기존 content id를 사용한다.
+     - 사용자의 상태를 completed/watched로 upsert한다.
+     - 결과를 `existing_app_match` 또는 `duplicate_existing_updated`로 기록한다.
+   - 기존 후보가 여러 개라 애매하면 자동 등록하지 말고 manual_review로 표시한다.
+
+3. TMDB 매칭
+   - 기존 앱 DB에서 명확한 중복을 찾지 못한 경우에만 TMDB를 호출한다.
+   - TMDB 검색은 row마다 무작정 반복하지 말고 cache를 사용한다.
+   - 검색 키는 `media_hint + tmdb_search_query` 조합으로 캐싱한다.
+   - language=ko-KR 우선으로 검색한다.
+   - movie/tv만 허용하고 person은 제외한다.
+   - media_hint가 tv이면 tv 후보에 가산점을 주고, movie이면 movie 후보에 가산점을 준다.
+   - normalized_title/title_override와 TMDB title/name의 정확 일치, 원제 일치, 공백/특수문자 제거 후 일치를 confidence에 반영한다.
+   - confidence가 충분히 높지 않거나 후보가 애매하면 자동 생성하지 말고 manual_review로 둔다.
+
+4. TMDB 매칭 후 다시 중복 체크
+   - TMDB에서 tmdb_id + media_type을 확정한 뒤에는 반드시 앱 DB에서 다시 중복 체크한다.
+   - 같은 tmdb_id + media_type 작품이 이미 있으면:
+     - 새 작품을 생성하지 않는다.
+     - 기존 작품에 사용자 상태만 completed/watched로 upsert한다.
+   - 없으면:
+     - 새 작품을 생성한다.
+     - TMDB id, media_type, 제목, 원제, release/first_air_date, poster, overview 등 앱이 쓰는 메타데이터를 저장한다.
+     - 이후 사용자 상태를 completed/watched로 upsert한다.
+
+5. 시청완료 상태 저장
+   - 앱의 기존 상태 enum/필드명을 먼저 확인하고 그에 맞춰 매핑한다.
+   - 예: COMPLETED, completed, WATCHED, watched, FINISHED 등 기존 프로젝트 컨벤션을 따른다.
+   - 새로운 enum을 임의로 만들지 말고 기존 구조를 우선 사용한다.
+   - 상태 저장 테이블이 user_content, user_media_status, library_item, watch_status 등 어떤 이름이든 프로젝트 스키마에 맞춘다.
+   - 같은 user_id + content_id 조합이 이미 있으면 insert가 아니라 update/upsert한다.
+   - 앱이 날짜 필드를 지원하면:
+     - completed_at 또는 watched_at에는 `last_watched_date`를 사용한다.
+     - started_at 또는 first_watched_at에는 `first_watched_date`를 사용한다.
+   - 날짜 필드가 없으면 상태만 저장한다.
+
+6. 중복 방지 / idempotency
+   - content 테이블에는 가능하면 `(tmdb_id, media_type)` 유니크 제약 또는 upsert를 사용한다.
+   - user 상태 테이블에는 가능하면 `(user_id, content_id)` 유니크 제약 또는 upsert를 사용한다.
+   - importer를 여러 번 실행해도:
+     - 같은 작품이 여러 번 생성되면 안 된다.
+     - 같은 사용자 상태가 여러 줄 생기면 안 된다.
+     - 기존 상태가 있으면 completed/watched로 갱신되어야 한다.
+
+7. API 제한 보호
+   - TMDB 요청에는 rate limiter를 둔다.
+   - 동시 요청 수는 1~3개로 제한한다.
+   - 초당 요청 수는 안전하게 4~5 requests/sec 이하로 제한한다.
+   - 429 응답이 오면 Retry-After 헤더를 우선 따르고, 없으면 exponential backoff로 재시도한다.
+   - 5xx/네트워크 오류는 제한된 횟수만 재시도한다.
+   - 이미 검색한 title/media 조합과 이미 조회한 tmdb_id는 캐시한다.
+   - 캐시는 가능하면 DB 또는 파일 캐시로 두어 재실행 시 API를 다시 때리지 않게 한다.
+
+8. Dry-run / commit 모드
+   - 기본 실행은 dry-run으로 만든다.
+   - dry-run은 DB를 변경하지 않고 아래 분류 리포트만 출력한다:
+     - total_rows
+     - selected_rows
+     - existing_app_matches
+     - tmdb_cache_hits
+     - tmdb_api_calls
+     - tmdb_matched_existing_content
+     - new_content_to_create
+     - status_to_update
+     - manual_review_required
+     - skipped
+     - failed
+   - 실제 저장은 `--commit` 옵션 또는 명확한 confirm 액션이 있을 때만 수행한다.
+   - commit 후에도 동일한 리포트를 출력한다.
+
+9. 결과 기록
+   - 가능하면 import 결과를 새 엑셀 또는 CSV로 저장한다.
+   - 각 row별로 아래 값을 기록한다:
+     - work_id
+     - normalized_title
+     - resolved_title
+     - existing_app_content_id
+     - resolved_tmdb_id
+     - resolved_media_type
+     - duplicate_check_result
+     - import_result
+     - status_result
+     - failure_reason
+   - 실패/수동검토 항목은 절대 조용히 무시하지 말고 별도 목록으로 출력한다.
+
+10. UI 또는 API 구현 방향
+   - 우선순위는 백엔드 importer와 dry-run 리포트다.
+   - 프로젝트 구조에 맞게 CLI 스크립트, admin endpoint, 또는 import page 중 가장 자연스러운 방식으로 구현한다.
+   - UI를 만든다면:
+     - 파일 업로드
+     - dry-run preview
+     - 기존 등록 작품 / 새 등록 예정 / 수동 검토 필요 구분 표시
+     - 체크박스 선택
+     - 최종 일괄 등록
+     - 완료 리포트 표시
+   - UI가 부담되면 먼저 CLI 또는 API로 구현하고, 추후 UI를 붙일 수 있게 구조화한다.
+
+11. 테스트 요구사항
+   - 엑셀 파싱 테스트
+   - import_selected=FALSE row 제외 테스트
+   - title_override 우선순위 테스트
+   - 기존 앱 DB 작품 중복 탐지 테스트
+   - tmdb_id + media_type 중복 탐지 테스트
+   - 기존 작품이면 새 content를 만들지 않고 상태만 업데이트하는 테스트
+   - 신규 작품이면 content 생성 후 completed/watched 상태가 생성되는 테스트
+   - 같은 importer를 2번 실행해도 중복이 생기지 않는 idempotency 테스트
+   - TMDB 캐시가 중복 호출을 막는 테스트
+   - 429 발생 시 retry/backoff 테스트
+   - manual_review_required 항목이 자동 생성되지 않는 테스트
+
+주의:
+- 443개 작품 row를 5천 개 시청 기록으로 다시 확장하지 말 것.
+- 원본 Netflix CSV를 다시 요구하지 말 것.
+- row마다 무조건 TMDB API를 호출하지 말 것.
+- 기존 등록 작품을 절대 중복 생성하지 말 것.
+- 모든 처리 대상은 최종적으로 사용자의 시청 상태가 completed/watched가 되도록 등록 또는 업데이트할 것.
+- 필드명과 enum명은 프로젝트 기존 스키마를 먼저 확인하고, 그에 맞춰 안전하게 매핑할 것.
+
+작업 시작:
+1. 먼저 프로젝트의 DB schema/model/status enum/import 관련 코드를 확인해줘.
+2. 그 다음 위 엑셀 파일을 읽는 dry-run importer를 구현해줘.
+3. dry-run 결과 리포트를 출력하게 해줘.
+4. 문제 없으면 commit 모드에서 중복 체크 + TMDB 매칭 + 시청완료 상태 upsert가 동작하도록 완성해줘.

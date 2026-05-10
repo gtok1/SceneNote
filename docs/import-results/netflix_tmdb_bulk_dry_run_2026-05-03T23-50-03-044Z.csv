@@ -1,0 +1,6 @@
+work_id,row_number,normalized_title,resolved_title,existing_app_content_id,resolved_tmdb_id,resolved_media_type,duplicate_check_result,import_result,status_result,failure_reason
+1,2,나의 히어로 아카데미아,나의 히어로 아카데미아,064b1bd2-526c-418c-b595-795b7d1bc52b,,,existing_app_match,dry_run_existing_status_update,would_update_completed,
+2,3,헌터X헌터,헌터X헌터,,,,no_existing_match,manual_review,skipped_manual_review,"low or ambiguous TMDB confidence: best=107, second=106"
+3,4,일곱 개의 대죄,일곱 개의 대죄,,62104,tv,no_existing_match,dry_run_new_content_to_create,would_update_completed,
+4,5,니돈내산 독박투어,니돈내산 독박투어,,227395,tv,no_existing_match,dry_run_new_content_to_create,would_update_completed,
+5,6,블랙 클로버,블랙 클로버,,73223,tv,no_existing_match,dry_run_new_content_to_create,would_update_completed,

@@ -1,0 +1,2 @@
+-- Seed data intentionally left empty for the MVP.
+-- User data should be created through Supabase Auth and RLS-protected tables.

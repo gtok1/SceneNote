@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Frontend: Expo Web",
+      "type": "shell",
+      "command": "EXPO_NO_TELEMETRY=1 npm run web -- --port 8081 --localhost",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Expo Native",
+      "type": "shell",
+      "command": "EXPO_NO_TELEMETRY=1 npm run start -- --port 8081 --localhost",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Supabase Functions Serve",
+      "type": "shell",
+      "command": "npm run backend:serve",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Supabase Functions Deploy",
+      "type": "shell",
+      "command": "set -a; source .env; npm run backend:deploy",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "/bin/zsh",
+          "args": ["-lc"]
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality: Typecheck Lint Test",
+      "type": "shell",
+      "command": "npm run typecheck && npm run lint && npm test",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

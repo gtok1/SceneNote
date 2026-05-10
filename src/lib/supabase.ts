@@ -9,6 +9,7 @@ import type { Database } from "@/types/database";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "https://placeholder.supabase.co";
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "placeholder-anon-key";
 const canPersistAuth = Platform.OS !== "web" || typeof window !== "undefined";
+const canDetectSessionInUrl = Platform.OS === "web" && typeof window !== "undefined";
 const noopAuthStorage = {
   getItem: async (_key: string) => null,
   setItem: async (_key: string, _value: string) => undefined,
@@ -24,6 +25,6 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     storage: canPersistAuth ? AsyncStorage : noopAuthStorage,
     autoRefreshToken: canPersistAuth,
     persistSession: canPersistAuth,
-    detectSessionInUrl: false
+    detectSessionInUrl: canDetectSessionInUrl
   }
 });

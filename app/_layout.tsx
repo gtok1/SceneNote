@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
@@ -7,6 +7,7 @@ import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { colors } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -21,11 +22,28 @@ export default function RootLayout() {
           <Stack.Screen name="people/[id]" />
         </Stack>
         <AuthRedirect />
+        <NativePasswordRecoveryLinkHandler />
         <GlobalBottomNav />
         <AuthLoadingOverlay />
       </AppProviders>
     </GestureHandlerRootView>
   );
+}
+
+function getRecoverySessionTokens(url: string) {
+  const marker = url.includes("#") ? "#" : url.includes("?") ? "?" : null;
+  if (!marker) return null;
+
+  const params = new URLSearchParams(url.slice(url.indexOf(marker) + 1));
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+
+  if (!accessToken || !refreshToken) return null;
+
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken
+  };
 }
 
 function AuthRedirect() {
@@ -38,13 +56,42 @@ function AuthRedirect() {
   useEffect(() => {
     if (isLoading || !rootNavigationState?.key) return;
 
-    const inAuthGroup = segments[0] === "(auth)";
+    const routeSegments = segments as readonly string[];
+    const inAuthGroup = routeSegments[0] === "(auth)";
+    const inPasswordReset = inAuthGroup && routeSegments[1] === "reset-password";
     if (!session && !inAuthGroup) {
       router.replace("/onboarding");
-    } else if (session && inAuthGroup) {
+    } else if (session && inAuthGroup && !inPasswordReset) {
       router.replace("/");
     }
   }, [isLoading, rootNavigationState?.key, router, segments, session]);
+
+  return null;
+}
+
+function NativePasswordRecoveryLinkHandler() {
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const handleUrl = (url: string | null) => {
+      if (!url) return;
+
+      const tokens = getRecoverySessionTokens(url);
+      if (!tokens) return;
+
+      void supabase.auth.setSession(tokens);
+    };
+
+    void Linking.getInitialURL().then(handleUrl);
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      handleUrl(url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   return null;
 }

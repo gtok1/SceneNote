@@ -1,36 +1,32 @@
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, useRouter, type Href } from "expo-router";
+import { Link } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
-import { authSchema } from "@/utils/validation";
+import { passwordResetRequestSchema } from "@/utils/validation";
 
-type AuthFormValues = z.infer<typeof authSchema>;
-const forgotPasswordHref = "/forgot-password" as Href;
+type PasswordResetRequestFormValues = z.infer<typeof passwordResetRequestSchema>;
 
-export default function SignInScreen() {
-  const router = useRouter();
-  const { signIn } = useAuth();
-  const { control, handleSubmit, formState } = useForm<AuthFormValues>({
-    resolver: zodResolver(authSchema),
-    defaultValues: { email: "", password: "" }
+export default function ForgotPasswordScreen() {
+  const { requestPasswordReset } = useAuth();
+  const { control, handleSubmit, formState } = useForm<PasswordResetRequestFormValues>({
+    resolver: zodResolver(passwordResetRequestSchema),
+    defaultValues: { email: "" }
   });
 
   const submit = handleSubmit((values) => {
-    signIn.mutate(values, {
-      onSuccess: () => router.replace("/")
-    });
+    requestPasswordReset.mutate(values);
   });
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
-        <Text style={styles.subtitle}>내 장면 기록으로 바로 돌아가기</Text>
+        <Text style={styles.subtitle}>가입한 이메일로 비밀번호 재설정 링크를 보내드려요</Text>
       </View>
 
       <View style={styles.form}>
@@ -52,40 +48,29 @@ export default function SignInScreen() {
             </View>
           )}
         />
-        <Controller
-          control={control}
-          name="password"
-          render={({ field, fieldState }) => (
-            <View style={styles.field}>
-              <TextInput
-                onBlur={field.onBlur}
-                onChangeText={field.onChange}
-                placeholder="비밀번호"
-                secureTextEntry
-                style={styles.input}
-                value={field.value}
-              />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
-            </View>
-          )}
-        />
-        {signIn.error ? <Text style={styles.error}>{signIn.error.message}</Text> : null}
+        {requestPasswordReset.error ? (
+          <Text style={styles.error}>{requestPasswordReset.error.message}</Text>
+        ) : null}
+        {requestPasswordReset.isSuccess ? (
+          <Text style={styles.success}>
+            메일을 보냈습니다. 받은 편지함과 스팸함을 확인해 주세요.
+          </Text>
+        ) : null}
         <Pressable
           accessibilityRole="button"
-          disabled={formState.isSubmitting || signIn.isPending}
+          disabled={formState.isSubmitting || requestPasswordReset.isPending}
           onPress={submit}
-          style={styles.primaryButton}
+          style={[
+            styles.primaryButton,
+            formState.isSubmitting || requestPasswordReset.isPending ? styles.disabledButton : null
+          ]}
         >
-          <Text style={styles.primaryText}>{signIn.isPending ? "로그인 중" : "로그인"}</Text>
+          <Text style={styles.primaryText}>
+            {requestPasswordReset.isPending ? "보내는 중" : "재설정 링크 보내기"}
+          </Text>
         </Pressable>
-        <Link href="/sign-up" style={styles.link}>
-          계정 만들기
-        </Link>
-        <Link href={forgotPasswordHref} style={styles.secondaryLink}>
-          비밀번호를 잊으셨나요?
-        </Link>
-        <Link href="/onboarding" style={styles.secondaryLink}>
-          처음 사용하는 분들을 위한 안내
+        <Link href="/sign-in" style={styles.link}>
+          로그인으로 돌아가기
         </Link>
       </View>
     </View>
@@ -133,6 +118,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.lg
   },
+  disabledButton: {
+    opacity: 0.65
+  },
   primaryText: {
     color: colors.surface,
     fontSize: 16,
@@ -144,14 +132,13 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     textAlign: "center"
   },
-  secondaryLink: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center"
-  },
   error: {
     color: colors.danger,
     fontSize: 12
+  },
+  success: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: "700"
   }
 });

@@ -1,0 +1,28 @@
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/content/:id/episodes",
+      "destination": "/content/[id]/episodes.html"
+    },
+    {
+      "source": "/content/:id/pins",
+      "destination": "/content/[id]/pins.html"
+    },
+    {
+      "source": "/content/:id",
+      "destination": "/content/[id].html"
+    },
+    {
+      "source": "/people/:id",
+      "destination": "/people/[id].html"
+    },
+    {
+      "source": "/pins/:id",
+      "destination": "/pins/[id].html"
+    }
+  ]
+}

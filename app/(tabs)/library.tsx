@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
+import { GenreFilterChips } from "@/components/common/GenreFilterChips";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { YearSelect } from "@/components/common/YearSelect";
 import { ContentCard } from "@/components/content/ContentCard";
@@ -18,7 +19,7 @@ import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import type { ContentType } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import { filterByYear, normalizeYearFilter, sortByYear, type DateSortOrder } from "@/utils/contentSort";
-import { ALL_GENRE_FILTER, createGenreFilterOptions, matchesGenreFilter } from "@/utils/genre";
+import { ALL_GENRE_FILTER, matchesGenreFilter } from "@/utils/genre";
 
 type ContentTypeFilter = ContentType | "all";
 
@@ -60,7 +61,7 @@ export default function LibraryScreen() {
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const yearFilter = normalizeYearFilter(year);
   const advancedFilterCount = [
-    contentTypeFilter !== "all",
+    genreFilter !== ALL_GENRE_FILTER,
     Boolean(year),
     sortOrder !== "latest"
   ].filter(Boolean).length;
@@ -71,7 +72,6 @@ export default function LibraryScreen() {
     () => (library.data ?? []).flatMap((item) => item.genres),
     [library.data]
   );
-  const genreFilterOptions = useMemo(() => createGenreFilterOptions(genreOptions), [genreOptions]);
   const filteredItems = useMemo(
     () => {
       const searchedItems = (library.data ?? []).filter((item) => {
@@ -130,6 +130,7 @@ export default function LibraryScreen() {
             style={styles.primaryFiltersScroll}
             contentContainerStyle={styles.primaryFilters}
           >
+            <Text style={styles.filterGroupLabel}>시청 상태</Text>
             {STATUS_FILTERS.map((item) => {
               const selected = item === statusFilter;
               return (
@@ -147,28 +148,30 @@ export default function LibraryScreen() {
               );
             })}
             <View style={styles.filterDivider} />
-            <Text style={styles.filterGroupLabel}>장르</Text>
+            <Text style={styles.filterGroupLabel}>작품 유형</Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ selected: genreFilter === ALL_GENRE_FILTER }}
-              onPress={() => setGenreFilter(ALL_GENRE_FILTER)}
-              style={[styles.filter, genreFilter === ALL_GENRE_FILTER && styles.filterSelected]}
+              accessibilityState={{ selected: contentTypeFilter === "all" }}
+              onPress={() => setContentTypeFilter("all")}
+              style={[styles.filter, contentTypeFilter === "all" && styles.filterSelected]}
             >
-              <Text style={[styles.filterText, genreFilter === ALL_GENRE_FILTER && styles.filterTextSelected]}>
+              <Text style={[styles.filterText, contentTypeFilter === "all" && styles.filterTextSelected]}>
                 전체
               </Text>
             </Pressable>
-            {genreFilterOptions.map((genre) => {
-              const selected = genre === genreFilter;
+            {CONTENT_TYPE_FILTERS.filter((item) => item !== "all").map((item) => {
+              const selected = item === contentTypeFilter;
               return (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
-                  key={genre}
-                  onPress={() => setGenreFilter(genre)}
+                  key={item}
+                  onPress={() => setContentTypeFilter(item)}
                   style={[styles.filter, selected && styles.filterSelected]}
                 >
-                  <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{genre}</Text>
+                  <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
+                    {CONTENT_TYPE_LABELS[item]}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -254,23 +257,7 @@ export default function LibraryScreen() {
                 );
               })}
             </View>
-            <View style={styles.filters}>
-              {CONTENT_TYPE_FILTERS.map((item) => {
-                const selected = item === contentTypeFilter;
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    key={item}
-                    onPress={() => setContentTypeFilter(item)}
-                    style={[styles.filter, selected && styles.filterSelected]}
-                  >
-                    <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
-                      {CONTENT_TYPE_LABELS[item]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <GenreFilterChips genres={genreOptions} onChange={setGenreFilter} value={genreFilter} />
           </View>
         ) : null}
       </View>
@@ -427,11 +414,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     zIndex: 1000
-  },
-  filters: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm
   },
   filter: {
     borderColor: colors.border,

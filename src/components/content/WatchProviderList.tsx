@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 
+import { AppImage as Image } from "@/components/common/AppImage";
 import { radius, spacing } from "@/constants/theme";
 import {
   WATCH_PROVIDER_CATEGORIES,

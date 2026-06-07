@@ -15,13 +15,13 @@ import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
+import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import type { ContentType } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import { filterByYear, normalizeYearFilter, sortByYear, type DateSortOrder } from "@/utils/contentSort";
 import { ALL_GENRE_FILTER, matchesGenreFilter } from "@/utils/genre";
 
 type ContentTypeFilter = ContentType | "all";
-type LibraryViewMode = "detail" | "gallery";
 
 const STATUS_FILTERS: LibraryStatusFilter[] = [
   "all",
@@ -50,10 +50,11 @@ export default function LibraryScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [year, setYear] = useState("");
   const [sortOrder, setSortOrder] = useState<DateSortOrder>("latest");
-  const [viewMode, setViewMode] = useState<LibraryViewMode>("detail");
   const [showFilters, setShowFilters] = useState(false);
   const [visibleItemCount, setVisibleItemCount] = useState(0);
   const listRef = useRef<FlashListRef<LibraryListItem>>(null);
+  const viewMode = useLibraryUiStore((state) => state.viewMode);
+  const setViewMode = useLibraryUiStore((state) => state.setViewMode);
   const { width } = useWindowDimensions();
   const library = useLibrary(statusFilter);
   const router = useRouter();

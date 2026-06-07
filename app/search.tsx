@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -22,11 +22,8 @@ import type { PersonSearchResult } from "@/types/people";
 import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { matchesGenreFilter } from "@/utils/genre";
 
-type SearchViewMode = "detail" | "gallery";
-
 export default function SearchScreen() {
   const router = useRouter();
-  const [viewMode, setViewMode] = useState<SearchViewMode>("detail");
   const { width } = useWindowDimensions();
   const query = useSearchUiStore((state) => state.query);
   const setQuery = useSearchUiStore((state) => state.setQuery);
@@ -40,6 +37,8 @@ export default function SearchScreen() {
   const setYear = useSearchUiStore((state) => state.setYear);
   const sortOrder = useSearchUiStore((state) => state.sortOrder);
   const setSortOrder = useSearchUiStore((state) => state.setSortOrder);
+  const viewMode = useSearchUiStore((state) => state.viewMode);
+  const setViewMode = useSearchUiStore((state) => state.setViewMode);
   const search = useContentSearch(query, mediaType);
   const personSearch = usePersonContentSearch(query, "all");
   const library = useLibrary("all");

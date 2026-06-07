@@ -1,9 +1,8 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Image } from "expo-image";
-
 import { GenreBadgeList } from "@/components/GenreBadge";
+import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibraryItemCast } from "@/hooks/useLibraryItemCast";
 import type { LibraryListItem } from "@/types/library";

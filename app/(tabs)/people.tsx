@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 
+import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";

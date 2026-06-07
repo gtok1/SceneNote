@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
+import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";

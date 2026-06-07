@@ -81,8 +81,8 @@ export default function SignInScreen() {
         <Link href="/sign-up" style={styles.link}>
           계정 만들기
         </Link>
-        <Link href={forgotPasswordHref} style={styles.secondaryLink}>
-          비밀번호를 잊으셨나요?
+        <Link href={forgotPasswordHref} style={styles.passwordSetupLink}>
+          비밀번호 설정/재설정
         </Link>
         <Link href="/onboarding" style={styles.secondaryLink}>
           처음 사용하는 분들을 위한 안내
@@ -148,6 +148,13 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: "700",
+    textAlign: "center"
+  },
+  passwordSetupLink: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: "800",
+    padding: spacing.sm,
     textAlign: "center"
   },
   error: {

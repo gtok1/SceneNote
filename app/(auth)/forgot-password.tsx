@@ -26,7 +26,7 @@ export default function ForgotPasswordScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
-        <Text style={styles.subtitle}>가입한 이메일로 비밀번호 재설정 링크를 보내드려요</Text>
+        <Text style={styles.subtitle}>가입한 이메일로 비밀번호 설정 링크를 보내드려요</Text>
       </View>
 
       <View style={styles.form}>
@@ -53,7 +53,7 @@ export default function ForgotPasswordScreen() {
         ) : null}
         {requestPasswordReset.isSuccess ? (
           <Text style={styles.success}>
-            메일을 보냈습니다. 받은 편지함과 스팸함을 확인해 주세요.
+            메일을 보냈습니다. 링크를 열어 새 비밀번호를 설정해 주세요.
           </Text>
         ) : null}
         <Pressable
@@ -66,7 +66,7 @@ export default function ForgotPasswordScreen() {
           ]}
         >
           <Text style={styles.primaryText}>
-            {requestPasswordReset.isPending ? "보내는 중" : "재설정 링크 보내기"}
+            {requestPasswordReset.isPending ? "보내는 중" : "설정 링크 보내기"}
           </Text>
         </Pressable>
         <Link href="/sign-in" style={styles.link}>

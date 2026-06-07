@@ -1,18 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
-import * as Linking from "expo-linking";
-import { Platform } from "react-native";
 
 import { queryClient } from "@/lib/query";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/authStore";
-
-function getPasswordResetRedirectUrl() {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return `${window.location.origin}/reset-password`;
-  }
-
-  return Linking.createURL("/reset-password");
-}
+import { getAuthRedirectUrl } from "@/utils/authLinks";
 
 export function useAuth() {
   const session = useAuthStore((state) => state.session);
@@ -29,15 +20,22 @@ export function useAuth() {
 
   const signUp = useMutation({
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: getAuthRedirectUrl("/sign-in")
+        }
+      });
       if (error) throw new Error(error.message);
+      return data;
     }
   });
 
   const requestPasswordReset = useMutation({
     mutationFn: async ({ email }: { email: string }) => {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: getPasswordResetRedirectUrl()
+        redirectTo: getAuthRedirectUrl("/reset-password")
       });
       if (error) throw new Error(error.message);
     }

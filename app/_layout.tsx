@@ -10,6 +10,7 @@ import { colors } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
 import { useAuthStore } from "@/stores/authStore";
+import { getAuthLinkSession } from "@/utils/authLinks";
 
 export default function RootLayout() {
   return (
@@ -22,28 +23,12 @@ export default function RootLayout() {
           <Stack.Screen name="people/[id]" />
         </Stack>
         <AuthRedirect />
-        <NativePasswordRecoveryLinkHandler />
+        <AuthLinkHandler />
         <GlobalBottomNav />
         <AuthLoadingOverlay />
       </AppProviders>
     </GestureHandlerRootView>
   );
-}
-
-function getRecoverySessionTokens(url: string) {
-  const marker = url.includes("#") ? "#" : url.includes("?") ? "?" : null;
-  if (!marker) return null;
-
-  const params = new URLSearchParams(url.slice(url.indexOf(marker) + 1));
-  const accessToken = params.get("access_token");
-  const refreshToken = params.get("refresh_token");
-
-  if (!accessToken || !refreshToken) return null;
-
-  return {
-    access_token: accessToken,
-    refresh_token: refreshToken
-  };
 }
 
 function AuthRedirect() {
@@ -73,29 +58,55 @@ function AuthRedirect() {
   return null;
 }
 
-function NativePasswordRecoveryLinkHandler() {
-  useEffect(() => {
-    if (Platform.OS === "web") return;
+function AuthLinkHandler() {
+  const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
 
-    const handleUrl = (url: string | null) => {
+  useEffect(() => {
+    if (!rootNavigationState?.key) return;
+
+    let isMounted = true;
+
+    const handleUrl = async (url: string | null) => {
       if (!url) return;
 
-      const tokens = getRecoverySessionTokens(url);
-      if (!tokens) return;
+      const authLinkSession = getAuthLinkSession(url);
+      if (!authLinkSession) return;
 
-      void supabase.auth.setSession(tokens);
+      if (authLinkSession.kind === "tokens") {
+        const { error } = await supabase.auth.setSession({
+          access_token: authLinkSession.access_token,
+          refresh_token: authLinkSession.refresh_token
+        });
+        if (error) return;
+      } else {
+        const { error } = await supabase.auth.exchangeCodeForSession(authLinkSession.code);
+        if (error) return;
+      }
+
+      if (isMounted && authLinkSession.shouldSetPassword) {
+        router.replace("/reset-password");
+      }
     };
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      void handleUrl(window.location.href);
+      return () => {
+        isMounted = false;
+      };
+    }
 
     void Linking.getInitialURL().then(handleUrl);
 
     const subscription = Linking.addEventListener("url", ({ url }) => {
-      handleUrl(url);
+      void handleUrl(url);
     });
 
     return () => {
+      isMounted = false;
       subscription.remove();
     };
-  }, []);
+  }, [rootNavigationState?.key, router]);
 
   return null;
 }

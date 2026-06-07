@@ -52,7 +52,7 @@ export default function LibraryScreen() {
   const [sortOrder, setSortOrder] = useState<DateSortOrder>("latest");
   const [viewMode, setViewMode] = useState<LibraryViewMode>("detail");
   const [showFilters, setShowFilters] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [visibleItemCount, setVisibleItemCount] = useState(0);
   const listRef = useRef<FlashListRef<LibraryListItem>>(null);
   const { width } = useWindowDimensions();
   const library = useLibrary(statusFilter);
@@ -96,25 +96,22 @@ export default function LibraryScreen() {
     },
     [contentTypeFilter, genreFilter, library.data, normalizedSearchQuery, sortOrder, yearFilter]
   );
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-  const pageItems = useMemo(
-    () => filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [currentPage, filteredItems, pageSize]
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleItemCount),
+    [filteredItems, visibleItemCount]
   );
-  const pageStart = filteredItems.length ? (currentPage - 1) * pageSize + 1 : 0;
-  const pageEnd = Math.min(currentPage * pageSize, filteredItems.length);
+  const visibleItemEnd = Math.min(visibleItemCount, filteredItems.length);
+  const hasMoreItems = visibleItemEnd < filteredItems.length;
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [contentTypeFilter, genreFilter, normalizedSearchQuery, sortOrder, statusFilter, viewMode, yearFilter]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
-
-  useEffect(() => {
+    setVisibleItemCount(pageSize);
     listRef.current?.scrollToOffset({ animated: false, offset: 0 });
-  }, [currentPage, pageSize]);
+  }, [contentTypeFilter, genreFilter, normalizedSearchQuery, pageSize, sortOrder, statusFilter, viewMode, yearFilter]);
+
+  const loadMoreItems = () => {
+    if (!hasMoreItems) return;
+    setVisibleItemCount((count) => Math.min(count + pageSize, filteredItems.length));
+  };
 
   return (
     <View style={styles.container}>
@@ -266,22 +263,20 @@ export default function LibraryScreen() {
         ItemSeparatorComponent={isGallery ? undefined : () => <View style={{ height: spacing.md }} />}
         ListFooterComponent={
           filteredItems.length > pageSize ? (
-            <PaginationControls
-              currentPage={currentPage}
-              onNext={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              onPrevious={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              pageEnd={pageEnd}
-              pageStart={pageStart}
+            <InfiniteScrollFooter
+              hasMoreItems={hasMoreItems}
+              visibleItemEnd={visibleItemEnd}
               totalItems={filteredItems.length}
-              totalPages={totalPages}
             />
           ) : null
         }
         contentContainerStyle={styles.listContent}
-        data={pageItems}
+        data={visibleItems}
         key={viewMode}
         keyExtractor={(item) => item.library_item_id}
         numColumns={isGallery ? galleryColumns : 1}
+        onEndReached={loadMoreItems}
+        onEndReachedThreshold={0.6}
         ref={listRef}
         renderItem={({ item }) => (
           isGallery ? (
@@ -301,54 +296,21 @@ export default function LibraryScreen() {
   );
 }
 
-function PaginationControls({
-  currentPage,
-  totalPages,
-  pageStart,
-  pageEnd,
+function InfiniteScrollFooter({
+  hasMoreItems,
+  visibleItemEnd,
   totalItems,
-  onPrevious,
-  onNext
 }: {
-  currentPage: number;
-  totalPages: number;
-  pageStart: number;
-  pageEnd: number;
+  hasMoreItems: boolean;
+  visibleItemEnd: number;
   totalItems: number;
-  onPrevious: () => void;
-  onNext: () => void;
 }) {
-  const canGoPrevious = currentPage > 1;
-  const canGoNext = currentPage < totalPages;
-
   return (
-    <View style={styles.pagination}>
-      <Text style={styles.paginationInfo}>
-        {pageStart}-{pageEnd} / {totalItems}
+    <View style={styles.infiniteFooter}>
+      <Text style={styles.infiniteFooterInfo}>
+        1-{visibleItemEnd} / {totalItems}
       </Text>
-      <View style={styles.paginationButtons}>
-        <Pressable
-          accessibilityRole="button"
-          disabled={!canGoPrevious}
-          onPress={onPrevious}
-          style={[styles.pageButton, !canGoPrevious ? styles.pageButtonDisabled : null]}
-        >
-          <Ionicons color={canGoPrevious ? colors.text : colors.textMuted} name="chevron-back" size={16} />
-          <Text style={[styles.pageButtonText, !canGoPrevious ? styles.pageButtonTextDisabled : null]}>이전</Text>
-        </Pressable>
-        <Text style={styles.pageIndicator}>
-          {currentPage} / {totalPages}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          disabled={!canGoNext}
-          onPress={onNext}
-          style={[styles.pageButton, !canGoNext ? styles.pageButtonDisabled : null]}
-        >
-          <Text style={[styles.pageButtonText, !canGoNext ? styles.pageButtonTextDisabled : null]}>다음</Text>
-          <Ionicons color={canGoNext ? colors.text : colors.textMuted} name="chevron-forward" size={16} />
-        </Pressable>
-      </View>
+      {!hasMoreItems ? <Text style={styles.infiniteFooterHint}>전체 표시 완료</Text> : null}
     </View>
   );
 }
@@ -443,47 +405,20 @@ const styles = StyleSheet.create({
   filterTextSelected: {
     color: colors.surface
   },
-  pagination: {
+  infiniteFooter: {
     alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.xs,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg
   },
-  paginationInfo: {
+  infiniteFooterInfo: {
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: "700"
   },
-  paginationButtons: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm
-  },
-  pageButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm
-  },
-  pageButtonDisabled: {
-    opacity: 0.45
-  },
-  pageButtonText: {
-    color: colors.text,
-    fontWeight: "800"
-  },
-  pageButtonTextDisabled: {
-    color: colors.textMuted
-  },
-  pageIndicator: {
-    color: colors.text,
-    fontWeight: "900",
-    minWidth: 52,
-    textAlign: "center"
+  infiniteFooterHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700"
   }
 });

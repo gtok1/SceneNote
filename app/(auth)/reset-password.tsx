@@ -39,10 +39,10 @@ export default function ResetPasswordScreen() {
       {!session ? (
         <View style={styles.form}>
           <Text style={styles.notice}>
-            이메일로 받은 비밀번호 재설정 링크를 열면 새 비밀번호를 설정할 수 있어요.
+            이메일로 받은 비밀번호 설정 링크를 열면 새 비밀번호를 설정할 수 있어요.
           </Text>
           <Link href={forgotPasswordHref} style={styles.link}>
-            재설정 링크 다시 받기
+            설정 링크 다시 받기
           </Link>
           <Link href="/sign-in" style={styles.secondaryLink}>
             로그인으로 돌아가기

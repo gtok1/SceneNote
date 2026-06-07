@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useRouter } from "expo-router";
+import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -14,14 +15,23 @@ type AuthFormValues = z.infer<typeof authSchema>;
 export default function SignUpScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
-  const { control, handleSubmit } = useForm<AuthFormValues>({
+  const [verificationEmailSent, setVerificationEmailSent] = useState(false);
+  const { control, handleSubmit, formState } = useForm<AuthFormValues>({
     resolver: zodResolver(authSchema),
     defaultValues: { email: "", password: "" }
   });
 
   const submit = handleSubmit((values) => {
+    setVerificationEmailSent(false);
     signUp.mutate(values, {
-      onSuccess: () => router.replace("/")
+      onSuccess: (data) => {
+        if (data.session) {
+          router.replace("/");
+          return;
+        }
+
+        setVerificationEmailSent(true);
+      }
     });
   });
 
@@ -69,7 +79,20 @@ export default function SignUpScreen() {
           )}
         />
         {signUp.error ? <Text style={styles.error}>{signUp.error.message}</Text> : null}
-        <Pressable accessibilityRole="button" onPress={submit} style={styles.primaryButton}>
+        {verificationEmailSent ? (
+          <Text style={styles.success}>
+            인증 메일을 보냈습니다. 메일 확인 후 로그인해 주세요.
+          </Text>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          disabled={formState.isSubmitting || signUp.isPending}
+          onPress={submit}
+          style={[
+            styles.primaryButton,
+            formState.isSubmitting || signUp.isPending ? styles.disabledButton : null
+          ]}
+        >
           <Text style={styles.primaryText}>{signUp.isPending ? "가입 중" : "회원가입"}</Text>
         </Pressable>
         <Link href="/sign-in" style={styles.link}>
@@ -121,6 +144,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.lg
   },
+  disabledButton: {
+    opacity: 0.65
+  },
   primaryText: {
     color: colors.surface,
     fontSize: 16,
@@ -135,5 +161,10 @@ const styles = StyleSheet.create({
   error: {
     color: colors.danger,
     fontSize: 12
+  },
+  success: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: "700"
   }
 });

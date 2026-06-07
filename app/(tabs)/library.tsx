@@ -130,7 +130,12 @@ export default function LibraryScreen() {
             style={styles.primaryFiltersScroll}
             contentContainerStyle={styles.primaryFilters}
           >
-            <Text style={styles.filterGroupLabel}>시청 상태</Text>
+            <View
+              accessibilityLabel="시청 상태"
+              style={styles.filterGroupIcon}
+            >
+              <Ionicons color={colors.textMuted} name="eye-outline" size={15} />
+            </View>
             {STATUS_FILTERS.map((item) => {
               const selected = item === statusFilter;
               return (
@@ -148,7 +153,12 @@ export default function LibraryScreen() {
               );
             })}
             <View style={styles.filterDivider} />
-            <Text style={styles.filterGroupLabel}>작품 유형</Text>
+            <View
+              accessibilityLabel="작품 유형"
+              style={styles.filterGroupIcon}
+            >
+              <Ionicons color={colors.textMuted} name="albums-outline" size={15} />
+            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: contentTypeFilter === "all" }}
@@ -386,10 +396,15 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xs,
     width: StyleSheet.hairlineWidth
   },
-  filterGroupLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "900"
+  filterGroupIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 30,
+    justifyContent: "center",
+    width: 30
   },
   toolGroup: {
     flexDirection: "row",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -7,7 +7,6 @@ import { useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
-import { GenreFilterChips } from "@/components/common/GenreFilterChips";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { YearSelect } from "@/components/common/YearSelect";
 import { ContentCard } from "@/components/content/ContentCard";
@@ -19,7 +18,7 @@ import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import type { ContentType } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import { filterByYear, normalizeYearFilter, sortByYear, type DateSortOrder } from "@/utils/contentSort";
-import { ALL_GENRE_FILTER, matchesGenreFilter } from "@/utils/genre";
+import { ALL_GENRE_FILTER, createGenreFilterOptions, matchesGenreFilter } from "@/utils/genre";
 
 type ContentTypeFilter = ContentType | "all";
 
@@ -62,7 +61,6 @@ export default function LibraryScreen() {
   const yearFilter = normalizeYearFilter(year);
   const advancedFilterCount = [
     contentTypeFilter !== "all",
-    genreFilter !== ALL_GENRE_FILTER,
     Boolean(year),
     sortOrder !== "latest"
   ].filter(Boolean).length;
@@ -73,6 +71,7 @@ export default function LibraryScreen() {
     () => (library.data ?? []).flatMap((item) => item.genres),
     [library.data]
   );
+  const genreFilterOptions = useMemo(() => createGenreFilterOptions(genreOptions), [genreOptions]);
   const filteredItems = useMemo(
     () => {
       const searchedItems = (library.data ?? []).filter((item) => {
@@ -125,12 +124,18 @@ export default function LibraryScreen() {
           value={searchQuery}
         />
         <View style={styles.quickBar}>
-          <View style={styles.statusFilters}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.primaryFiltersScroll}
+            contentContainerStyle={styles.primaryFilters}
+          >
             {STATUS_FILTERS.map((item) => {
               const selected = item === statusFilter;
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ selected }}
                   key={item}
                   onPress={() => setStatusFilter(item)}
                   style={[styles.filter, selected && styles.filterSelected]}
@@ -141,7 +146,33 @@ export default function LibraryScreen() {
                 </Pressable>
               );
             })}
-          </View>
+            <View style={styles.filterDivider} />
+            <Text style={styles.filterGroupLabel}>장르</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: genreFilter === ALL_GENRE_FILTER }}
+              onPress={() => setGenreFilter(ALL_GENRE_FILTER)}
+              style={[styles.filter, genreFilter === ALL_GENRE_FILTER && styles.filterSelected]}
+            >
+              <Text style={[styles.filterText, genreFilter === ALL_GENRE_FILTER && styles.filterTextSelected]}>
+                전체
+              </Text>
+            </Pressable>
+            {genreFilterOptions.map((genre) => {
+              const selected = genre === genreFilter;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  key={genre}
+                  onPress={() => setGenreFilter(genre)}
+                  style={[styles.filter, selected && styles.filterSelected]}
+                >
+                  <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{genre}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
           <View style={styles.toolGroup}>
             <Pressable
@@ -240,7 +271,6 @@ export default function LibraryScreen() {
                 );
               })}
             </View>
-            <GenreFilterChips genres={genreOptions} onChange={setGenreFilter} value={genreFilter} />
           </View>
         ) : null}
       </View>
@@ -354,10 +384,25 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     justifyContent: "space-between"
   },
-  statusFilters: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm
+  primaryFiltersScroll: {
+    flex: 1,
+    minWidth: 0
+  },
+  primaryFilters: {
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingRight: spacing.md
+  },
+  filterDivider: {
+    backgroundColor: colors.border,
+    height: 30,
+    marginHorizontal: spacing.xs,
+    width: StyleSheet.hairlineWidth
+  },
+  filterGroupLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "900"
   },
   toolGroup: {
     flexDirection: "row",

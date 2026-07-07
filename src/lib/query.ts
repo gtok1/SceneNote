@@ -24,6 +24,9 @@ export const queryKeys = {
     results: (query: string, mediaType: MediaTypeFilter, page: number) =>
       ["search", query, mediaType, page] as const
   },
+  recommendations: {
+    popular: (userId: string) => ["recommendations", userId, "popular"] as const
+  },
   library: {
     all: (userId: string) => ["library", userId] as const,
     byStatus: (userId: string, status: WatchStatus | "all") =>
@@ -53,7 +56,8 @@ export const queryKeys = {
     all: (userId: string) => ["tags", userId] as const
   },
   reviews: {
-    byContent: (userId: string, contentId: string) => ["reviews", userId, "content", contentId] as const
+    byContent: (userId: string, contentId: string) =>
+      ["reviews", userId, "content", contentId] as const
   },
   profile: {
     stats: (userId: string) => ["profile", userId, "stats"] as const

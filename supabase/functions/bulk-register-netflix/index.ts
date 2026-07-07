@@ -9,7 +9,14 @@ type TmdbMediaType = "tv" | "movie";
 
 const TMDB_LANGUAGE = "ko-KR";
 const TMDB_REGION = "KR";
-const WATCH_STATUS_OPTIONS: WatchStatus[] = ["wishlist", "watching", "completed", "recommended", "not_recommended"];
+const WATCH_STATUS_OPTIONS: WatchStatus[] = [
+  "wishlist",
+  "watching",
+  "dropped",
+  "completed",
+  "recommended",
+  "not_recommended"
+];
 
 interface BulkRegisterRequest {
   rows?: Record<string, unknown>[];
@@ -38,6 +45,7 @@ interface ContentRecord {
   title_primary: string;
   title_original: string | null;
   air_year: number | null;
+  air_date: string | null;
   content_external_ids?: { api_source: ExternalSource; external_id: string }[] | null;
   content_titles?: { language_code: string; title: string }[] | null;
 }
@@ -329,11 +337,12 @@ async function createTmdbContent(
         title_original: contentMeta.title_original,
         poster_url: contentMeta.poster_url,
         overview: contentMeta.overview,
-        air_year: contentMeta.air_year
+        air_year: contentMeta.air_year,
+        air_date: contentMeta.air_date
       },
       { onConflict: "source_api,source_id" }
     )
-    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year")
+    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date")
     .single();
 
   if (contentError || !contentRow) {
@@ -494,7 +503,7 @@ async function fetchAllContents(adminClient: ReturnType<typeof createAdminClient
     const { data, error } = await adminClient
       .from("contents")
       .select(
-        "id,content_type,source_api,source_id,title_primary,title_original,air_year,content_external_ids(api_source,external_id),content_titles(language_code,title)"
+        "id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id),content_titles(language_code,title)"
       )
       .range(from, from + pageSize - 1)
       .order("created_at", { ascending: true });

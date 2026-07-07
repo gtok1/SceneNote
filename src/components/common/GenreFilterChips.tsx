@@ -25,6 +25,7 @@ export function GenreFilterChips({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.options}
+        style={styles.scroller}
       >
         <GenreChip label="전체" selected={value === ALL_GENRE_FILTER} onPress={() => onChange(ALL_GENRE_FILTER)} />
         {options.map((genre) => (
@@ -71,10 +72,16 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   options: {
+    alignItems: "center",
     gap: spacing.sm,
     paddingRight: spacing.md
   },
+  scroller: {
+    flexGrow: 0,
+    maxHeight: 44
+  },
   chip: {
+    alignSelf: "flex-start",
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,

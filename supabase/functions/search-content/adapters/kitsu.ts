@@ -86,7 +86,14 @@ function normalizeKitsuItem(item: KitsuAnime): SearchResult {
     poster_url: attributes?.posterImage?.large ?? attributes?.posterImage?.medium ?? null,
     overview: cleanText(attributes?.synopsis),
     air_year: attributes?.startDate ? Number.parseInt(attributes.startDate.slice(0, 4), 10) : null,
+    air_date: dateOnly(attributes?.startDate),
     has_seasons: attributes?.subtype !== "movie",
     episode_count: attributes?.episodeCount ?? null
   };
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }

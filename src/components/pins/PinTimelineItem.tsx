@@ -41,7 +41,7 @@ export const PinTimelineItem = memo(function PinTimelineItem({
       </View>
       <View style={[styles.body, compact ? styles.bodyCompact : null]}>
         {contextLabel ? (
-          <Text numberOfLines={1} style={[styles.context, compact ? styles.contextCompact : null]}>
+          <Text numberOfLines={compact ? 1 : 2} style={[styles.context, compact ? styles.contextCompact : null]}>
             {contextLabel}
           </Text>
         ) : null}
@@ -60,7 +60,7 @@ export const PinTimelineItem = memo(function PinTimelineItem({
             <Text style={styles.spoilerText}>스포일러 포함 · 보기</Text>
           </Pressable>
         ) : (
-          <Text numberOfLines={compact ? 1 : 4} style={[styles.memo, compact ? styles.memoCompact : null]}>
+          <Text numberOfLines={compact ? 1 : 5} style={[styles.memo, compact ? styles.memoCompact : null]}>
             {pin.memo?.trim() || "메모 없음"}
           </Text>
         )}
@@ -121,7 +121,8 @@ const styles = StyleSheet.create({
   context: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: "900"
+    fontWeight: "900",
+    lineHeight: 19
   },
   contextCompact: {
     fontSize: 12,
@@ -139,6 +140,7 @@ const styles = StyleSheet.create({
   },
   emotion: {
     color: colors.textMuted,
+    flexShrink: 1,
     fontSize: 12,
     fontWeight: "700"
   },

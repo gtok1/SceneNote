@@ -16,6 +16,20 @@ function yearFromDate(value: unknown): number | null {
   return Number.isFinite(year) ? year : null;
 }
 
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
+function dateFromParts(parts?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
+  const year = parts?.year;
+  const month = parts?.month;
+  const day = parts?.day;
+  if (!year || !month || !day) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function durationMinutesToSeconds(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
   return Math.round(value * 60);
@@ -169,6 +183,7 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
 
   const cast = mapTmdbCast(detail.credits?.cast);
   const contentType = isMovie ? "movie" : inferTmdbSeriesType(detail, cast);
+  const airDate = dateOnly(isMovie ? detail.release_date : detail.first_air_date);
 
   return {
     external_source: "tmdb",
@@ -179,6 +194,7 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
     poster_url: detail.poster_path ? `https://image.tmdb.org/t/p/w500${detail.poster_path}` : null,
     overview: cleanText(detail.overview),
     air_year: yearFromDate(isMovie ? detail.release_date : detail.first_air_date),
+    air_date: airDate,
     has_seasons: !isMovie,
     episode_count: seasons.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) || null,
     genres: normalizeGenreNames((detail.genres ?? []).map((genre) => genre.name)),
@@ -359,6 +375,8 @@ const ANILIST_DETAIL_QUERY = `
       description(asHtml: false)
       startDate {
         year
+        month
+        day
       }
       episodes
       format
@@ -403,6 +421,8 @@ interface AniListDetailResponse {
       description?: string | null;
       startDate?: {
         year?: number | null;
+        month?: number | null;
+        day?: number | null;
       };
       episodes?: number | null;
       format?: string | null;
@@ -475,6 +495,7 @@ export async function fetchAniListDetail(externalId: string): Promise<ContentMet
 
   const isMovie = media.format === "MOVIE";
   const episodeCount = media.episodes ?? null;
+  const airDate = dateFromParts(media.startDate);
   const aniListCast = mapAniListVoiceActors(media);
   const koreanFallback = await fetchTmdbKoreanAnimeFallback({
     titles: [media.title?.native, media.title?.romaji, media.title?.english],
@@ -496,6 +517,7 @@ export async function fetchAniListDetail(externalId: string): Promise<ContentMet
     overview: koreanFallback?.overview ?? cleanText(media.description),
     localized_overview: koreanFallback?.overview ?? null,
     air_year: media.startDate?.year ?? null,
+    air_date: airDate,
     has_seasons: !isMovie,
     episode_count: episodeCount,
     genres: normalizeGenreNames(media.genres ?? []),
@@ -574,6 +596,7 @@ export async function fetchKitsuDetail(externalId: string): Promise<ContentMeta>
     overview: koreanFallback?.overview ?? cleanText(attributes.synopsis),
     localized_overview: koreanFallback?.overview ?? null,
     air_year: yearFromDate(attributes.startDate),
+    air_date: dateOnly(attributes.startDate),
     has_seasons: !isMovie,
     episode_count: episodeCount,
     genres: [],
@@ -635,6 +658,7 @@ export async function fetchTvmazeDetail(externalId: string): Promise<ContentMeta
     poster_url: show.image?.original ?? show.image?.medium ?? null,
     overview: cleanText(show.summary),
     air_year: yearFromDate(show.premiered),
+    air_date: dateOnly(show.premiered),
     has_seasons: true,
     episode_count: seasonRows.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) || null,
     genres: normalizeGenreNames(show.genres ?? []),

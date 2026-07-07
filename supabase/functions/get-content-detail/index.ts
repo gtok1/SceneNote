@@ -57,7 +57,8 @@ Deno.serve(async (req: Request) => {
           title_original: contentMeta.title_original,
           poster_url: contentMeta.poster_url,
           overview: contentMeta.overview,
-          air_year: contentMeta.air_year
+          air_year: contentMeta.air_year,
+          air_date: contentMeta.air_date
         })
         .eq("id", externalRow.content_id);
 
@@ -79,6 +80,7 @@ Deno.serve(async (req: Request) => {
           overview: contentMeta.overview,
           localized_overview: contentMeta.localized_overview,
           air_year: contentMeta.air_year,
+          air_date: contentMeta.air_date,
           has_seasons: contentMeta.has_seasons,
           episode_count: contentMeta.episode_count,
           genres: contentMeta.genres,
@@ -120,6 +122,7 @@ Deno.serve(async (req: Request) => {
         overview: content.overview,
         localized_overview: null,
         air_year: content.air_year,
+        air_date: content.air_date ?? null,
         has_seasons: content.content_type !== "movie",
         episode_count:
           seasons?.reduce((sum: number, season: { episode_count: number | null }) => {
@@ -161,6 +164,7 @@ Deno.serve(async (req: Request) => {
         overview: contentMeta.overview,
         localized_overview: contentMeta.localized_overview,
         air_year: contentMeta.air_year,
+        air_date: contentMeta.air_date,
         has_seasons: contentMeta.has_seasons,
         episode_count: contentMeta.episode_count,
         genres: contentMeta.genres,

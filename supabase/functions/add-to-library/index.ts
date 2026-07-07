@@ -13,7 +13,14 @@ interface AddToLibraryRequest {
   media_type?: string;
 }
 
-const WATCH_STATUS_OPTIONS: WatchStatus[] = ["wishlist", "watching", "completed", "recommended", "not_recommended"];
+const WATCH_STATUS_OPTIONS: WatchStatus[] = [
+  "wishlist",
+  "watching",
+  "dropped",
+  "completed",
+  "recommended",
+  "not_recommended"
+];
 
 function normalizeWatchStatuses(statuses: WatchStatus[] | undefined, fallback: WatchStatus): WatchStatus[] {
   const normalized = Array.from(new Set(statuses?.length ? statuses : [fallback])).filter((status) =>
@@ -125,7 +132,8 @@ Deno.serve(async (req: Request) => {
         title_original: contentMeta.title_original,
         poster_url: contentMeta.poster_url,
         overview: contentMeta.overview,
-        air_year: contentMeta.air_year
+        air_year: contentMeta.air_year,
+        air_date: contentMeta.air_date
       },
       { onConflict: "source_api,source_id" }
     )

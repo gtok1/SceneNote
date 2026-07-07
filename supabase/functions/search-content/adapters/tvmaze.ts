@@ -68,10 +68,17 @@ function normalizeTvmazeItem(item: TvmazeSearchItem): SearchResult | null {
     poster_url: show.image?.original ?? show.image?.medium ?? null,
     overview: cleanText(show.summary),
     air_year: show.premiered ? Number.parseInt(show.premiered.slice(0, 4), 10) : null,
+    air_date: dateOnly(show.premiered),
     has_seasons: true,
     episode_count: null,
     genres: Array.from(new Set(show.genres ?? []))
   };
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
 function inferTvmazeContentType(show: NonNullable<TvmazeSearchItem["show"]>): ContentType {

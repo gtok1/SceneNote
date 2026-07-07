@@ -28,7 +28,7 @@ import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
 import { createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 
-const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "completed"];
+const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
 
 export default function ContentDetailScreen() {

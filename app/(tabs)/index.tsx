@@ -1,43 +1,62 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { useRouter } from "expo-router";
 
-import { ContentCard } from "@/components/content/ContentCard";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
-import { PinTimelineItem } from "@/components/pins/PinTimelineItem";
+import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
+import { PopularRecommendationSection } from "@/components/content/PopularRecommendationSection";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
-import { useAllPins } from "@/hooks/useTimelinePins";
 
 export default function HomeScreen() {
   const router = useRouter();
   const library = useLibrary("watching");
-  const pins = useAllPins();
+  const { width } = useWindowDimensions();
+  const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 3;
+  const galleryCardWidth = `${100 / galleryColumns}%` as const;
+  const watchingItems = library.data?.slice(0, galleryColumns) ?? [];
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <View style={styles.hero}>
         <Text style={styles.title}>SceneNote</Text>
         <Text style={styles.subtitle}>보고 있는 작품과 다시 찾고 싶은 장면</Text>
-        <Pressable accessibilityRole="button" onPress={() => router.push("/search")} style={styles.searchButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push("/search")}
+          style={styles.searchButton}
+        >
           <Text style={styles.searchText}>작품 검색</Text>
         </Pressable>
       </View>
 
-      <SectionHeader title="보는 중" action="전체 보기" onAction={() => router.push("/library")} />
+      <PopularRecommendationSection />
+
+      <SectionHeader
+        title="보는 중"
+        action="전체 보기"
+        onAction={() =>
+          router.push({
+            pathname: "/library",
+            params: { status: "watching" }
+          })
+        }
+      />
       {library.isLoading ? <LoadingSkeleton count={2} /> : null}
       {library.isError ? <ErrorState onRetry={() => library.refetch()} /> : null}
-      {library.data?.length ? (
-        <View style={styles.list}>
-          {library.data.slice(0, 3).map((item) => (
-            <ContentCard
-              compact
-              item={item}
-              key={item.library_item_id}
-              onPress={() => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
-            />
+      {watchingItems.length ? (
+        <View style={styles.galleryGrid}>
+          {watchingItems.map((item) => (
+            <View key={item.library_item_id} style={[styles.galleryCell, { width: galleryCardWidth }]}>
+              <ContentGalleryCard
+                item={item}
+                onPress={() =>
+                  router.push({ pathname: "/content/[id]", params: { id: item.content_id } })
+                }
+              />
+            </View>
           ))}
         </View>
       ) : !library.isLoading ? (
@@ -48,24 +67,7 @@ export default function HomeScreen() {
           title="보는 중인 작품이 없어요"
         />
       ) : null}
-
-      <SectionHeader title="최근 핀" action="전체 보기" onAction={() => router.push("/pins")} />
-      <View style={styles.pinList}>
-        {pins.data?.slice(0, 3).map((pin) => (
-          <PinTimelineItem
-            compact
-            isSpoilerRevealed={false}
-            key={pin.id}
-            onPress={() => router.push({ pathname: "/pins/[id]", params: { id: pin.id } })}
-            onRevealSpoiler={() => undefined}
-            pin={pin}
-          />
-        ))}
-      </View>
-      {!pins.isLoading && !pins.data?.length ? (
-        <EmptyState description="에피소드에서 첫 핀을 남겨보세요." title="아직 핀이 없어요" />
-      ) : null}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -89,11 +91,13 @@ function SectionHeader({
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     backgroundColor: colors.background,
-    flex: 1,
+    flex: 1
+  },
+  container: {
     gap: 6,
-    paddingBottom: 68
+    paddingBottom: 92
   },
   hero: {
     backgroundColor: colors.surface,
@@ -140,10 +144,12 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: "700"
   },
-  list: {
-    gap: 6
+  galleryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: spacing.xs
   },
-  pinList: {
-    gap: 6
+  galleryCell: {
+    minWidth: 0
   }
 });

@@ -56,6 +56,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningSoft
   },
   dropped: {
-    backgroundColor: colors.dangerSoft
+    backgroundColor: colors.warningSoft
   }
 });

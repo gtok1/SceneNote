@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 import type { SearchContentResponse } from "../src/types/content";
+import type { PopularRecommendationsResponse } from "../src/services/popularRecommendations";
 import type { Database } from "../src/types/database";
 
 loadEnvFile(".env");
@@ -74,6 +75,22 @@ async function main() {
     console.log(`failedSources: ${data.failedSources.join(", ") || "(none)"}`);
     console.log(`results: ${data.results.length}`);
     console.log(`firstResult: ${data.results[0]?.title_primary ?? "(none)"}`);
+
+    const { data: recommendations, error: recommendationsError } =
+      await supabase.functions.invoke<PopularRecommendationsResponse>("popular-recommendations");
+
+    if (recommendationsError) {
+      fail(`popular-recommendations failed: ${recommendationsError.message}`);
+    }
+
+    if (!recommendations) {
+      fail("popular-recommendations returned an empty response.");
+    }
+
+    console.log("popular-recommendations smoke test passed");
+    console.log(`dramaRecommendations: ${recommendations.categories.drama.length}`);
+    console.log(`animeRecommendations: ${recommendations.categories.anime.length}`);
+    console.log(`recommendationFailedSources: ${recommendations.failedSources.join(", ") || "(none)"}`);
   } finally {
     await supabase.auth.signOut();
   }

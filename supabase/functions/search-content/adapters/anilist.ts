@@ -24,6 +24,8 @@ const ANILIST_SEARCH_QUERY = `
         description(asHtml: false)
         startDate {
           year
+          month
+          day
         }
         episodes
         format
@@ -46,6 +48,8 @@ interface AniListMedia {
   description?: string | null;
   startDate?: {
     year?: number | null;
+    month?: number | null;
+    day?: number | null;
   };
   episodes?: number | null;
   format?: string | null;
@@ -129,10 +133,19 @@ function normalizeAniListItem(item: AniListMedia): SearchResult {
     poster_url: item.coverImage?.large ?? null,
     overview: cleanText(item.description),
     air_year: item.startDate?.year ?? null,
+    air_date: dateFromParts(item.startDate),
     has_seasons: item.format !== "MOVIE",
     episode_count: item.episodes ?? null,
     genres: Array.from(new Set(item.genres ?? []))
   };
+}
+
+function dateFromParts(parts?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
+  const year = parts?.year;
+  const month = parts?.month;
+  const day = parts?.day;
+  if (!year || !month || !day) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 async function enrichWithTmdbKorean(

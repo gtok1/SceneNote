@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
+import { useRouter } from "expo-router";
+
 import { RatingInput } from "@/components/form/RatingInput";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useContentReview, useSaveContentReview } from "@/hooks/useReviews";
@@ -10,6 +12,7 @@ interface ContentReviewEditorProps {
 }
 
 export function ContentReviewEditor({ contentId }: ContentReviewEditorProps) {
+  const router = useRouter();
   const review = useContentReview(contentId);
   const saveReview = useSaveContentReview(contentId);
   const [rating, setRating] = useState<number | null>(null);
@@ -33,6 +36,12 @@ export function ContentReviewEditor({ contentId }: ContentReviewEditorProps) {
   ]);
 
   const submit = () => {
+    const hasReviewInput = rating !== null || oneLineReview.trim().length > 0 || body.trim().length > 0;
+    if (!hasReviewInput) {
+      router.replace("/library");
+      return;
+    }
+
     saveReview.mutate(
       {
         content_id: contentId,
@@ -47,7 +56,7 @@ export function ContentReviewEditor({ contentId }: ContentReviewEditorProps) {
           setOneLineReview(savedReview.one_line_review ?? "");
           setBody(savedReview.body ?? "");
           setIsSpoiler(savedReview.is_spoiler);
-          Alert.alert("저장 완료", "감상 기록을 저장했습니다.");
+          router.replace("/library");
         },
         onError: (error) => Alert.alert("저장 실패", error.message)
       }

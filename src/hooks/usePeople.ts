@@ -30,7 +30,7 @@ export function usePersonDetail(
   category: PersonCategory | undefined
 ) {
   return useQuery({
-    queryKey: ["person-detail", "v2", source, externalId, category],
+    queryKey: ["person-detail", "v3-ko", source, externalId, category],
     queryFn: () =>
       getPersonDetail({
         source: source as PersonSource,

@@ -6,18 +6,19 @@ export const WATCH_STATUS_LABEL: Record<WatchStatus, string> = {
   completed: "완료",
   recommended: "추천",
   not_recommended: "비추천",
-  dropped: "삭제됨"
+  dropped: "보류"
 };
 
 export const WATCH_STATUS_OPTIONS: WatchStatus[] = [
   "wishlist",
   "watching",
+  "dropped",
   "completed",
   "recommended",
   "not_recommended"
 ];
 
-export const DEPRECATED_WATCH_STATUS_OPTIONS: WatchStatus[] = ["dropped"];
+export const DEPRECATED_WATCH_STATUS_OPTIONS: WatchStatus[] = [];
 
 const WATCH_STATUS_ORDER = new Map(WATCH_STATUS_OPTIONS.map((status, index) => [status, index]));
 

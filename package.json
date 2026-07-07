@@ -13,7 +13,7 @@
     "web:restart": "pkill -f \"expo start\" || true; expo start --web --port 8081 --localhost --clear",
     "dev:restart": "pkill -f \"expo start\" || true; pkill -f \"supabase functions serve\" || true; npm run backend:serve & EXPO_NO_TELEMETRY=1 expo start --web --port 8081 --localhost --clear",
     "backend:serve": "supabase functions serve --env-file .env",
-    "backend:deploy": "supabase functions deploy search-content add-to-library get-content-detail get-watch-providers fetch-episodes bulk-register-netflix",
+    "backend:deploy": "supabase functions deploy search-content search-person-content add-to-library get-content-detail get-person-detail get-watch-providers fetch-episodes bulk-register-netflix popular-recommendations create-library-share get-library-share",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts supabase/functions/**/*.test.ts",
@@ -49,6 +49,7 @@
     "react-native-svg": "15.12.1",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.21.2",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8",
     "zustand": "^5.0.0"

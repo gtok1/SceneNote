@@ -20,6 +20,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="share/[id]" />
           <Stack.Screen name="people/[id]" />
         </Stack>
         <AuthRedirect />
@@ -43,8 +44,13 @@ function AuthRedirect() {
 
     const routeSegments = segments as readonly string[];
     const inAuthGroup = routeSegments[0] === "(auth)";
+    const inPublicShare = routeSegments[0] === "share";
     const inPasswordReset = inAuthGroup && routeSegments[1] === "reset-password";
-    const nextPath = !session && !inAuthGroup ? "/onboarding" : session && inAuthGroup && !inPasswordReset ? "/" : null;
+    const nextPath = !session && !inAuthGroup && !inPublicShare
+      ? "/onboarding"
+      : session && inAuthGroup && !inPasswordReset
+        ? "/"
+        : null;
 
     if (!nextPath) return;
 
@@ -138,7 +144,7 @@ function GlobalBottomNav() {
   const session = useAuthStore((state) => state.session);
   const segments = useSegments();
 
-  if (!session || segments[0] === "(auth)") return null;
+  if (!session || segments[0] === "(auth)" || segments[0] === "share") return null;
 
   return (
     <View style={styles.bottomNav}>

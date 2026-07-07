@@ -38,6 +38,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="pins"
         options={{
+          headerShown: false,
           title: "핀",
           tabBarIcon: ({ color, size }) => <Ionicons color={color} name="pin-outline" size={size} />
         }}

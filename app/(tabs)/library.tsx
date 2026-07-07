@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
@@ -15,53 +15,63 @@ import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
+import { buildLibraryShareUrl, copyTextToClipboard, createLibraryShare } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
-import type { ContentType } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
-import { filterByYear, normalizeYearFilter, sortByYear, type DateSortOrder } from "@/utils/contentSort";
-import { ALL_GENRE_FILTER, matchesGenreFilter } from "@/utils/genre";
+import type { DateSortOrder } from "@/utils/contentSort";
+import { ALL_GENRE_FILTER } from "@/utils/genre";
+import {
+  CONTENT_TYPE_FILTERS,
+  CONTENT_TYPE_LABELS,
+  createLibraryShareTitle,
+  filterLibraryItems,
+  RATING_FILTERS,
+  STATUS_FILTERS,
+  type ContentTypeFilter,
+  type RatingFilter
+} from "@/utils/libraryFilters";
 
-type ContentTypeFilter = ContentType | "all";
-
-const STATUS_FILTERS: LibraryStatusFilter[] = [
-  "all",
-  "watching",
-  "wishlist",
-  "completed",
-  "recommended",
-  "not_recommended"
-];
-
-const CONTENT_TYPE_LABELS: Record<ContentTypeFilter, string> = {
-  all: "전체",
-  anime: "애니",
-  kdrama: "한국 드라마",
-  jdrama: "일본 드라마",
-  movie: "영화",
-  other: "기타"
-};
-
-const CONTENT_TYPE_FILTERS: ContentTypeFilter[] = ["all", "anime", "kdrama", "jdrama", "movie", "other"];
+type ShareFeedback =
+  | { status: "loading"; message: string; url?: undefined }
+  | { status: "success"; message: string; url: string }
+  | { status: "error"; message: string; url?: undefined };
 
 export default function LibraryScreen() {
-  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>("all");
+  const params = useLocalSearchParams<{ status?: string }>();
+  const initialStatusFilter = parseLibraryStatusParam(params.status) ?? "all";
+  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(initialStatusFilter);
   const [contentTypeFilter, setContentTypeFilter] = useState<ContentTypeFilter>("all");
   const [genreFilter, setGenreFilter] = useState(ALL_GENRE_FILTER);
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [year, setYear] = useState("");
   const [sortOrder, setSortOrder] = useState<DateSortOrder>("latest");
   const [showFilters, setShowFilters] = useState(false);
   const [visibleItemCount, setVisibleItemCount] = useState(0);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null);
   const listRef = useRef<FlashListRef<LibraryListItem>>(null);
+  const loadMoreQueuedRef = useRef(false);
   const viewMode = useLibraryUiStore((state) => state.viewMode);
   const setViewMode = useLibraryUiStore((state) => state.setViewMode);
   const { width } = useWindowDimensions();
   const library = useLibrary(statusFilter);
   const router = useRouter();
-  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-  const yearFilter = normalizeYearFilter(year);
+  const filters = useMemo(
+    () => ({
+      statusFilter,
+      contentTypeFilter,
+      genreFilter,
+      ratingFilter,
+      searchQuery,
+      year,
+      sortOrder
+    }),
+    [contentTypeFilter, genreFilter, ratingFilter, searchQuery, sortOrder, statusFilter, year]
+  );
   const advancedFilterCount = [
     genreFilter !== ALL_GENRE_FILTER,
+    ratingFilter !== "all",
     Boolean(year),
     sortOrder !== "latest"
   ].filter(Boolean).length;
@@ -73,28 +83,8 @@ export default function LibraryScreen() {
     [library.data]
   );
   const filteredItems = useMemo(
-    () => {
-      const searchedItems = (library.data ?? []).filter((item) => {
-        const contentTypeMatches = contentTypeFilter === "all" ? true : item.content_type === contentTypeFilter;
-        if (!contentTypeMatches) return false;
-        if (!matchesGenreFilter(item.genres, genreFilter)) return false;
-        if (!normalizedSearchQuery) return true;
-
-        const searchableText = [
-          item.title_primary,
-          item.title_original,
-          ...(item.cast ?? []).flatMap((member) => [member.name, member.original_name, member.character])
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLocaleLowerCase();
-
-        return searchableText.includes(normalizedSearchQuery);
-      });
-
-      return sortByYear(filterByYear(searchedItems, yearFilter), sortOrder);
-    },
-    [contentTypeFilter, genreFilter, library.data, normalizedSearchQuery, sortOrder, yearFilter]
+    () => filterLibraryItems(library.data ?? [], filters),
+    [filters, library.data]
   );
   const visibleItems = useMemo(
     () => filteredItems.slice(0, visibleItemCount),
@@ -104,13 +94,66 @@ export default function LibraryScreen() {
   const hasMoreItems = visibleItemEnd < filteredItems.length;
 
   useEffect(() => {
+    setStatusFilter(parseLibraryStatusParam(params.status) ?? "all");
+  }, [params.status]);
+
+  useEffect(() => {
     setVisibleItemCount(pageSize);
     listRef.current?.scrollToOffset({ animated: false, offset: 0 });
-  }, [contentTypeFilter, genreFilter, normalizedSearchQuery, pageSize, sortOrder, statusFilter, viewMode, yearFilter]);
+  }, [contentTypeFilter, genreFilter, pageSize, ratingFilter, searchQuery, sortOrder, statusFilter, viewMode, year]);
 
-  const loadMoreItems = () => {
+  const loadMoreItems = useCallback(() => {
+    if (loadMoreQueuedRef.current) return;
     if (!hasMoreItems) return;
-    setVisibleItemCount((count) => Math.min(count + pageSize, filteredItems.length));
+    loadMoreQueuedRef.current = true;
+    requestAnimationFrame(() => {
+      setVisibleItemCount((count) => Math.min(count + pageSize, filteredItems.length));
+      loadMoreQueuedRef.current = false;
+    });
+  }, [filteredItems.length, hasMoreItems, pageSize]);
+
+  const shareCurrentView = async () => {
+    if (!filteredItems.length) {
+      setShareFeedback({ status: "error", message: "현재 필터 조건에 맞는 공유할 작품이 없습니다." });
+      return;
+    }
+
+    setIsSharing(true);
+    setShareFeedback({ status: "loading", message: "공유 링크를 생성하고 있습니다." });
+    try {
+      const title = createLibraryShareTitle(filters);
+      const share = await withTimeout(
+        createLibraryShare({
+          title,
+          filters,
+          contentIds: filteredItems.map((item) => item.content_id)
+        }),
+        15000,
+        "공유 링크 생성 요청이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+      );
+      const url = buildLibraryShareUrl(share.id);
+      setShareFeedback({ status: "success", message: "공유 링크를 생성했습니다.", url });
+
+      try {
+        const copied = await copyTextToClipboard(url);
+        setShareFeedback({
+          status: "success",
+          message: copied ? "공유 링크를 생성하고 클립보드에 복사했습니다." : "공유 링크를 생성했습니다.",
+          url
+        });
+      } catch {
+        setShareFeedback({
+          status: "success",
+          message: "공유 링크를 생성했습니다. 클립보드 복사는 브라우저에서 허용되지 않았습니다.",
+          url
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "공유 링크를 만들지 못했습니다.";
+      setShareFeedback({ status: "error", message });
+    } finally {
+      setIsSharing(false);
+    }
   };
 
   return (
@@ -197,6 +240,16 @@ export default function LibraryScreen() {
               <Text style={styles.filterText}>엑셀 업로드</Text>
             </Pressable>
 
+            <Pressable
+              accessibilityRole="button"
+              disabled={isSharing || library.isLoading}
+              onPress={shareCurrentView}
+              style={[styles.toolButton, isSharing || library.isLoading ? styles.toolButtonDisabled : null]}
+            >
+              <Ionicons color={colors.textMuted} name="share-social-outline" size={16} />
+              <Text style={styles.filterText}>{isSharing ? "공유 중" : "공유"}</Text>
+            </Pressable>
+
             {[
               { label: "자세히", value: "detail" as const, icon: "list-outline" as const },
               { label: "갤러리", value: "gallery" as const, icon: "grid-outline" as const }
@@ -268,6 +321,58 @@ export default function LibraryScreen() {
               })}
             </View>
             <GenreFilterChips genres={genreOptions} onChange={setGenreFilter} value={genreFilter} />
+            <View style={styles.ratingFilterGroup}>
+              <Text style={styles.ratingFilterLabel}>추천점수</Text>
+              <View style={styles.ratingFilterChips}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: ratingFilter === "all" }}
+                  onPress={() => setRatingFilter("all")}
+                  style={[styles.filter, ratingFilter === "all" && styles.filterSelected]}
+                >
+                  <Text style={[styles.filterText, ratingFilter === "all" && styles.filterTextSelected]}>전체</Text>
+                </Pressable>
+                {RATING_FILTERS.map((rating) => {
+                  const selected = rating === ratingFilter;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      key={rating}
+                      onPress={() => setRatingFilter(rating)}
+                      style={[styles.filter, selected && styles.filterSelected]}
+                    >
+                      <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{rating}/10</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {shareFeedback ? (
+          <View
+            style={[
+              styles.shareFeedback,
+              shareFeedback.status === "error" ? styles.shareFeedbackError : null,
+              shareFeedback.status === "success" ? styles.shareFeedbackSuccess : null
+            ]}
+          >
+            <Text
+              selectable
+              style={[
+                styles.shareFeedbackText,
+                shareFeedback.status === "error" ? styles.shareFeedbackTextError : null
+              ]}
+            >
+              {shareFeedback.message}
+            </Text>
+            {shareFeedback.url ? (
+              <Text selectable numberOfLines={2} style={styles.shareFeedbackUrl}>
+                {shareFeedback.url}
+              </Text>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -322,6 +427,21 @@ export default function LibraryScreen() {
       />
     </View>
   );
+}
+
+function parseLibraryStatusParam(status: string | string[] | undefined): LibraryStatusFilter | null {
+  const value = Array.isArray(status) ? status[0] : status;
+  if (!value) return null;
+  return STATUS_FILTERS.includes(value as LibraryStatusFilter) ? (value as LibraryStatusFilter) : null;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    })
+  ]);
 }
 
 function InfiniteScrollFooter({
@@ -421,6 +541,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
+  toolButtonDisabled: {
+    opacity: 0.48
+  },
   advancedFilters: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -429,6 +552,49 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     zIndex: 1000
+  },
+  shareFeedback: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  shareFeedbackSuccess: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#A7F3D0"
+  },
+  shareFeedbackError: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA"
+  },
+  shareFeedbackText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  shareFeedbackTextError: {
+    color: "#B91C1C"
+  },
+  shareFeedbackUrl: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  ratingFilterGroup: {
+    gap: spacing.xs
+  },
+  ratingFilterLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  ratingFilterChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
   },
   filter: {
     borderColor: colors.border,

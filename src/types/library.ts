@@ -30,6 +30,7 @@ export interface LibraryListItem {
   source_api: ExternalSource;
   source_id: string;
   air_year: number | null;
+  air_date: string | null;
   cast: CastMember[];
   rating: number | null;
   one_line_review: string | null;

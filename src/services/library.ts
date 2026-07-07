@@ -88,6 +88,7 @@ export async function getLibraryItems(status: LibraryStatusFilter): Promise<Libr
       source_api: row.contents?.source_api ?? "manual",
       source_id: row.contents?.source_id ?? "",
       air_year: row.contents?.air_year ?? null,
+      air_date: row.contents?.air_date ?? null,
       cast: [],
       rating: null,
       one_line_review: null,
@@ -124,13 +125,19 @@ export async function addContentToLibrary(
 ): Promise<AddToLibraryResponse> {
   const normalizedStatuses = normalizeWatchStatuses(statuses ?? [status]);
   const primaryStatus = getPrimaryWatchStatus(normalizedStatuses) ?? "wishlist";
+  const requiresDirectStatusUpdate = normalizedStatuses.includes("dropped");
+  const functionStatuses = requiresDirectStatusUpdate
+    ? normalizeWatchStatuses(normalizedStatuses.filter((item) => item !== "dropped"))
+    : normalizedStatuses;
+  const fallbackFunctionStatuses: WatchStatus[] = functionStatuses.length ? functionStatuses : ["wishlist"];
+  const functionPrimaryStatus = getPrimaryWatchStatus(fallbackFunctionStatuses) ?? "wishlist";
   const { data, error } = await supabase.functions.invoke<AddToLibraryResponse>("add-to-library", {
       body: {
         api_source: result.external_source,
         external_id: result.external_id,
         media_type: result.content_type === "movie" ? "movie" : "tv",
-        watch_status: primaryStatus,
-        watch_statuses: normalizedStatuses
+        watch_status: functionPrimaryStatus,
+        watch_statuses: fallbackFunctionStatuses
       }
   });
 
@@ -140,6 +147,15 @@ export async function addContentToLibrary(
 
   if (!data) {
     throw new Error("라이브러리 추가 응답이 비어 있습니다");
+  }
+
+  if (requiresDirectStatusUpdate) {
+    await updateLibraryStatuses(data.library_item_id, normalizedStatuses);
+    return {
+      ...data,
+      status: primaryStatus,
+      statuses: normalizedStatuses
+    };
   }
 
   return data;
@@ -250,6 +266,7 @@ export async function getLibraryStatusByExternalId(
     source_api: row.contents?.source_api ?? "manual",
     source_id: row.contents?.source_id ?? "",
     air_year: row.contents?.air_year ?? null,
+    air_date: row.contents?.air_date ?? null,
     cast: [],
     rating: null,
     one_line_review: null,

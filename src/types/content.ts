@@ -14,6 +14,7 @@ export interface SearchResult {
   overview: string | null;
   localized_overview?: string | null;
   air_year: number | null;
+  air_date?: string | null;
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
@@ -53,6 +54,7 @@ export interface Content {
   poster_url: string | null;
   overview: string | null;
   air_year: number | null;
+  air_date: string | null;
   genres?: string[];
   created_at: string;
   updated_at: string;

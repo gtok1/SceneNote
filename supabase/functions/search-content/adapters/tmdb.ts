@@ -128,10 +128,17 @@ function normalizeTmdbItem(
     poster_url: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
     overview: cleanText(item.overview),
     air_year: isMovie ? yearFromDate(item.release_date) : yearFromDate(item.first_air_date),
+    air_date: isMovie ? dateOnly(item.release_date) : dateOnly(item.first_air_date),
     has_seasons: isTv,
     episode_count: null,
     genres: genreNamesFromIds(item.genre_ids)
   };
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
 function genreNamesFromIds(genreIds?: number[]): string[] {

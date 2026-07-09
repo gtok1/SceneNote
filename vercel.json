@@ -23,6 +23,10 @@
     {
       "source": "/pins/:id",
       "destination": "/pins/[id].html"
+    },
+    {
+      "source": "/share/:id",
+      "destination": "/share/[id].html"
     }
   ]
 }

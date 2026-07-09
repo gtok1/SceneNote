@@ -10,6 +10,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { colors, radius, spacing } from "@/constants/theme";
 import { usePersonDetail } from "@/hooks/usePeople";
 import type { PersonCategory, PersonCredit, PersonSource } from "@/types/people";
+import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 
 const CREDIT_PAGE_SIZE = 10;
 
@@ -96,7 +97,8 @@ export default function PersonDetailScreen() {
                       originalTitle: credit.original_title ?? "",
                       posterUrl: credit.poster_url ?? "",
                       contentType: credit.content_type,
-                      airYear: credit.air_year ? String(credit.air_year) : ""
+                      airYear: credit.air_year ? String(credit.air_year) : "",
+                      airDate: credit.air_date ?? ""
                     }
                   })
                 }
@@ -172,6 +174,8 @@ function InfoItem({ label, value }: { label: string; value: string | null | unde
 }
 
 function CreditRow({ credit, onPress }: { credit: PersonCredit; onPress: () => void }) {
+  const airDateLabel = createAirDateLabel(credit.air_date, credit.air_year);
+
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.creditRow}>
       <Image contentFit="cover" source={credit.poster_url ? { uri: credit.poster_url } : null} style={styles.poster} />
@@ -185,7 +189,7 @@ function CreditRow({ credit, onPress }: { credit: PersonCredit; onPress: () => v
           </Text>
         ) : null}
         <Text style={styles.creditMeta}>
-          {[credit.air_year, labelContentType(credit.content_type)].filter(Boolean).join(" · ")}
+          {[airDateLabel, labelContentType(credit.content_type)].filter(Boolean).join(" · ")}
         </Text>
         {credit.role ? (
           <Text numberOfLines={1} style={styles.role}>
@@ -221,11 +225,17 @@ function labelContentType(value: PersonCredit["content_type"]) {
 
 function sortCreditsByDate(credits: PersonCredit[]): PersonCredit[] {
   return [...credits].sort((a, b) => {
-    const bYear = b.air_year ?? -1;
-    const aYear = a.air_year ?? -1;
-    if (bYear !== aYear) return bYear - aYear;
+    const bMonth = parseYearMonthSortValue(b.air_date, b.air_year);
+    const aMonth = parseYearMonthSortValue(a.air_date, a.air_year);
+    if (bMonth !== aMonth) return bMonth - aMonth;
     return a.title.localeCompare(b.title, "ko");
   });
+}
+
+function parseYearMonthSortValue(airDate?: string | null, airYear?: number | null): number {
+  const match = typeof airDate === "string" ? /^(\d{4})-(\d{2})/.exec(airDate) : null;
+  if (match?.[1] && match[2]) return Number.parseInt(`${match[1]}${match[2]}`, 10);
+  return typeof airYear === "number" && Number.isFinite(airYear) ? airYear * 100 : -1;
 }
 
 const styles = StyleSheet.create({

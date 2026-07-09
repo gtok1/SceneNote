@@ -11,6 +11,8 @@ export interface LibraryItem {
   status: WatchStatus;
   status_flags: WatchStatus[];
   watch_count: number;
+  first_watched_at: string | null;
+  last_watched_at: string | null;
   added_at: string;
   updated_at: string;
   content: Content | null;
@@ -22,6 +24,8 @@ export interface LibraryListItem {
   statuses: WatchStatus[];
   added_at: string;
   updated_at: string;
+  first_watched_at: string | null;
+  last_watched_at: string | null;
   content_id: string;
   title_primary: string;
   title_original: string | null;
@@ -31,10 +35,13 @@ export interface LibraryListItem {
   source_id: string;
   air_year: number | null;
   air_date: string | null;
+  end_date: string | null;
   cast: CastMember[];
   rating: number | null;
   one_line_review: string | null;
   episode_count: number | null;
+  watched_episode_count: number;
+  next_episode_number: number | null;
   genres: string[];
   watch_count: number;
   pin_count?: number;

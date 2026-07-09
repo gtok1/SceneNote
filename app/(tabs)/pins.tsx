@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useAtom } from "jotai";
 
@@ -9,25 +10,23 @@ import { revealedSpoilerPinIdsAtom } from "@/atoms/spoilerAtom";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
-import { EMOTION_LABELS } from "@/constants/emotions";
+import { PinShareCard } from "@/components/pins/PinShareCard";
+import { EMOTION_LABELS, EMOTION_OPTIONS } from "@/constants/emotions";
 import { colors, spacing } from "@/constants/theme";
 import { useTags } from "@/hooks/useTags";
 import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER, createGenreFilterOptions, matchesGenreFilter } from "@/utils/genre";
+import { sharePinCardImage } from "@/utils/pinShare";
 import { formatSecondsToTimecode } from "@/utils/timecode";
 
 const DETAIL_PANEL_WIDTH = 360;
 const MAIN_CONTENT_MAX_WIDTH = 860;
 
-const emotionFilterOptions: { label: string; value: EmotionType }[] = [
-  { label: "감동", value: "moved" },
-  { label: "명장면", value: "excited" },
-  { label: "명대사", value: "love" },
-  { label: "웃김", value: "funny" },
-  { label: "슬픔", value: "sad" },
-  { label: "놀람", value: "surprised" }
-];
+const emotionFilterOptions = EMOTION_OPTIONS.map((value) => ({
+  label: EMOTION_LABELS[value],
+  value
+}));
 
 type ViewMode = "list" | "timeline";
 
@@ -40,6 +39,8 @@ export default function PinsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [revealedSpoilers, setRevealedSpoilers] = useAtom(revealedSpoilerPinIdsAtom);
+  const plainShareRef = useRef<View | null>(null);
+  const maskedShareRef = useRef<View | null>(null);
   const allPins = useAllPins();
   const taggedPins = usePinsByTag(selectedTagId ?? undefined);
   const tags = useTags();
@@ -113,121 +114,171 @@ export default function PinsScreen() {
     setRevealedSpoilers((previous) => new Set([...previous, pin.id]));
   };
 
+  const sharePin = (pinToShare: TimelinePin) => {
+    if (Platform.OS === "web") return;
+
+    const capture = async (maskMemo: boolean) => {
+      try {
+        await sharePinCardImage(maskMemo ? maskedShareRef : plainShareRef);
+      } catch (error) {
+        console.error("Pin share failed:", error);
+        Alert.alert("공유 실패", error instanceof Error ? error.message : "핀 이미지를 공유하지 못했습니다.");
+      }
+    };
+
+    if (!pinToShare.is_spoiler) {
+      void capture(false);
+      return;
+    }
+
+    Alert.alert("스포일러 핀입니다", "메모를 가린 카드로 공유할까요?", [
+      { text: "취소", style: "cancel" },
+      { text: "가리고 공유", onPress: () => void capture(true) },
+      { text: "그대로 공유", onPress: () => void capture(false) }
+    ]);
+  };
+
+  const listData = isLoading || isError ? [] : sortedPins;
+  const emptyTitle = hasActiveFilter ? "검색 결과가 없어요" : "아직 저장된 핀이 없어요";
+  const emptyDescription = hasActiveFilter ? "다른 키워드나 필터를 사용해보세요." : "감동적인 장면을 발견하면 핀으로 남겨보세요.";
+  const listHeader = (
+    <View style={styles.listHeader}>
+      <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.title}>핀</Text>
+          <Text style={styles.subtitle}>감동적인 장면과 기억하고 싶은 대사를 모아보세요.</Text>
+        </View>
+        <View style={styles.headerTools}>
+          <View style={styles.searchBox}>
+            <Ionicons color={colors.textMuted} name="search-outline" size={18} />
+            <TextInput
+              accessibilityLabel="핀 검색"
+              onChangeText={setSearchQuery}
+              placeholder="작품명, 핀 메모, 태그 검색"
+              placeholderTextColor={colors.textMuted}
+              style={styles.searchInput}
+              value={searchQuery}
+            />
+            {searchQuery ? (
+              <Pressable accessibilityLabel="검색어 지우기" accessibilityRole="button" onPress={() => setSearchQuery("")}>
+                <Ionicons color={colors.textMuted} name="close-circle" size={18} />
+              </Pressable>
+            ) : null}
+          </View>
+          <ToolbarIconButton icon="filter-outline" label="필터" />
+          <ToolbarIconButton
+            icon={viewMode === "list" ? "list-outline" : "git-branch-outline"}
+            label="보기 방식"
+            onPress={() => setViewMode((current) => (current === "list" ? "timeline" : "list"))}
+            selected={viewMode === "timeline"}
+          />
+        </View>
+      </View>
+
+      <View style={styles.toolbar}>
+        <View style={styles.segmentGroup}>
+          <SegmentButton label="최신순" selected={sortMode === "latest"} onPress={() => setSortMode("latest")} />
+          <SegmentButton label="시간순" selected={sortMode === "timeline"} onPress={() => setSortMode("timeline")} />
+        </View>
+        <Text style={styles.resultCount}>{sortedPins.length}개의 핀</Text>
+      </View>
+
+      <FilterRow
+        label="장르"
+        options={genreOptions.map((genre) => ({ id: genre, label: genre }))}
+        selectedId={genreFilter}
+        allLabel="전체"
+        onSelect={setGenreFilter}
+      />
+      <FilterRow
+        label="감정"
+        options={emotionFilterOptions.map((emotion) => ({ id: emotion.value, label: emotion.label }))}
+        selectedId={selectedEmotion}
+        allLabel="전체"
+        onSelect={(value) => setSelectedEmotion(value as EmotionType | "all")}
+      />
+      <FilterRow
+        label="태그"
+        options={(tags.data ?? []).map((tag) => ({ id: tag.id, label: `#${tag.name}` }))}
+        selectedId={selectedTagId ?? "all"}
+        allLabel="전체"
+        onSelect={(value) => setSelectedTagId(value === "all" ? null : value)}
+      />
+
+      <SummaryCards
+        pins={allPinsForSummary}
+        selectedEmotion={selectedEmotion}
+        onSelectEmotion={setSelectedEmotion}
+        onSelectAll={() => {
+          setSelectedTagId(null);
+          setSelectedEmotion("all");
+          setGenreFilter(ALL_GENRE_FILTER);
+        }}
+      />
+    </View>
+  );
+
   return (
     <View style={styles.shell}>
-      <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
+      <View style={styles.page}>
         <View style={styles.contentGrid}>
           <View style={styles.mainColumn}>
-            <View style={styles.header}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.title}>핀</Text>
-                <Text style={styles.subtitle}>감동적인 장면과 기억하고 싶은 대사를 모아보세요.</Text>
-              </View>
-              <View style={styles.headerTools}>
-                <View style={styles.searchBox}>
-                  <Ionicons color={colors.textMuted} name="search-outline" size={18} />
-                  <TextInput
-                    accessibilityLabel="핀 검색"
-                    onChangeText={setSearchQuery}
-                    placeholder="작품명, 핀 메모, 태그 검색"
-                    placeholderTextColor={colors.textMuted}
-                    style={styles.searchInput}
-                    value={searchQuery}
-                  />
-                  {searchQuery ? (
-                    <Pressable accessibilityLabel="검색어 지우기" accessibilityRole="button" onPress={() => setSearchQuery("")}>
-                      <Ionicons color={colors.textMuted} name="close-circle" size={18} />
-                    </Pressable>
-                  ) : null}
+            <FlashList
+              ListEmptyComponent={
+                <View style={styles.listEmpty}>
+                  {isLoading ? (
+                    <LoadingSkeleton variant="pin-item" count={5} />
+                  ) : isError ? (
+                    <ErrorState onRetry={() => (selectedTagId ? taggedPins.refetch() : allPins.refetch())} />
+                  ) : (
+                    <EmptyState title={emptyTitle} description={emptyDescription} />
+                  )}
                 </View>
-                <ToolbarIconButton icon="filter-outline" label="필터" />
-                <ToolbarIconButton
-                  icon={viewMode === "list" ? "list-outline" : "git-branch-outline"}
-                  label="보기 방식"
-                  onPress={() => setViewMode((current) => (current === "list" ? "timeline" : "list"))}
-                  selected={viewMode === "timeline"}
-                />
-              </View>
-            </View>
-
-            <View style={styles.toolbar}>
-              <View style={styles.segmentGroup}>
-                <SegmentButton label="최신순" selected={sortMode === "latest"} onPress={() => setSortMode("latest")} />
-                <SegmentButton label="시간순" selected={sortMode === "timeline"} onPress={() => setSortMode("timeline")} />
-              </View>
-              <Text style={styles.resultCount}>{sortedPins.length}개의 핀</Text>
-            </View>
-
-            <FilterRow
-              label="장르"
-              options={genreOptions.map((genre) => ({ id: genre, label: genre }))}
-              selectedId={genreFilter}
-              allLabel="전체"
-              onSelect={setGenreFilter}
-            />
-            <FilterRow
-              label="감정"
-              options={emotionFilterOptions.map((emotion) => ({ id: emotion.value, label: emotion.label }))}
-              selectedId={selectedEmotion}
-              allLabel="전체"
-              onSelect={(value) => setSelectedEmotion(value as EmotionType | "all")}
-            />
-            <FilterRow
-              label="태그"
-              options={(tags.data ?? []).map((tag) => ({ id: tag.id, label: `#${tag.name}` }))}
-              selectedId={selectedTagId ?? "all"}
-              allLabel="전체"
-              onSelect={(value) => setSelectedTagId(value === "all" ? null : value)}
-            />
-
-            <SummaryCards
-              pins={allPinsForSummary}
-              onSelectEmotion={setSelectedEmotion}
-              onSelectAll={() => {
-                setSelectedTagId(null);
-                setSelectedEmotion("all");
-                setGenreFilter(ALL_GENRE_FILTER);
+              }
+              ListHeaderComponent={listHeader}
+              ItemSeparatorComponent={() => <View style={viewMode === "timeline" ? styles.timelineSeparator : styles.pinSeparator} />}
+              contentContainerStyle={styles.pinFlashContent}
+              data={listData}
+              drawDistance={520}
+              extraData={{
+                selectedPinId: selectedPin?.id ?? null,
+                revealedSpoilers,
+                viewMode
               }}
+              keyExtractor={(pin) => pin.id}
+              renderItem={({ item: pin }) =>
+                viewMode === "timeline" ? (
+                  <PinTimelineItem pin={pin} selectedPinId={selectedPin?.id ?? null} onSelectPin={setSelectedPinId} />
+                ) : (
+                  <PinCard
+                    isSelected={selectedPin?.id === pin.id}
+                    isSpoilerRevealed={revealedSpoilers.has(pin.id)}
+                    onOpen={() => router.push({ pathname: "/pins/[id]", params: { id: pin.id } })}
+                    onRevealSpoiler={() => revealSpoiler(pin)}
+                    onSelect={() => setSelectedPinId(pin.id)}
+                    pin={pin}
+                  />
+                )
+              }
+              style={styles.pinFlashList}
             />
-
-            <View style={styles.listSurface}>
-              {isLoading ? (
-                <LoadingSkeleton variant="pin-item" count={5} />
-              ) : isError ? (
-                <ErrorState onRetry={() => (selectedTagId ? taggedPins.refetch() : allPins.refetch())} />
-              ) : viewMode === "timeline" ? (
-                <PinTimelineView pins={sortedPins} selectedPinId={selectedPin?.id ?? null} onSelectPin={setSelectedPinId} />
-              ) : sortedPins.length ? (
-                <View style={styles.pinList}>
-                  {sortedPins.map((pin) => (
-                    <PinCard
-                      isSelected={selectedPin?.id === pin.id}
-                      isSpoilerRevealed={revealedSpoilers.has(pin.id)}
-                      key={pin.id}
-                      onOpen={() => router.push({ pathname: "/pins/[id]", params: { id: pin.id } })}
-                      onRevealSpoiler={() => revealSpoiler(pin)}
-                      onSelect={() => setSelectedPinId(pin.id)}
-                      pin={pin}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <EmptyState
-                  title={hasActiveFilter ? "검색 결과가 없어요" : "아직 저장된 핀이 없어요"}
-                  description={hasActiveFilter ? "다른 키워드나 필터를 사용해보세요." : "감동적인 장면을 발견하면 핀으로 남겨보세요."}
-                />
-              )}
-            </View>
           </View>
 
           <PinDetailPanel
             isSpoilerRevealed={selectedPin ? revealedSpoilers.has(selectedPin.id) : false}
             onOpenDetail={() => selectedPin && router.push({ pathname: "/pins/[id]", params: { id: selectedPin.id } })}
             onRevealSpoiler={() => selectedPin && revealSpoiler(selectedPin)}
+            onShare={() => selectedPin && sharePin(selectedPin)}
             pin={selectedPin}
           />
         </View>
-      </ScrollView>
+      </View>
+      {selectedPin ? (
+        <View pointerEvents="none" style={styles.captureLayer}>
+          <PinShareCard pin={selectedPin} ref={plainShareRef} />
+          <PinShareCard maskMemo pin={selectedPin} ref={maskedShareRef} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -311,38 +362,145 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
 
 function SummaryCards({
   pins,
+  selectedEmotion,
   onSelectAll,
   onSelectEmotion
 }: {
   pins: TimelinePin[];
+  selectedEmotion: EmotionType | "all";
   onSelectAll: () => void;
   onSelectEmotion: (emotion: EmotionType | "all") => void;
 }) {
-  const movedCount = pins.filter((pin) => pin.emotion === "moved").length;
-  const sceneCount = pins.filter((pin) => pin.emotion === "excited").length;
-  const quoteCount = pins.filter((pin) => pin.emotion === "love").length;
-
-  const cards = [
-    { label: "전체 핀", value: pins.length, icon: "bookmark", tone: styles.summaryIconBlue, onPress: onSelectAll },
-    { label: "감동", value: movedCount, icon: "heart", tone: styles.summaryIconRose, onPress: () => onSelectEmotion("moved") },
-    { label: "명장면", value: sceneCount, icon: "flame", tone: styles.summaryIconAmber, onPress: () => onSelectEmotion("excited") },
-    { label: "명대사", value: quoteCount, icon: "chatbubble-ellipses", tone: styles.summaryIconPurple, onPress: () => onSelectEmotion("love") }
-  ] as const;
+  const emotionCounts = pins.reduce(
+    (counts, pin) => {
+      if (pin.emotion && pin.emotion !== "none") counts[pin.emotion] += 1;
+      return counts;
+    },
+    Object.fromEntries(EMOTION_OPTIONS.map((emotion) => [emotion, 0])) as Record<EmotionType, number>
+  );
+  const emotionCards = EMOTION_OPTIONS.map((emotion) => ({
+    emotion,
+    label: EMOTION_LABELS[emotion],
+    value: emotionCounts[emotion]
+  }))
+    .filter((card) => card.emotion !== "none" && card.value > 0)
+    .sort((a, b) => b.value - a.value || EMOTION_OPTIONS.indexOf(a.emotion) - EMOTION_OPTIONS.indexOf(b.emotion));
 
   return (
-    <View style={styles.summaryGrid}>
-      {cards.map((card) => (
-        <Pressable accessibilityRole="button" key={card.label} onPress={card.onPress} style={styles.summaryCard}>
-          <View style={[styles.summaryIcon, card.tone]}>
-            <Ionicons color={colors.primary} name={card.icon} size={20} />
-          </View>
-          <View>
-            <Text style={styles.summaryLabel}>{card.label}</Text>
-            <Text style={styles.summaryValue}>{card.value}</Text>
-          </View>
-        </Pressable>
-      ))}
-    </View>
+    <ScrollView contentContainerStyle={styles.summaryGrid} horizontal showsHorizontalScrollIndicator={false} style={styles.summaryScroller}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: selectedEmotion === "all" }}
+        onPress={onSelectAll}
+        style={[styles.summaryCard, selectedEmotion === "all" ? styles.summaryCardSelected : null]}
+      >
+        <View style={[styles.summaryIcon, styles.summaryIconBlue]}>
+          <Ionicons color={colors.primary} name="bookmark" size={20} />
+        </View>
+        <View>
+          <Text style={styles.summaryLabel}>전체 핀</Text>
+          <Text style={styles.summaryValue}>{pins.length}</Text>
+        </View>
+      </Pressable>
+
+      {emotionCards.map((card) => {
+        const selected = selectedEmotion === card.emotion;
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            key={card.emotion}
+            onPress={() => onSelectEmotion(selected ? "all" : card.emotion)}
+            style={[styles.summaryCard, selected ? styles.summaryCardSelected : null]}
+          >
+            <View style={[styles.summaryIcon, getEmotionSummaryTone(card.emotion)]}>
+              <Ionicons color={colors.primary} name={getEmotionSummaryIcon(card.emotion)} size={20} />
+            </View>
+            <View>
+              <Text style={styles.summaryLabel}>{card.label}</Text>
+              <Text style={styles.summaryValue}>{card.value}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function getEmotionSummaryIcon(emotion: EmotionType): keyof typeof Ionicons.glyphMap {
+  switch (emotion) {
+    case "moved":
+    case "love":
+      return "heart";
+    case "excited":
+      return "sparkles";
+    case "funny":
+      return "happy";
+    case "sad":
+      return "rainy";
+    case "surprised":
+      return "alert-circle";
+    case "angry":
+      return "flame";
+    case "scared":
+      return "skull";
+    case "boring":
+      return "remove-circle";
+    case "none":
+      return "ellipse-outline";
+  }
+}
+
+function getEmotionSummaryTone(emotion: EmotionType) {
+  switch (emotion) {
+    case "moved":
+    case "love":
+      return styles.summaryIconRose;
+    case "excited":
+    case "surprised":
+      return styles.summaryIconAmber;
+    case "funny":
+      return styles.summaryIconGreen;
+    case "sad":
+    case "scared":
+      return styles.summaryIconBlue;
+    case "angry":
+      return styles.summaryIconRed;
+    case "boring":
+    case "none":
+      return styles.summaryIconSlate;
+  }
+}
+
+function PinTimelineItem({
+  pin,
+  selectedPinId,
+  onSelectPin
+}: {
+  pin: TimelinePin;
+  selectedPinId: string | null;
+  onSelectPin: (id: string) => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: selectedPinId === pin.id }}
+      onPress={() => onSelectPin(pin.id)}
+      style={[styles.timelineItem, selectedPinId === pin.id ? styles.timelineItemSelected : null]}
+    >
+      <View style={styles.timelineDot} />
+      <View style={styles.timelineBody}>
+        <Text style={styles.timelineDate}>{formatDate(pin.created_at)}</Text>
+        <Text numberOfLines={1} style={styles.timelineTitle}>{getPinContextLabel(pin)}</Text>
+        <View style={styles.pinMetaRow}>
+          <Text style={styles.timeCode}>{getPinTimeLabel(pin)}</Text>
+          {pin.emotion && pin.emotion !== "none" ? (
+            <Text style={styles.emotionBadge}>{EMOTION_LABELS[pin.emotion]}</Text>
+          ) : null}
+        </View>
+        <Text numberOfLines={2} style={styles.pinMemo}>{pin.memo?.trim() || "메모 없음"}</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -410,12 +568,14 @@ function PinDetailPanel({
   pin,
   isSpoilerRevealed,
   onRevealSpoiler,
-  onOpenDetail
+  onOpenDetail,
+  onShare
 }: {
   pin: TimelinePin | null;
   isSpoilerRevealed: boolean;
   onRevealSpoiler: () => void;
   onOpenDetail: () => void;
+  onShare: () => void;
 }) {
   if (!pin) {
     return (
@@ -465,45 +625,12 @@ function PinDetailPanel({
         <Ionicons color={colors.surface} name="open-outline" size={18} />
         <Text style={styles.primaryActionText}>핀 상세 열기</Text>
       </Pressable>
-    </View>
-  );
-}
-
-function PinTimelineView({
-  pins,
-  selectedPinId,
-  onSelectPin
-}: {
-  pins: TimelinePin[];
-  selectedPinId: string | null;
-  onSelectPin: (id: string) => void;
-}) {
-  if (!pins.length) {
-    return <EmptyState title="검색 결과가 없어요" description="다른 키워드나 필터를 사용해보세요." />;
-  }
-
-  return (
-    <View style={styles.timelineList}>
-      {pins.map((pin) => (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: selectedPinId === pin.id }}
-          key={pin.id}
-          onPress={() => onSelectPin(pin.id)}
-          style={[styles.timelineItem, selectedPinId === pin.id ? styles.timelineItemSelected : null]}
-        >
-          <View style={styles.timelineDot} />
-          <View style={styles.timelineBody}>
-            <Text style={styles.timelineDate}>{formatDate(pin.created_at)}</Text>
-            <Text numberOfLines={1} style={styles.timelineTitle}>{getPinContextLabel(pin)}</Text>
-            <View style={styles.pinMetaRow}>
-              <Text style={styles.timeCode}>{getPinTimeLabel(pin)}</Text>
-              {pin.emotion && pin.emotion !== "none" ? <Text style={styles.emotionBadge}>{EMOTION_LABELS[pin.emotion]}</Text> : null}
-            </View>
-            <Text numberOfLines={2} style={styles.pinMemo}>{pin.memo?.trim() || "메모 없음"}</Text>
-          </View>
+      {Platform.OS !== "web" ? (
+        <Pressable accessibilityRole="button" onPress={onShare} style={styles.secondaryAction}>
+          <Ionicons color={colors.primary} name="share-social-outline" size={18} />
+          <Text style={styles.secondaryActionText}>공유</Text>
         </Pressable>
-      ))}
+      ) : null}
     </View>
   );
 }
@@ -548,12 +675,14 @@ const styles = StyleSheet.create({
     flex: 1
   },
   page: {
+    flex: 1,
     paddingBottom: 96,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xl
   },
   contentGrid: {
     alignSelf: "center",
+    flex: 1,
     flexDirection: "row",
     gap: spacing.xl,
     maxWidth: 1260,
@@ -564,6 +693,10 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     maxWidth: MAIN_CONTENT_MAX_WIDTH,
     minWidth: 0
+  },
+  listHeader: {
+    gap: spacing.lg,
+    paddingBottom: spacing.lg
   },
   header: {
     alignItems: "center",
@@ -698,9 +831,14 @@ const styles = StyleSheet.create({
   filterChipTextSelected: {
     color: colors.surface
   },
+  summaryScroller: {
+    flexGrow: 0,
+    maxHeight: 96
+  },
   summaryGrid: {
     flexDirection: "row",
-    gap: spacing.md
+    gap: spacing.md,
+    paddingRight: spacing.lg
   },
   summaryCard: {
     alignItems: "center",
@@ -708,15 +846,19 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    flex: 1,
     flexDirection: "row",
     gap: spacing.md,
+    minWidth: 166,
     minHeight: 86,
     padding: spacing.lg,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 2
+  },
+  summaryCardSelected: {
+    backgroundColor: "#EFF6FF",
+    borderColor: colors.primary
   },
   summaryIcon: {
     alignItems: "center",
@@ -737,6 +879,15 @@ const styles = StyleSheet.create({
   summaryIconPurple: {
     backgroundColor: "#EDE9FE"
   },
+  summaryIconGreen: {
+    backgroundColor: "#DCFCE7"
+  },
+  summaryIconRed: {
+    backgroundColor: "#FEE2E2"
+  },
+  summaryIconSlate: {
+    backgroundColor: "#E2E8F0"
+  },
   summaryLabel: {
     color: "#64748B",
     fontSize: 12,
@@ -748,11 +899,20 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     lineHeight: 30
   },
-  listSurface: {
-    minHeight: 320
+  pinFlashList: {
+    flex: 1
   },
-  pinList: {
-    gap: spacing.md
+  pinFlashContent: {
+    paddingBottom: 96
+  },
+  listEmpty: {
+    paddingTop: spacing.md
+  },
+  pinSeparator: {
+    height: spacing.md
+  },
+  timelineSeparator: {
+    height: spacing.md
   },
   pinCard: {
     backgroundColor: colors.surface,
@@ -991,6 +1151,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900"
   },
+  secondaryAction: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    height: 46,
+    justifyContent: "center"
+  },
+  secondaryActionText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  captureLayer: {
+    left: -1200,
+    opacity: 0,
+    position: "absolute",
+    top: 0
+  },
   timelineList: {
     backgroundColor: colors.surface,
     borderColor: "#E5E7EB",
@@ -999,12 +1181,16 @@ const styles = StyleSheet.create({
     padding: spacing.lg
   },
   timelineItem: {
+    backgroundColor: colors.surface,
+    borderColor: "#E5E7EB",
     borderLeftColor: "#CBD5E1",
     borderLeftWidth: 2,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: spacing.md,
-    paddingBottom: spacing.lg,
-    paddingLeft: spacing.lg
+    padding: spacing.lg,
+    paddingLeft: spacing.xl
   },
   timelineItemSelected: {
     borderLeftColor: colors.primary

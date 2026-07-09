@@ -11,6 +11,7 @@ import { colors, radius, spacing } from "@/constants/theme";
 import { useAddToLibrary } from "@/hooks/useLibrary";
 import { searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
+import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import { extractPhotoTitleCandidates } from "@/utils/photoTitleCandidates";
 
 const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
@@ -283,7 +284,7 @@ export default function LibraryPhotoImportScreen() {
                 <View style={styles.resultTextBox}>
                   <Text numberOfLines={1} style={styles.resultTitle}>{result.title_primary}</Text>
                   <Text numberOfLines={1} style={styles.resultMeta}>
-                    {[labelContentType(result.content_type), result.air_year, result.title_original]
+                    {[labelContentType(result.content_type), createAirDateLabel(result.air_date, result.air_year), result.title_original]
                       .filter(Boolean)
                       .join(" · ")}
                   </Text>

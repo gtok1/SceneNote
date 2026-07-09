@@ -36,6 +36,7 @@ export interface ContentMeta {
   localized_overview?: string | null;
   air_year: number | null;
   air_date: string | null;
+  end_date: string | null;
   has_seasons: boolean;
   episode_count: number | null;
   genres: string[];

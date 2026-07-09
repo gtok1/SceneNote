@@ -1,3 +1,4 @@
+import { supabase } from "@/lib/supabase";
 import { searchContent } from "@/services/contentSearch";
 import type { SearchResult } from "@/types/content";
 
@@ -86,8 +87,90 @@ const FALLBACK_QUERIES: Record<RecommendationCategory, FallbackQuery[]> = {
   ]
 };
 
+const KOREAN_TITLE_OVERRIDE_ENTRIES: readonly (readonly [string, string])[] = [
+  ["Mushoku Tensei: Jobless Reincarnation Season 3", "무직전생 3기"],
+  ["You and I Are Polar Opposites Season 2", "정반대의 너와 나 2기"],
+  ["Daemons of the Shadow Realm", "황천의 츠가이"],
+  ["The 100 Girlfriends Season 3", "너를 너무너무너무너무 좋아하는 100명의 그녀 3기"],
+  ["That Time I Got Reincarnated as a Slime Season 4", "전생했더니 슬라임이었던 건에 대하여 4기"],
+  ["The World's Strongest Rearguard", "세계 최강의 후위 ~미궁국의 신인 탐색자~"],
+  ["Sparks of Tomorrow", "스파크스 오브 투모로우"],
+  ["Black Torch", "블랙 토치"],
+  ["BLACK TORCH", "블랙 토치"],
+  ["Goodbye, Lara", "굿바이, 라라"],
+  ["Chainsmoker Cat", "체인스모커 캣"],
+  ["Kaiju Girl Caramelise", "괴수 소녀 카라멜라이즈"],
+  ["Jaadugar: A Witch in Mongolia", "자두가르: 몽골의 마녀"],
+  ["Super no Ura de Yani Suu Futari", "슈퍼 뒤에서 담배 피우는 두 사람"],
+  ["Skeleton Knight in Another World Season 2", "해골기사님은 지금 이세계 모험 중 2기"],
+  ["MARRIAGETOXIN", "매리지 톡신"],
+  ["ONE PIECE HEROINES", "원피스 히로인즈"],
+  ["The Ramparts of Ice", "얼음 성벽"],
+  ["Welcome to Demon School Iruma-kun Season 4", "마계학교 이루마군 4기"],
+  ["Welcome to Demon School! Iruma-kun Season 4", "마계학교 이루마군 4기"],
+  ["I Want to End this Love Game", "이 사랑을 끝내고 싶어"],
+  ["Witch Hat Atelier", "마녀의 모자 아틀리에"],
+  ["Re:ZERO -Starting Life in Another World- Season 4", "Re:제로부터 시작하는 이세계 생활 4기"],
+  ["Wistoria: Wand and Sword Season 2", "지팡이와 검의 위스토리아 2기"],
+  ["Classroom of the Elite Season 4", "어서 오세요 실력지상주의 교실에 4기"],
+  ["Ascendance of a Bookworm: Adopted Daughter of an Archduke", "책벌레의 하극상 영주의 양녀 편"],
+  ["The Exiled Heavy Knight Knows How to Game the System", "추방된 전직 중기사는 게임 지식으로 무쌍한다"],
+  ["The Cat and the Dragon", "고양이와 용"]
+];
+
+const KOREAN_TITLE_OVERRIDES = new Map<string, string>(
+  KOREAN_TITLE_OVERRIDE_ENTRIES.map(([title, koreanTitle]) => [normalizeTitleForOverride(title), koreanTitle])
+);
+
 export async function getPopularRecommendations(): Promise<PopularRecommendationsResponse> {
-  return getFallbackRecommendations();
+  try {
+    const { data, error } = await supabase.functions.invoke<PopularRecommendationsResponse>("popular-recommendations", {
+      body: {}
+    });
+
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("추천 응답이 비어 있습니다");
+
+    const normalizedCategories = {
+      drama: normalizeRecommendationDates(data.categories?.drama ?? []).map(applyKoreanTitleFallback),
+      anime: normalizeRecommendationDates(data.categories?.anime ?? []).map(applyKoreanTitleFallback)
+    };
+    const categories = await fillRecommendationPools(normalizedCategories);
+
+    return {
+      ...data,
+      categories,
+      failedSources: data.failedSources ?? [],
+      partial: Boolean(data.partial)
+    };
+  } catch (error) {
+    return getFallbackRecommendations(error instanceof Error ? error.message : "추천을 불러오지 못했습니다");
+  }
+}
+
+async function fillRecommendationPools(
+  categories: Record<RecommendationCategory, PopularRecommendation[]>
+): Promise<Record<RecommendationCategory, PopularRecommendation[]>> {
+  const filledCategories = { ...categories };
+  const categoriesToFill = (Object.keys(categories) as RecommendationCategory[]).filter(
+    (category) => categories[category].length < RECOMMENDATION_POOL_LIMIT
+  );
+
+  const fallbackResults = await Promise.allSettled(
+    categoriesToFill.map((category) => searchFallbackCategory(category))
+  );
+
+  fallbackResults.forEach((result, index) => {
+    const category = categoriesToFill[index];
+    if (!category || result.status !== "fulfilled") return;
+
+    filledCategories[category] = normalizeCategory(
+      [...filledCategories[category], ...result.value],
+      category
+    );
+  });
+
+  return filledCategories;
 }
 
 async function getFallbackRecommendations(reason?: string): Promise<PopularRecommendationsResponse> {
@@ -143,6 +226,7 @@ async function searchFallbackCategory(category: RecommendationCategory): Promise
           category,
           rank: items.length + 1,
           release_month: fallback?.releaseMonth ?? null,
+          air_date: item.air_date ?? createMonthStartDate(item.air_year, fallback?.releaseMonth ?? null),
           trend_source: fallback?.releaseMonth
             ? `${CURRENT_RELEASE_YEAR}년 ${fallback.releaseMonth}월 인기 신작`
             : "최신 검색 기반"
@@ -179,9 +263,10 @@ function normalizeCategory(
     .slice(0, RECOMMENDATION_POOL_LIMIT);
 
   return filtered.map((item, index) => ({
-    ...item,
+    ...applyKoreanTitleFallback(item),
     category,
-    rank: index + 1
+    rank: index + 1,
+    air_date: item.air_date ?? createMonthStartDate(item.air_year, item.release_month ?? null)
   }));
 }
 
@@ -194,7 +279,71 @@ function compareRecommendationRecency(a: PopularRecommendation, b: PopularRecomm
 }
 
 function getReleaseMonthScore(item: PopularRecommendation): number {
-  const month = item.release_month ?? 0;
+  const month = item.release_month ?? monthFromDate(item.air_date) ?? 0;
   if (month > 0 && month <= CURRENT_RELEASE_MONTH) return month;
   return 0;
+}
+
+function normalizeRecommendationDates(items: PopularRecommendation[]): PopularRecommendation[] {
+  return items.map((item) => ({
+    ...item,
+    release_month: item.release_month ?? monthFromDate(item.air_date),
+    air_date: item.air_date ?? createMonthStartDate(item.air_year, item.release_month ?? null)
+  }));
+}
+
+function applyKoreanTitleFallback<T extends PopularRecommendation>(item: T): T {
+  if (hasHangul(item.title_primary)) return item;
+
+  if (item.title_original && hasHangul(item.title_original)) {
+    return {
+      ...item,
+      title_primary: item.title_original,
+      title_original: item.title_primary
+    };
+  }
+
+  const koreanTitle = findKoreanTitleOverride(item);
+  if (!koreanTitle) return item;
+
+  return {
+    ...item,
+    title_primary: koreanTitle,
+    title_original: item.title_original ?? item.title_primary
+  };
+}
+
+function findKoreanTitleOverride(item: SearchResult): string | null {
+  const candidates = [item.title_primary, item.title_original].filter(Boolean);
+  for (const candidate of candidates) {
+    const title = KOREAN_TITLE_OVERRIDES.get(normalizeTitleForOverride(candidate ?? ""));
+    if (title) return title;
+  }
+
+  return null;
+}
+
+function hasHangul(value: string | null | undefined): boolean {
+  return /[가-힣]/.test(value ?? "");
+}
+
+function normalizeTitleForOverride(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .trim();
+}
+
+function createMonthStartDate(year: number | null | undefined, month: number | null | undefined): string | null {
+  if (!year || !month || month < 1 || month > 12) return null;
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
+function monthFromDate(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = /^\d{4}-(\d{2})/.exec(value);
+  if (!match?.[1]) return null;
+  const month = Number.parseInt(match[1], 10);
+  return Number.isFinite(month) && month >= 1 && month <= 12 ? month : null;
 }

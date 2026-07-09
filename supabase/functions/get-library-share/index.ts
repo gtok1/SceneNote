@@ -24,6 +24,8 @@ interface LibraryRow {
   status: WatchStatus;
   status_flags?: WatchStatus[] | null;
   watch_count?: number | null;
+  first_watched_at?: string | null;
+  last_watched_at?: string | null;
   added_at: string;
   updated_at: string;
   contents: ContentRow | null;
@@ -40,6 +42,7 @@ interface ContentRow {
   overview: string | null;
   air_year: number | null;
   air_date: string | null;
+  end_date: string | null;
   content_genres?: { genres: { name: string } | { name: string }[] | null }[] | null;
 }
 
@@ -94,7 +97,9 @@ Deno.serve(async (req: Request) => {
     adminClient.from("profiles").select("display_name").eq("id", share.owner_user_id).maybeSingle(),
     adminClient
       .from("user_library_items")
-      .select("id,user_id,content_id,status,status_flags,watch_count,added_at,updated_at,contents(*,content_genres(genres(name)))")
+      .select(
+        "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at,added_at,updated_at,contents(*,content_genres(genres(name)))"
+      )
       .eq("user_id", share.owner_user_id)
       .in("content_id", contentIds),
     adminClient
@@ -136,6 +141,8 @@ Deno.serve(async (req: Request) => {
           statuses: normalizeWatchStatuses(row.status_flags?.length ? row.status_flags : [row.status]),
           added_at: row.added_at,
           updated_at: row.updated_at,
+          first_watched_at: row.first_watched_at ?? null,
+          last_watched_at: row.last_watched_at ?? null,
           content_id: row.content_id,
           title_primary: row.contents?.title_primary ?? "제목 없음",
           title_original: row.contents?.title_original ?? null,
@@ -145,10 +152,13 @@ Deno.serve(async (req: Request) => {
           source_id: row.contents?.source_id ?? "",
           air_year: row.contents?.air_year ?? null,
           air_date: row.contents?.air_date ?? null,
+          end_date: row.contents?.end_date ?? null,
           cast: [],
           rating: review?.rating ?? null,
           one_line_review: review?.one_line_review ?? null,
           episode_count: episodeCountsByContentId.get(row.content_id) ?? null,
+          watched_episode_count: 0,
+          next_episode_number: null,
           genres: extractGenreNames(row.contents?.content_genres),
           watch_count: row.watch_count ?? 0
         }

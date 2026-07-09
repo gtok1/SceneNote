@@ -90,7 +90,9 @@ test("finds existing app content by exact title without creating duplicates", ()
       source_id: "1",
       title_primary: "나의 해방일지",
       title_original: null,
-      air_year: 2022
+      air_year: 2022,
+      air_date: null,
+      end_date: null
     }
   ]);
 
@@ -117,7 +119,9 @@ test("finds existing content by tmdb external id", () => {
       source_id: "99",
       title_primary: "기존 영화",
       title_original: null,
-      air_year: 2020
+      air_year: 2020,
+      air_date: null,
+      end_date: null
     }
   ]);
 
@@ -143,7 +147,9 @@ test("marks ambiguous existing candidates for manual review", () => {
       source_id: "1",
       title_primary: "동명 작품",
       title_original: null,
-      air_year: 2019
+      air_year: 2019,
+      air_date: null,
+      end_date: null
     },
     {
       id: "b",
@@ -152,7 +158,9 @@ test("marks ambiguous existing candidates for manual review", () => {
       source_id: "2",
       title_primary: "동명 작품",
       title_original: null,
-      air_year: 2020
+      air_year: 2020,
+      air_date: null,
+      end_date: null
     }
   ]);
 

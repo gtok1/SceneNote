@@ -6,12 +6,14 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
-import { createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 
 interface SearchResultItemProps {
   result: SearchResult;
   onPress: () => void;
   onAddToLibrary?: () => void;
+  addLabel?: string;
+  isAddDisabled?: boolean;
   libraryItem?: LibraryListItem | null;
 }
 
@@ -19,9 +21,12 @@ export const SearchResultItem = memo(function SearchResultItem({
   result,
   onPress,
   onAddToLibrary,
+  addLabel = "추가",
+  isAddDisabled = false,
   libraryItem = null
 }: SearchResultItemProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
+  const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
   const watchCountLabel = libraryItem
     ? createWatchCountLabel(libraryItem.watch_count, { includeZero: true })
     : null;
@@ -47,7 +52,7 @@ export const SearchResultItem = memo(function SearchResultItem({
             </Text>
           ) : null}
           <Text numberOfLines={1} style={styles.meta}>
-            {[result.air_year, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+            {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
           </Text>
           <GenreBadgeList genres={result.genres} maxVisible={2} />
           {result.matched_people?.length ? (
@@ -59,8 +64,14 @@ export const SearchResultItem = memo(function SearchResultItem({
         </View>
       </Pressable>
       {onAddToLibrary ? (
-        <Pressable accessibilityRole="button" onPress={onAddToLibrary} style={styles.addButton}>
-          <Text style={styles.addText}>추가</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: isAddDisabled }}
+          disabled={isAddDisabled}
+          onPress={onAddToLibrary}
+          style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
+        >
+          <Text style={styles.addText}>{addLabel}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -137,6 +148,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
+  },
+  addButtonDisabled: {
+    opacity: 0.6
   },
   addText: {
     color: colors.surface,

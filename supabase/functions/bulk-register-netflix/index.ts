@@ -32,6 +32,8 @@ interface WorkRow {
   resolvedTitle: string;
   tmdbSearchQuery: string | null;
   mediaHint: MediaHint;
+  firstWatchedDate: string | null;
+  lastWatchedDate: string | null;
   existingAppContentId: string | null;
   tmdbId: string | null;
   tmdbMediaType: TmdbMediaType | null;
@@ -46,6 +48,7 @@ interface ContentRecord {
   title_original: string | null;
   air_year: number | null;
   air_date: string | null;
+  end_date: string | null;
   content_external_ids?: { api_source: ExternalSource; external_id: string }[] | null;
   content_titles?: { language_code: string; title: string }[] | null;
 }
@@ -55,6 +58,8 @@ interface LibraryRecord {
   status: WatchStatus;
   status_flags?: WatchStatus[] | null;
   watch_count?: number | null;
+  first_watched_at?: string | null;
+  last_watched_at?: string | null;
 }
 
 interface TmdbSearchCandidate {
@@ -202,7 +207,7 @@ async function processRow({
     : undefined;
 
   if (providedContent) {
-    const statusResult = await maybeUpsertCompletedStatus(adminClient, commit, userId, providedContent.id);
+    const statusResult = await maybeUpsertCompletedStatus(adminClient, commit, userId, providedContent.id, row);
     return {
       row: {
         ...base,
@@ -229,7 +234,13 @@ async function processRow({
     };
   }
   if (existingBeforeTmdb.status === "matched" && existingBeforeTmdb.content) {
-    const statusResult = await maybeUpsertCompletedStatus(adminClient, commit, userId, existingBeforeTmdb.content.id);
+    const statusResult = await maybeUpsertCompletedStatus(
+      adminClient,
+      commit,
+      userId,
+      existingBeforeTmdb.content.id,
+      row
+    );
     return {
       row: {
         ...base,
@@ -262,7 +273,7 @@ async function processRow({
   const existingAfterTmdb = findContentByTmdb(contents, tmdbId, mediaType);
 
   if (existingAfterTmdb) {
-    const statusResult = await maybeUpsertCompletedStatus(adminClient, commit, userId, existingAfterTmdb.id);
+    const statusResult = await maybeUpsertCompletedStatus(adminClient, commit, userId, existingAfterTmdb.id, row);
     return {
       row: {
         ...base,
@@ -298,7 +309,7 @@ async function processRow({
 
   const content = await createTmdbContent(adminClient, tmdbId, mediaType);
   contents.push(content);
-  const statusResult = await maybeUpsertCompletedStatus(adminClient, true, userId, content.id);
+  const statusResult = await maybeUpsertCompletedStatus(adminClient, true, userId, content.id, row);
 
   return {
     row: {
@@ -338,11 +349,12 @@ async function createTmdbContent(
         poster_url: contentMeta.poster_url,
         overview: contentMeta.overview,
         air_year: contentMeta.air_year,
-        air_date: contentMeta.air_date
+        air_date: contentMeta.air_date,
+        end_date: contentMeta.end_date
       },
       { onConflict: "source_api,source_id" }
     )
-    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date")
+    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date")
     .single();
 
   if (contentError || !contentRow) {
@@ -390,13 +402,14 @@ async function maybeUpsertCompletedStatus(
   adminClient: ReturnType<typeof createAdminClient>,
   commit: boolean,
   userId: string,
-  contentId: string
+  contentId: string,
+  row: WorkRow
 ): Promise<string> {
   if (!commit) return "would_update_completed";
 
   const { data: existing, error: lookupError } = await adminClient
     .from("user_library_items")
-    .select("id,status,status_flags,watch_count")
+    .select("id,status,status_flags,watch_count,first_watched_at,last_watched_at")
     .eq("user_id", userId)
     .eq("content_id", contentId)
     .maybeSingle();
@@ -405,11 +418,12 @@ async function maybeUpsertCompletedStatus(
   const existingRow = existing as LibraryRecord | null;
   const statusFlags = completedStatusFlags(existingRow?.status_flags ?? (existingRow ? [existingRow.status] : []));
   const watchCount = Math.max(1, existingRow?.watch_count ?? 0);
+  const watchDatePatch = createBulkWatchDatePatch(row);
 
   if (existingRow) {
     const { error } = await adminClient
       .from("user_library_items")
-      .update({ status: "completed", status_flags: statusFlags, watch_count: watchCount })
+      .update({ status: "completed", status_flags: statusFlags, watch_count: watchCount, ...watchDatePatch })
       .eq("id", existingRow.id);
     if (error) throw new Error(error.message);
     return "updated_completed";
@@ -420,7 +434,8 @@ async function maybeUpsertCompletedStatus(
     content_id: contentId,
     status: "completed",
     status_flags: ["completed"],
-    watch_count: 1
+    watch_count: 1,
+    ...watchDatePatch
   });
   if (error) {
     if (error.code === "23505") return "already_exists_race_skipped";
@@ -503,7 +518,7 @@ async function fetchAllContents(adminClient: ReturnType<typeof createAdminClient
     const { data, error } = await adminClient
       .from("contents")
       .select(
-        "id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id),content_titles(language_code,title)"
+        "id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date,content_external_ids(api_source,external_id),content_titles(language_code,title)"
       )
       .range(from, from + pageSize - 1)
       .order("created_at", { ascending: true });
@@ -656,6 +671,8 @@ function normalizeRows(rows: Record<string, unknown>[]): WorkRow[] {
       resolvedTitle,
       tmdbSearchQuery: nullableString(row.tmdb_search_query),
       mediaHint: normalizeMediaHint(row.media_hint),
+      firstWatchedDate: normalizeIsoDate(row.first_watched_date),
+      lastWatchedDate: normalizeIsoDate(row.last_watched_date),
       existingAppContentId: nullableString(row.existing_app_content_id),
       tmdbId: nullableString(row.tmdb_id),
       tmdbMediaType: normalizeTmdbMediaType(row.tmdb_media_type)
@@ -708,6 +725,16 @@ function completedStatusFlags(existingFlags: WatchStatus[]): WatchStatus[] {
   );
 }
 
+function createBulkWatchDatePatch(row: WorkRow): Record<string, string> {
+  const firstWatchedAt = row.firstWatchedDate ?? row.lastWatchedDate;
+  const lastWatchedAt = row.lastWatchedDate ?? row.firstWatchedDate;
+  const patch: Record<string, string> = {};
+
+  if (firstWatchedAt) patch.first_watched_at = firstWatchedAt;
+  if (lastWatchedAt) patch.last_watched_at = lastWatchedAt;
+  return patch;
+}
+
 function normalizeMediaHint(value: unknown): MediaHint {
   const text = readString(value).toLowerCase();
   if (text === "tv" || text === "show" || text === "series") return "tv";
@@ -719,6 +746,36 @@ function normalizeTmdbMediaType(value: unknown): TmdbMediaType | null {
   const text = readString(value).toLowerCase();
   if (text === "tv" || text === "movie") return text;
   return null;
+}
+
+function normalizeIsoDate(value: unknown): string | null {
+  const text = readString(value);
+  if (!text) return null;
+
+  const compact = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  const parts = compact
+    ? [compact[1], compact[2], compact[3]]
+    : text
+        .replace(/[./]/g, "-")
+        .replace(/[년월]/g, "-")
+        .replace(/일/g, "")
+        .split(/\D+/)
+        .filter(Boolean);
+
+  const year = Number(parts[0]);
+  const month = parts[1] ? Number(parts[1]) : 1;
+  const day = parts[2] ? Number(parts[2]) : 1;
+
+  if (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear() + 1) return null;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function readString(value: unknown): string {

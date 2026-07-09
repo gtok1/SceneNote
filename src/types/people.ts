@@ -28,6 +28,7 @@ export interface PersonCredit {
   poster_url: string | null;
   content_type: "anime" | "kdrama" | "jdrama" | "movie" | "other";
   air_year: number | null;
+  air_date: string | null;
   role: string | null;
 }
 

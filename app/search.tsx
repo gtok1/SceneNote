@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -15,12 +15,16 @@ import { colors, radius, spacing } from "@/constants/theme";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, usePersonContentSearch } from "@/hooks/usePeople";
+import { usePopularRecommendations } from "@/hooks/usePopularRecommendations";
+import type { PopularRecommendation } from "@/services/popularRecommendations";
 import { useSearchUiStore } from "@/stores/searchUiStore";
-import type { MediaTypeFilter, SearchResult } from "@/types/content";
+import type { ContentType, MediaTypeFilter, SearchResult } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import type { PersonSearchResult } from "@/types/people";
 import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { matchesGenreFilter } from "@/utils/genre";
+
+const PERSONALIZED_RECOMMENDATION_LIMIT = 12;
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -42,8 +46,13 @@ export default function SearchScreen() {
   const search = useContentSearch(query, mediaType);
   const personSearch = usePersonContentSearch(query, "all");
   const library = useLibrary("all");
+  const recommendations = usePopularRecommendations();
   const addToLibrary = useAddToLibrary();
   const addFavoritePerson = useAddFavoritePerson();
+  const [addedSearchKeys, setAddedSearchKeys] = useState<Set<string>>(() => new Set());
+  const [addedRecommendationKeys, setAddedRecommendationKeys] = useState<Set<string>>(() => new Set());
+  const [pendingSearchKey, setPendingSearchKey] = useState<string | null>(null);
+  const [pendingRecommendationKey, setPendingRecommendationKey] = useState<string | null>(null);
   const yearFilter = normalizeYearFilter(year);
   const libraryItemsByExternalKey = useMemo(() => {
     return new Map(
@@ -83,6 +92,31 @@ export default function SearchScreen() {
   const error = search.error ?? personSearch.error;
   const isGallery = viewMode === "gallery";
   const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 3;
+  const hasSearchQuery = query.trim().length >= 2;
+  const recommendationPool = useMemo(
+    () => [
+      ...(recommendations.data?.categories.drama ?? []),
+      ...(recommendations.data?.categories.anime ?? [])
+    ],
+    [recommendations.data?.categories.anime, recommendations.data?.categories.drama]
+  );
+  const locallyAddedKeys = useMemo(
+    () => new Set([...addedSearchKeys, ...addedRecommendationKeys]),
+    [addedSearchKeys, addedRecommendationKeys]
+  );
+  const personalizedRecommendations = useMemo(
+    () =>
+      createPersonalizedRecommendations({
+        addedKeys: locallyAddedKeys,
+        items: recommendationPool,
+        libraryItems: library.data ?? [],
+        mediaType
+      }),
+    [library.data, locallyAddedKeys, mediaType, recommendationPool]
+  );
+  const recommendationIsLoading = !hasSearchQuery && (recommendations.isLoading || library.isLoading);
+  const displayedResults = hasSearchQuery ? activeResults : personalizedRecommendations;
+  const displayedAsGallery = !hasSearchQuery || isGallery;
   const refetch = () => {
     void search.refetch();
     void personSearch.refetch();
@@ -101,6 +135,8 @@ export default function SearchScreen() {
         overview: result.overview ?? "",
         contentType: result.content_type,
         airYear: result.air_year ? String(result.air_year) : "",
+        airDate: result.air_date ?? "",
+        endDate: result.end_date ?? "",
         hasSeasons: result.has_seasons ? "true" : "false",
         episodeCount: result.episode_count ? String(result.episode_count) : ""
       }
@@ -114,20 +150,60 @@ export default function SearchScreen() {
   };
 
   const addResult = (result: SearchResult) => {
+    const key = createExternalKey(result);
+    if (isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)) return;
+
+    setPendingSearchKey(key);
     addToLibrary.mutate(
       { result, status: "wishlist" },
       {
-        onSuccess: (response) => {
-          router.push({ pathname: "/content/[id]", params: { id: response.content_id } });
+        onSuccess: () => {
+          setAddedSearchKeys((previous) => new Set(previous).add(key));
         },
         onError: (error) => {
           Alert.alert(
             "라이브러리 추가 실패",
             `${error.message}\n\n로그인 상태, Edge Function 배포 상태, 외부 API secret 설정을 확인하세요.`
           );
+        },
+        onSettled: () => {
+          setPendingSearchKey(null);
         }
       }
     );
+  };
+
+  const addRecommendationResult = (result: SearchResult) => {
+    const key = createExternalKey(result);
+    if (isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)) return;
+
+    setPendingRecommendationKey(key);
+
+    addToLibrary.mutate(
+      { result, status: "wishlist" },
+      {
+        onSuccess: () => {
+          setAddedRecommendationKeys((previous) => new Set(previous).add(key));
+        },
+        onError: (error) => {
+          Alert.alert("라이브러리 추가 실패", error.message);
+        },
+        onSettled: () => {
+          setPendingRecommendationKey(null);
+        }
+      }
+    );
+  };
+
+  const getAddState = (result: SearchResult) => {
+    const key = createExternalKey(result);
+    const isPending = addToLibrary.isPending && (pendingSearchKey === key || pendingRecommendationKey === key);
+    const isAdded = isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys);
+
+    return {
+      label: isPending ? "추가 중" : isAdded ? "추가됨" : "추가",
+      disabled: isAdded || addToLibrary.isPending
+    };
   };
 
   return (
@@ -200,19 +276,35 @@ export default function SearchScreen() {
         })}
       </View>
 
-      {isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
-      {isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
-      {!isLoading && query.trim().length >= 2 && activeResults.length === 0 ? (
+      {hasSearchQuery && isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
+      {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
+      {recommendationIsLoading ? <LoadingSkeleton count={6} variant="search-result" /> : null}
+      {!hasSearchQuery && recommendations.isError ? (
+        <ErrorState
+          message="추천 작품을 불러오지 못했습니다"
+          onRetry={() => recommendations.refetch()}
+        />
+      ) : null}
+      {!isLoading && hasSearchQuery && activeResults.length === 0 ? (
         <EmptyState description="작품명, 배우, 성우 이름을 다른 키워드로 검색해 보세요." title="검색 결과가 없습니다" />
       ) : null}
-      {query.trim().length < 2 ? (
+      {!hasSearchQuery && !recommendationIsLoading && !recommendations.isError && personalizedRecommendations.length === 0 ? (
         <EmptyState
-          description="작품명, 배우, 성우 이름을 두 글자 이상 입력하면 검색이 시작됩니다."
-          title="통합 검색"
+          description="라이브러리에 작품을 더 등록하면 취향 추천이 더 정교해집니다."
+          title="추천할 작품을 찾고 있어요"
         />
       ) : null}
 
-      {!isLoading && activeResults.length > 0 ? (
+      {!hasSearchQuery && !recommendationIsLoading && personalizedRecommendations.length > 0 ? (
+        <View style={styles.resultsHeader}>
+          <Text style={styles.sectionTitle}>내 취향 추천</Text>
+          <Text style={styles.resultsHint}>
+            등록한 작품은 제외하고 {PERSONALIZED_RECOMMENDATION_LIMIT}개를 먼저 보여줍니다.
+          </Text>
+        </View>
+      ) : null}
+
+      {hasSearchQuery && !isLoading && activeResults.length > 0 ? (
         <View style={styles.resultsHeader}>
           <Text style={styles.sectionTitle}>검색 결과</Text>
           <Text style={styles.resultsHint}>
@@ -223,28 +315,34 @@ export default function SearchScreen() {
 
       <FlashList
         contentContainerStyle={styles.resultsList}
-        ItemSeparatorComponent={isGallery ? undefined : () => <View style={{ height: spacing.md }} />}
-        data={activeResults}
-        key={viewMode}
+        ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
+        data={displayedResults}
+        key={`${hasSearchQuery ? "search" : "recommendations"}-${viewMode}`}
         keyExtractor={(item) => `${item.external_source}:${item.external_id}`}
-        numColumns={isGallery ? galleryColumns : 1}
-        renderItem={({ item }) => (
-          isGallery ? (
+        numColumns={displayedAsGallery ? galleryColumns : 1}
+        renderItem={({ item }) => {
+          const addState = getAddState(item);
+
+          return displayedAsGallery ? (
             <SearchResultGalleryCard
-              libraryItem={libraryItemsByExternalKey.get(`${item.external_source}:${item.external_id}`) ?? null}
-              onAddToLibrary={() => addResult(item)}
+              addLabel={addState.label}
+              isAddDisabled={addState.disabled}
+              libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
+              onAddToLibrary={() => (hasSearchQuery ? addResult(item) : addRecommendationResult(item))}
               onPress={() => openResult(item)}
               result={item}
             />
           ) : (
             <SearchResultItem
-              libraryItem={libraryItemsByExternalKey.get(`${item.external_source}:${item.external_id}`) ?? null}
+              addLabel={addState.label}
+              isAddDisabled={addState.disabled}
+              libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
               onAddToLibrary={() => addResult(item)}
               onPress={() => openResult(item)}
               result={item}
             />
-          )
-        )}
+          );
+        }}
       />
     </View>
   );
@@ -255,6 +353,136 @@ function filterResultsByMediaType(results: SearchResult[], mediaType: MediaTypeF
   if (mediaType === "anime") return results.filter((item) => item.content_type === "anime");
   if (mediaType === "movie") return results.filter((item) => item.content_type === "movie");
   return results.filter((item) => item.content_type === "kdrama" || item.content_type === "jdrama");
+}
+
+function createExternalKey(result: SearchResult): string {
+  return `${result.external_source}:${result.external_id}`;
+}
+
+function isResultAlreadyAdded(
+  result: SearchResult,
+  libraryItemsByExternalKey: Map<string, LibraryListItem>,
+  addedSearchKeys: Set<string>,
+  addedRecommendationKeys: Set<string>
+): boolean {
+  const key = createExternalKey(result);
+  return libraryItemsByExternalKey.has(key) || addedSearchKeys.has(key) || addedRecommendationKeys.has(key);
+}
+
+function createPersonalizedRecommendations({
+  items,
+  libraryItems,
+  addedKeys,
+  mediaType
+}: {
+  items: PopularRecommendation[];
+  libraryItems: LibraryListItem[];
+  addedKeys: Set<string>;
+  mediaType: MediaTypeFilter;
+}): PopularRecommendation[] {
+  const profile = createPreferenceProfile(libraryItems);
+  const dedupedItems = dedupeRecommendations(items);
+
+  return dedupedItems
+    .filter((item) => filterResultsByMediaType([item], mediaType).length > 0)
+    .filter((item) => !addedKeys.has(createExternalKey(item)))
+    .filter((item) => !isRegisteredRecommendation(item, libraryItems))
+    .map((item, index) => ({
+      item,
+      score: scoreRecommendation(item, profile, index)
+    }))
+    .sort((left, right) => right.score - left.score || left.item.rank - right.item.rank)
+    .slice(0, PERSONALIZED_RECOMMENDATION_LIMIT)
+    .map(({ item }, index) => ({ ...item, rank: index + 1 }));
+}
+
+function dedupeRecommendations(items: PopularRecommendation[]): PopularRecommendation[] {
+  const deduped: PopularRecommendation[] = [];
+
+  for (const item of items) {
+    if (
+      deduped.some((previous) =>
+        isSameExternalResult(previous, item) || isSameWorkResult(previous, item)
+      )
+    ) {
+      continue;
+    }
+
+    deduped.push(item);
+  }
+
+  return deduped;
+}
+
+function createPreferenceProfile(libraryItems: LibraryListItem[]) {
+  const contentTypeScores = new Map<ContentType, number>();
+  const genreScores = new Map<string, number>();
+
+  for (const item of libraryItems) {
+    const weight = getLibraryPreferenceWeight(item);
+    contentTypeScores.set(item.content_type, (contentTypeScores.get(item.content_type) ?? 0) + weight);
+
+    for (const genre of item.genres ?? []) {
+      const key = genre.toLocaleLowerCase();
+      genreScores.set(key, (genreScores.get(key) ?? 0) + weight);
+    }
+  }
+
+  return {
+    contentTypeScores,
+    genreScores,
+    hasPreferences: libraryItems.length > 0
+  };
+}
+
+function getLibraryPreferenceWeight(item: LibraryListItem): number {
+  const statuses = item.statuses;
+  if (statuses.includes("not_recommended") || statuses.includes("dropped")) return -3;
+  if (statuses.includes("recommended")) return 7;
+  if (statuses.includes("completed")) return 5 + Math.min(item.watch_count ?? 0, 3);
+  if (statuses.includes("watching")) return 4;
+  return 1;
+}
+
+function scoreRecommendation(
+  item: PopularRecommendation,
+  profile: ReturnType<typeof createPreferenceProfile>,
+  index: number
+): number {
+  const typeScore = profile.contentTypeScores.get(item.content_type) ?? 0;
+  const genreScore = (item.genres ?? []).reduce(
+    (sum, genre) => sum + (profile.genreScores.get(genre.toLocaleLowerCase()) ?? 0),
+    0
+  );
+  const preferenceScore = typeScore * 2 + genreScore;
+  const fallbackTrendScore = Math.max(0, 30 - index);
+  const rankScore = Math.max(0, 20 - item.rank);
+
+  return profile.hasPreferences
+    ? preferenceScore * 10 + rankScore + fallbackTrendScore / 10
+    : rankScore + fallbackTrendScore;
+}
+
+function isRegisteredRecommendation(result: SearchResult, libraryItems: LibraryListItem[]): boolean {
+  return libraryItems.some((item) => {
+    if (item.source_api !== "manual" && `${item.source_api}:${item.source_id}` === createExternalKey(result)) {
+      return true;
+    }
+
+    return isSameLibraryWork(item, result);
+  });
+}
+
+function isSameLibraryWork(item: LibraryListItem, result: SearchResult): boolean {
+  if (item.content_type !== result.content_type) return false;
+  if (item.air_year && result.air_year && item.air_year !== result.air_year) return false;
+
+  const itemTitles = [item.title_primary, item.title_original]
+    .map((title) => normalizeTitleForDedupe(title ?? ""))
+    .filter((title) => title.length >= 2);
+  const resultTitles = normalizedTitleCandidates(result);
+
+  return itemTitles.some((title) => resultTitles.includes(title));
 }
 
 function filterResultsByLibraryStatus(
@@ -341,6 +569,7 @@ function mergeResultFields(left: SearchResult, right: SearchResult): SearchResul
     overview: preferred.overview ?? fallback.overview,
     air_year: preferred.air_year ?? fallback.air_year,
     air_date: preferred.air_date ?? fallback.air_date ?? null,
+    end_date: preferred.end_date ?? fallback.end_date ?? null,
     episode_count: preferred.episode_count ?? fallback.episode_count,
     genres: Array.from(new Set([...(preferred.genres ?? []), ...(fallback.genres ?? [])])),
     has_seasons: preferred.has_seasons || fallback.has_seasons,
@@ -382,6 +611,7 @@ function completenessScore(result: SearchResult): number {
     result.localized_overview,
     result.air_year,
     result.air_date,
+    result.end_date,
     result.episode_count,
     result.title_original
   ].filter(Boolean).length;

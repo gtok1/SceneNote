@@ -1,11 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Ionicons } from "@expo/vector-icons";
-import { Stack, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
+import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import {
+  ArchiveBoxIcon,
+  CompassIcon,
+  HomeTheaterIcon,
+  PersonChatIcon,
+  PinQuoteIcon,
+  UserSettingsIcon
+} from "@/components/icons/FooterIcons";
 import { colors } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
@@ -20,6 +27,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="share/index" />
           <Stack.Screen name="share/[id]" />
           <Stack.Screen name="people/[id]" />
         </Stack>
@@ -130,47 +138,78 @@ function AuthLoadingOverlay() {
 }
 
 const navItems = [
-  { href: "/", label: "홈", icon: "home-outline" },
-  { href: "/search", label: "검색", icon: "search-outline" },
-  { href: "/library", label: "라이브러리", icon: "albums-outline" },
-  { href: "/pins", label: "핀", icon: "pin-outline" },
-  { href: "/people", label: "인물", icon: "star-outline" },
-  { href: "/profile", label: "프로필", icon: "person-outline" }
+  { href: "/", label: "홈", icon: HomeTheaterIcon, ariaLabel: "홈으로 이동" },
+  { href: "/search", label: "검색", icon: CompassIcon, ariaLabel: "검색으로 이동" },
+  { href: "/library", label: "라이브러리", icon: ArchiveBoxIcon, ariaLabel: "라이브러리로 이동" },
+  { href: "/pins", label: "핀", icon: PinQuoteIcon, ariaLabel: "핀으로 이동" },
+  { href: "/people", label: "인물", icon: PersonChatIcon, ariaLabel: "인물로 이동" },
+  { href: "/profile", label: "프로필", icon: UserSettingsIcon, ariaLabel: "프로필로 이동" }
 ] as const;
+
+type NavHref = (typeof navItems)[number]["href"];
 
 function GlobalBottomNav() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useGlobalSearchParams();
   const session = useAuthStore((state) => state.session);
   const segments = useSegments();
+  const [focusedHref, setFocusedHref] = useState<NavHref | null>(null);
+  const activeHref = getActiveNavHref(pathname, searchParams);
 
   if (!session || segments[0] === "(auth)" || segments[0] === "share") return null;
 
   return (
     <View style={styles.bottomNav}>
       {navItems.map((item) => {
-        const active =
-          item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = item.href === activeHref;
+        const Icon = item.icon;
 
         return (
           <Pressable
+            accessibilityLabel={item.ariaLabel}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
+            aria-current={active ? "page" : undefined}
             key={item.href}
+            onBlur={() => setFocusedHref(null)}
+            onFocus={() => setFocusedHref(item.href)}
             onPress={() => router.replace(item.href)}
-            style={styles.navItem}
+            style={({ hovered }) => [
+              styles.navItem,
+              hovered ? styles.navItemHovered : null,
+              focusedHref === item.href ? styles.navItemFocused : null
+            ]}
           >
-            <Ionicons
-              color={active ? colors.primary : colors.textMuted}
-              name={item.icon}
-              size={24}
-            />
+            {active ? <View style={styles.navActiveIndicator} /> : null}
+            <Icon active={active} color={active ? colors.primary : "#64748B"} size={24} />
             <Text style={[styles.navLabel, active ? styles.navLabelActive : null]}>{item.label}</Text>
           </Pressable>
         );
       })}
     </View>
   );
+}
+
+function getActiveNavHref(pathname: string, searchParams: Record<string, unknown>): NavHref | null {
+  const route = pathname.replace(/^\/\(tabs\)/, "") || "/";
+
+  if (route === "/") return "/";
+  if (route === "/search" || route.startsWith("/search/")) return "/search";
+  if (route === "/library" || route.startsWith("/library/")) return "/library";
+  if (route === "/pins" || route.startsWith("/pins/")) return "/pins";
+  if (route === "/people" || route.startsWith("/people/")) return "/people";
+  if (route === "/profile" || route.startsWith("/profile/")) return "/profile";
+
+  if (route === "/content" || route.startsWith("/content/")) {
+    return hasSearchParam(searchParams.source) || hasSearchParam(searchParams.externalId) ? "/search" : "/library";
+  }
+
+  return null;
+}
+
+function hasSearchParam(value: unknown): boolean {
+  return Array.isArray(value) ? value.some(Boolean) : Boolean(value);
 }
 
 const styles = StyleSheet.create({
@@ -190,30 +229,55 @@ const styles = StyleSheet.create({
   },
   bottomNav: {
     alignItems: "center",
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    backgroundColor: "#FFFFFF",
+    borderTopColor: "#E5E7EB",
     borderTopWidth: StyleSheet.hairlineWidth,
     bottom: 0,
     flexDirection: "row",
-    height: 64,
+    height: 72,
     justifyContent: "space-around",
     left: 0,
+    paddingHorizontal: 16,
     position: "absolute",
     right: 0,
     zIndex: 1000
   },
   navItem: {
     alignItems: "center",
+    borderRadius: 14,
     flex: 1,
-    gap: 3,
-    justifyContent: "center"
+    gap: 4,
+    height: 56,
+    justifyContent: "center",
+    maxWidth: 112,
+    minWidth: 72,
+    position: "relative"
+  },
+  navItemHovered: {
+    backgroundColor: "#EFF6FF"
+  },
+  navItemFocused: {
+    outlineColor: colors.primary,
+    outlineOffset: 2,
+    outlineStyle: "solid",
+    outlineWidth: 2
+  },
+  navActiveIndicator: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    height: 3,
+    bottom: 0,
+    position: "absolute",
+    width: 24
   },
   navLabel: {
-    color: colors.textMuted,
+    color: "#64748B",
     fontSize: 12,
-    fontWeight: "700"
+    fontWeight: "500",
+    lineHeight: 12
   },
   navLabelActive: {
-    color: colors.primary
+    color: colors.primary,
+    fontWeight: "700"
   }
 });

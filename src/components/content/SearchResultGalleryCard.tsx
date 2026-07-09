@@ -6,12 +6,14 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
-import { createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 
 interface SearchResultGalleryCardProps {
   result: SearchResult;
   onPress: () => void;
   onAddToLibrary?: () => void;
+  addLabel?: string;
+  isAddDisabled?: boolean;
   libraryItem?: LibraryListItem | null;
 }
 
@@ -19,44 +21,56 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   result,
   onPress,
   onAddToLibrary,
+  addLabel = "추가",
+  isAddDisabled = false,
   libraryItem = null
 }: SearchResultGalleryCardProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
+  const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
   const watchCountLabel = libraryItem
     ? createWatchCountLabel(libraryItem.watch_count, { includeZero: true })
     : null;
 
   return (
     <View style={styles.cell}>
-      <Pressable accessibilityRole="button" onPress={onPress} style={styles.card}>
-        <Image
-          contentFit="cover"
-          source={result.poster_url ? { uri: result.poster_url } : null}
-          style={styles.poster}
-        />
-        <View style={styles.body}>
-          <Text numberOfLines={2} style={styles.title}>
-            {result.title_primary}
-          </Text>
-          <Text numberOfLines={1} style={styles.meta}>
-            {[result.air_year, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
-          </Text>
-          <GenreBadgeList genres={result.genres} maxVisible={2} />
-          {result.matched_people?.length ? (
-            <Text numberOfLines={1} style={styles.matchedPeople}>
-              {result.matched_people.join(", ")}
+      <View style={styles.card}>
+        <Pressable accessibilityRole="button" onPress={onPress} style={styles.mainButton}>
+          <Image
+            contentFit="cover"
+            source={result.poster_url ? { uri: result.poster_url } : null}
+            style={styles.poster}
+          />
+          <View style={styles.body}>
+            <Text numberOfLines={2} style={styles.title}>
+              {result.title_primary}
             </Text>
-          ) : null}
-          <View style={styles.footer}>
-            <Text style={styles.source}>{result.external_source.toUpperCase()}</Text>
-            {onAddToLibrary ? (
-              <Pressable accessibilityRole="button" onPress={onAddToLibrary} style={styles.addButton}>
-                <Text style={styles.addText}>추가</Text>
-              </Pressable>
+            <Text numberOfLines={1} style={styles.meta}>
+              {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+            </Text>
+            <GenreBadgeList genres={result.genres} maxVisible={2} />
+            {result.matched_people?.length ? (
+              <Text numberOfLines={1} style={styles.matchedPeople}>
+                {result.matched_people.join(", ")}
+              </Text>
             ) : null}
           </View>
+        </Pressable>
+
+        <View style={styles.footer}>
+          <Text style={styles.source}>{result.external_source.toUpperCase()}</Text>
+          {onAddToLibrary ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isAddDisabled }}
+              disabled={isAddDisabled}
+              onPress={onAddToLibrary}
+              style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
+            >
+              <Text style={styles.addText}>{addLabel}</Text>
+            </Pressable>
+          ) : null}
         </View>
-      </Pressable>
+      </View>
     </View>
   );
 });
@@ -72,6 +86,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden"
+  },
+  mainButton: {
+    flex: 1
   },
   poster: {
     backgroundColor: colors.surfaceMuted,
@@ -104,7 +121,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.xs,
     justifyContent: "space-between",
-    marginTop: "auto"
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.sm
   },
   source: {
     backgroundColor: colors.surfaceMuted,
@@ -121,6 +139,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs
+  },
+  addButtonDisabled: {
+    opacity: 0.6
   },
   addText: {
     color: colors.surface,

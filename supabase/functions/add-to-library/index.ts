@@ -1,8 +1,8 @@
-import { fetchContentDetail } from "../_shared/externalContent.ts";
+import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
 import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
-import type { ExternalSource, WatchStatus } from "../_shared/types.ts";
+import type { ContentMeta, ExternalSource, SeasonMeta, WatchStatus } from "../_shared/types.ts";
 
 interface AddToLibraryRequest {
   api_source?: ExternalSource;
@@ -21,6 +21,12 @@ const WATCH_STATUS_OPTIONS: WatchStatus[] = [
   "recommended",
   "not_recommended"
 ];
+
+interface SeasonRow {
+  id: string;
+  season_number: number;
+  episode_count: number | null;
+}
 
 function normalizeWatchStatuses(statuses: WatchStatus[] | undefined, fallback: WatchStatus): WatchStatus[] {
   const normalized = Array.from(new Set(statuses?.length ? statuses : [fallback])).filter((status) =>
@@ -121,24 +127,7 @@ Deno.serve(async (req: Request) => {
     return jsonError(503, "API_ERROR", "Failed to fetch content metadata");
   }
 
-  const { data: contentRow, error: contentError } = await adminClient
-    .from("contents")
-    .upsert(
-      {
-        content_type: contentMeta.content_type,
-        source_api: source,
-        source_id: externalId,
-        title_primary: contentMeta.title_primary,
-        title_original: contentMeta.title_original,
-        poster_url: contentMeta.poster_url,
-        overview: contentMeta.overview,
-        air_year: contentMeta.air_year,
-        air_date: contentMeta.air_date
-      },
-      { onConflict: "source_api,source_id" }
-    )
-    .select("id")
-    .single();
+  const { contentRow, error: contentError } = await upsertContent(adminClient, contentMeta, source, externalId);
 
   if (contentError || !contentRow) {
     await logSync(adminClient, {
@@ -173,8 +162,9 @@ Deno.serve(async (req: Request) => {
     return jsonError(500, "DB_ERROR", externalIdError.message);
   }
 
+  let seasonRows: SeasonRow[] = [];
   if (contentMeta.seasons.length > 0) {
-    const { error: seasonsError } = await adminClient.from("seasons").upsert(
+    const { data: upsertedSeasons, error: seasonsError } = await adminClient.from("seasons").upsert(
       contentMeta.seasons.map((season) => ({
         content_id: contentId,
         season_number: season.season_number,
@@ -183,7 +173,7 @@ Deno.serve(async (req: Request) => {
         air_year: season.air_year
       })),
       { onConflict: "content_id,season_number" }
-    );
+    ).select("id,season_number,episode_count");
 
     if (seasonsError) {
       await logSync(adminClient, {
@@ -194,8 +184,18 @@ Deno.serve(async (req: Request) => {
         request_payload: { source, externalId },
         error_message: seasonsError.message
       });
+    } else {
+      seasonRows = (upsertedSeasons ?? []) as SeasonRow[];
     }
   }
+
+  await prefetchFirstSeasonEpisodes(adminClient, {
+    contentId,
+    source,
+    externalId,
+    contentMeta,
+    seasons: seasonRows
+  });
 
   const { data: libraryItem, error: libraryError } = await adminClient
     .from("user_library_items")
@@ -227,6 +227,7 @@ Deno.serve(async (req: Request) => {
     response_snapshot: {
       title_primary: contentMeta.title_primary,
       content_type: contentMeta.content_type,
+      air_date: contentMeta.air_date,
       season_count: contentMeta.seasons.length
     }
   });
@@ -242,6 +243,127 @@ Deno.serve(async (req: Request) => {
     201
   );
 });
+
+function buildContentPayload(
+  contentMeta: ContentMeta,
+  source: ExternalSource,
+  externalId: string,
+  includeDateColumns: boolean
+) {
+  const payload: Record<string, unknown> = {
+    content_type: contentMeta.content_type,
+    source_api: source,
+    source_id: externalId,
+    title_primary: contentMeta.title_primary,
+    title_original: contentMeta.title_original,
+    poster_url: contentMeta.poster_url,
+    overview: contentMeta.overview,
+    air_year: contentMeta.air_year
+  };
+
+  if (includeDateColumns) {
+    payload.air_date = contentMeta.air_date;
+    payload.end_date = contentMeta.end_date;
+  }
+
+  return payload;
+}
+
+async function upsertContent(
+  adminClient: ReturnType<typeof createAdminClient>,
+  contentMeta: ContentMeta,
+  source: ExternalSource,
+  externalId: string
+) {
+  let result = await adminClient
+    .from("contents")
+    .upsert(buildContentPayload(contentMeta, source, externalId, true), { onConflict: "source_api,source_id" })
+    .select("id")
+    .single();
+
+  if (result.error && isMissingDateColumnError(result.error)) {
+    result = await adminClient
+      .from("contents")
+      .upsert(buildContentPayload(contentMeta, source, externalId, false), { onConflict: "source_api,source_id" })
+      .select("id")
+      .single();
+  }
+
+  return {
+    contentRow: result.data,
+    error: result.error
+  };
+}
+
+async function prefetchFirstSeasonEpisodes(
+  adminClient: ReturnType<typeof createAdminClient>,
+  params: {
+    contentId: string;
+    source: ExternalSource;
+    externalId: string;
+    contentMeta: ContentMeta;
+    seasons: SeasonRow[];
+  }
+): Promise<void> {
+  if (params.contentMeta.content_type === "movie") return;
+  if (params.seasons.length === 0) return;
+
+  const firstSeason = [...params.seasons]
+    .filter((season) => season.season_number > 0)
+    .sort((a, b) => a.season_number - b.season_number)[0];
+  if (!firstSeason) return;
+
+  try {
+    const episodes =
+      params.source === "tmdb" || params.source === "tvmaze"
+        ? await fetchEpisodesForSeason({
+            source: params.source,
+            externalId: params.externalId,
+            seasonNumber: firstSeason.season_number,
+            episodeCount: firstSeason.episode_count
+          })
+        : params.contentMeta.air_date
+          ? [
+              {
+                episode_number: 1,
+                title: null,
+                air_date: params.contentMeta.air_date,
+                duration_seconds: null
+              }
+            ]
+          : [];
+    const usefulEpisodes = episodes.filter((episode) => episode.air_date || episode.title || episode.duration_seconds);
+    if (!usefulEpisodes.length) return;
+
+    const { error } = await adminClient.from("episodes").upsert(
+      usefulEpisodes.map((episode) => ({
+        season_id: firstSeason.id,
+        content_id: params.contentId,
+        episode_number: episode.episode_number,
+        title: episode.title,
+        air_date: episode.air_date,
+        duration_seconds: episode.duration_seconds
+      })),
+      { onConflict: "season_id,episode_number" }
+    );
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    await logSync(adminClient, {
+      content_id: params.contentId,
+      api_source: params.source,
+      operation: "prefetch_first_season_episodes",
+      status: "partial",
+      request_payload: { source: params.source, externalId: params.externalId },
+      error_message: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+function isMissingDateColumnError(error: { code?: string; message?: string }): boolean {
+  const message = error.message ?? "";
+  return error.code === "42703" || message.includes("air_date") || message.includes("end_date");
+}
 
 async function logSync(
   adminClient: ReturnType<typeof createAdminClient>,

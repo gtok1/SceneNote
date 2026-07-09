@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { getPrimaryWatchStatus, normalizeWatchStatuses } from "@/constants/status";
@@ -14,11 +16,13 @@ import {
   toggleEpisodeProgress,
   updateLibraryStatus,
   updateLibraryStatuses,
-  updateLibraryWatchCount
+  updateLibraryWatchCount,
+  updateLibraryWatchDates
 } from "@/services/library";
 import { useAuthStore } from "@/stores/authStore";
 import type { Episode, SearchResult } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
+import { filterUpcomingAiringItems } from "@/utils/upcomingAiring";
 
 export function useLibrary(status: LibraryStatusFilter = "all") {
   const user = useAuthStore((state) => state.user);
@@ -29,6 +33,10 @@ export function useLibrary(status: LibraryStatusFilter = "all") {
     enabled: Boolean(user),
     staleTime: 60_000
   });
+}
+
+export function useUpcomingAiring(items: LibraryListItem[] | undefined) {
+  return useMemo(() => filterUpcomingAiringItems(items ?? []), [items]);
 }
 
 export function useContent(contentId: string | undefined) {
@@ -177,6 +185,9 @@ export function useToggleEpisodeProgress(contentId: string | undefined) {
         queryClient.invalidateQueries({
           queryKey: queryKeys.progress.byContent(user.id, contentId)
         });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.library.all(user.id)
+        });
       }
     }
   });
@@ -202,6 +213,39 @@ export function useUpdateLibraryWatchCount() {
     onSuccess: () => {
       if (user) {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id), refetchType: "inactive" });
+      }
+    }
+  });
+}
+
+export function useUpdateLibraryWatchDates() {
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+
+  return useMutation({
+    mutationFn: ({
+      libraryItemId,
+      firstWatchedAt,
+      lastWatchedAt
+    }: {
+      libraryItemId: string;
+      firstWatchedAt: string | null;
+      lastWatchedAt: string | null;
+    }) => updateLibraryWatchDates(libraryItemId, { firstWatchedAt, lastWatchedAt }),
+    onMutate: async ({ libraryItemId, firstWatchedAt, lastWatchedAt }) => {
+      if (!user) return;
+      await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
+      const snapshots = snapshotLibraryQueries(queryClient, user.id);
+      updateLibraryItemWatchDatesInCache(queryClient, user.id, libraryItemId, firstWatchedAt, lastWatchedAt);
+      return { snapshots };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+    },
+    onSuccess: () => {
+      if (user) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id), refetchType: "inactive" });
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
       }
     }
   });
@@ -287,6 +331,31 @@ function updateLibraryItemWatchCountInCache(
               watch_count: item.statuses.includes("completed")
                 ? Math.max(1, Math.floor(watchCount))
                 : Math.max(0, Math.floor(watchCount))
+            }
+          : item
+      )
+  );
+}
+
+function updateLibraryItemWatchDatesInCache(
+  queryClient: QueryClient,
+  userId: string,
+  libraryItemId: string,
+  firstWatchedAt: string | null,
+  lastWatchedAt: string | null
+) {
+  const updatedAt = new Date().toISOString();
+
+  queryClient.setQueriesData<LibraryListItem[]>(
+    { queryKey: queryKeys.library.all(userId) },
+    (items) =>
+      items?.map((item) =>
+        item.library_item_id === libraryItemId
+          ? {
+              ...item,
+              first_watched_at: firstWatchedAt,
+              last_watched_at: lastWatchedAt,
+              updated_at: updatedAt
             }
           : item
       )

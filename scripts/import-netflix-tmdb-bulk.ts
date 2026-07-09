@@ -65,6 +65,8 @@ interface ContentRecord {
   title_primary: string;
   title_original: string | null;
   air_year: number | null;
+  air_date: string | null;
+  end_date: string | null;
   content_external_ids?: { api_source: ExternalSource; external_id: string }[] | null;
   content_titles?: { language_code: string; title: string }[] | null;
 }
@@ -76,6 +78,8 @@ interface LibraryRecord {
   status: WatchStatus;
   status_flags?: WatchStatus[] | null;
   watch_count?: number | null;
+  first_watched_at?: string | null;
+  last_watched_at?: string | null;
 }
 
 interface TmdbSearchCandidate {
@@ -104,6 +108,7 @@ interface TmdbDetail {
   overview?: string | null;
   release_date?: string | null;
   first_air_date?: string | null;
+  last_air_date?: string | null;
   genres?: { id?: number; name?: string | null }[] | null;
   origin_country?: string[] | null;
 }
@@ -285,7 +290,8 @@ async function processRow({
     const statusResult = await maybeUpsertCompletedStatus(supabase, {
       commit: options.commit,
       userId,
-      contentId: providedContent.id
+      contentId: providedContent.id,
+      row
     });
     return {
       rowResult: {
@@ -321,7 +327,8 @@ async function processRow({
     const statusResult = await maybeUpsertCompletedStatus(supabase, {
       commit: options.commit,
       userId,
-      contentId: existingBeforeTmdb.content.id
+      contentId: existingBeforeTmdb.content.id,
+      row
     });
     return {
       rowResult: {
@@ -365,7 +372,8 @@ async function processRow({
     const statusResult = await maybeUpsertCompletedStatus(supabase, {
       commit: options.commit,
       userId,
-      contentId: existingAfterTmdb.id
+      contentId: existingAfterTmdb.id,
+      row
     });
     return {
       rowResult: {
@@ -410,7 +418,8 @@ async function processRow({
   const statusResult = await maybeUpsertCompletedStatus(supabase, {
     commit: true,
     userId,
-    contentId: content.id
+    contentId: content.id,
+    row
   });
 
   return {
@@ -597,13 +606,14 @@ async function maybeUpsertCompletedStatus(
     commit: boolean;
     userId: string;
     contentId: string;
+    row: WorkRow;
   }
 ): Promise<string> {
   if (!params.commit) return "would_update_completed";
 
   const { data: existing, error: lookupError } = await supabase
     .from("user_library_items")
-    .select("id,user_id,content_id,status,status_flags,watch_count")
+    .select("id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at")
     .eq("user_id", params.userId)
     .eq("content_id", params.contentId)
     .maybeSingle();
@@ -613,6 +623,7 @@ async function maybeUpsertCompletedStatus(
   const existingRow = existing as LibraryRecord | null;
   const nextFlags = completedStatusFlags(existingRow?.status_flags ?? (existingRow ? [existingRow.status] : []));
   const watchCount = Math.max(1, existingRow?.watch_count ?? 0);
+  const watchDatePatch = createBulkWatchDatePatch(params.row);
 
   if (existingRow) {
     const { error } = await supabase
@@ -620,7 +631,8 @@ async function maybeUpsertCompletedStatus(
       .update({
         status: "completed",
         status_flags: nextFlags,
-        watch_count: watchCount
+        watch_count: watchCount,
+        ...watchDatePatch
       })
       .eq("id", existingRow.id);
     if (error) throw new Error(error.message);
@@ -632,7 +644,8 @@ async function maybeUpsertCompletedStatus(
     content_id: params.contentId,
     status: "completed",
     status_flags: ["completed"],
-    watch_count: 1
+    watch_count: 1,
+    ...watchDatePatch
   });
 
   if (error) {
@@ -653,6 +666,7 @@ async function createOrUpdateTmdbContent(
   const contentType = isMovie ? "movie" : inferTmdbTvContentType(detail);
   const titlePrimary = (isMovie ? detail.title : detail.name)?.trim() || "제목 없음";
   const titleOriginal = ((isMovie ? detail.original_title : detail.original_name) ?? null)?.trim() || null;
+  const airDate = dateOnly(isMovie ? detail.release_date : detail.first_air_date);
 
   const { data, error } = await supabase
     .from("contents")
@@ -665,11 +679,13 @@ async function createOrUpdateTmdbContent(
         title_original: titleOriginal,
         poster_url: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
         overview: cleanText(detail.overview),
-        air_year: yearFromDate(isMovie ? detail.release_date : detail.first_air_date)
+        air_year: yearFromDate(isMovie ? detail.release_date : detail.first_air_date),
+        air_date: airDate,
+        end_date: isMovie ? airDate : dateOnly(detail.last_air_date)
       },
       { onConflict: "source_api,source_id" }
     )
-    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year")
+    .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date")
     .single();
 
   if (error || !data) throw new Error(error?.message ?? "content upsert failed");
@@ -720,7 +736,7 @@ async function fetchAllContents(supabase: SupabaseClient): Promise<ContentRecord
     const { data, error } = await supabase
       .from("contents")
       .select(
-        "id,content_type,source_api,source_id,title_primary,title_original,air_year,content_external_ids(api_source,external_id),content_titles(language_code,title)"
+        "id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date,content_external_ids(api_source,external_id),content_titles(language_code,title)"
       )
       .range(from, from + pageSize - 1)
       .order("created_at", { ascending: true });
@@ -962,6 +978,16 @@ export function completedStatusFlags(existingFlags: WatchStatus[]): WatchStatus[
   );
 }
 
+function createBulkWatchDatePatch(row: WorkRow): Record<string, string> {
+  const firstWatchedAt = row.firstWatchedDate ?? row.lastWatchedDate;
+  const lastWatchedAt = row.lastWatchedDate ?? row.firstWatchedDate;
+  const patch: Record<string, string> = {};
+
+  if (firstWatchedAt) patch.first_watched_at = firstWatchedAt;
+  if (lastWatchedAt) patch.last_watched_at = lastWatchedAt;
+  return patch;
+}
+
 function inferTmdbTvContentType(detail: TmdbDetail): ContentType {
   if (detail.genres?.some((genre) => genre.id === 16 || /animation|애니메이션/i.test(genre.name ?? ""))) return "anime";
   if (detail.origin_country?.includes("KR")) return "kdrama";
@@ -1012,6 +1038,12 @@ function yearFromDate(value: unknown): number | null {
   if (typeof value !== "string" || value.length < 4) return null;
   const year = Number.parseInt(value.slice(0, 4), 10);
   return Number.isFinite(year) ? year : null;
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
 function parseSheetRows(sheetXml: string, sharedStrings: string[]): JsonRecord[] {

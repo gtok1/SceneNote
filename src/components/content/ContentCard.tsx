@@ -6,21 +6,30 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibraryItemCast } from "@/hooks/useLibraryItemCast";
 import type { LibraryListItem } from "@/types/library";
-import { createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createContinueWatchingLabel } from "@/utils/continueWatching";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { WatchStatusBadge } from "./WatchStatusBadge";
 
 interface ContentCardProps {
   item: LibraryListItem;
   onPress: () => void;
+  onOpenEpisodes?: () => void;
   compact?: boolean;
 }
 
-export const ContentCard = memo(function ContentCard({ item, onPress, compact = false }: ContentCardProps) {
+export const ContentCard = memo(function ContentCard({
+  item,
+  onPress,
+  onOpenEpisodes,
+  compact = false
+}: ContentCardProps) {
   const cast = useLibraryItemCast(item, 2);
   const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
+  const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
+  const continueLabel = createContinueWatchingLabel(item);
 
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={[styles.card, compact ? styles.cardCompact : null]}>
@@ -34,7 +43,7 @@ export const ContentCard = memo(function ContentCard({ item, onPress, compact = 
           {item.title_primary}
         </Text>
         <Text numberOfLines={1} style={[styles.meta, compact ? styles.metaCompact : null]}>
-          {[item.air_year, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+          {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
         </Text>
         <GenreBadgeList genres={item.genres} maxVisible={2} />
         {cast.length ? (
@@ -47,6 +56,21 @@ export const ContentCard = memo(function ContentCard({ item, onPress, compact = 
           <Text numberOfLines={1} style={[styles.review, compact ? styles.reviewCompact : null]}>
             {reviewLabel}
           </Text>
+        ) : null}
+        {continueLabel && onOpenEpisodes ? (
+          <Pressable
+            accessibilityLabel={`${item.title_primary} 이어보기`}
+            accessibilityRole="button"
+            onPress={(event) => {
+              event.stopPropagation();
+              onOpenEpisodes();
+            }}
+            style={[styles.continueButton, compact ? styles.continueButtonCompact : null]}
+          >
+            <Text numberOfLines={1} style={[styles.continueText, compact ? styles.continueTextCompact : null]}>
+              {continueLabel}
+            </Text>
+          </Pressable>
         ) : null}
         <View style={styles.badges}>
           {item.statuses.map((status) => (
@@ -129,6 +153,25 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   reviewCompact: {
+    fontSize: 11
+  },
+  continueButton: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5
+  },
+  continueButtonCompact: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 3
+  },
+  continueText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  continueTextCompact: {
     fontSize: 11
   }
 });

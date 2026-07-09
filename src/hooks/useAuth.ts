@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 
 import { queryClient } from "@/lib/query";
 import { supabase } from "@/lib/supabase";
+import { deleteAccount as requestDeleteAccount } from "@/services/account";
 import { useAuthStore } from "@/stores/authStore";
 import { getAuthRedirectUrl } from "@/utils/authLinks";
 
@@ -67,6 +68,17 @@ export function useAuth() {
     }
   });
 
+  const deleteAccount = useMutation({
+    mutationFn: async () => {
+      await requestDeleteAccount();
+      await supabase.auth.signOut({ scope: "local" });
+    },
+    onSuccess: () => {
+      reset();
+      queryClient.clear();
+    }
+  });
+
   return {
     session,
     user,
@@ -76,6 +88,7 @@ export function useAuth() {
     signUp,
     requestPasswordReset,
     updatePassword,
-    signOut
+    signOut,
+    deleteAccount
   };
 }

@@ -17,8 +17,8 @@ import { PieChart } from "react-native-gifted-charts";
 import { GENRE_COLORS } from "@/constants/genreColors";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useGenreStats } from "@/hooks/useGenreStats";
-import type { GenreStat } from "@/types/genre";
-import { getGenreDisplayName } from "@/utils/genre";
+import { useLibrary } from "@/hooks/useLibrary";
+import { createDisplayGenreStats } from "@/utils/profileStats";
 
 const GRAPH_COUNT = 3;
 
@@ -26,6 +26,7 @@ export function GenreStatsSection() {
   const { width } = useWindowDimensions();
   const pageWidth = Math.max(280, width - spacing.lg * 2);
   const { data: stats = [], isLoading } = useGenreStats();
+  const library = useLibrary("all");
   const [activePage, setActivePage] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -74,7 +75,7 @@ export function GenreStatsSection() {
     [activePage, pageWidth, scrollToPage]
   );
 
-  if (isLoading) {
+  if (isLoading || library.isLoading) {
     return (
       <View style={styles.empty}>
         <ActivityIndicator color={colors.primary} />
@@ -85,8 +86,10 @@ export function GenreStatsSection() {
   if (stats.length === 0) return <EmptyStats />;
 
   const displayStats = createDisplayGenreStats(stats);
-  const totalCount = displayStats.reduce((sum, stat) => sum + stat.count, 0);
+  const totalLibraryItems = library.data?.length ?? 0;
   const topStats = displayStats.slice(0, 10);
+  // PieChart segment ratios use the displayed genre-count sum as the denominator,
+  // so the visible segments still add up to 100% even when one work has multiple genres.
   const donutData = topStats.map((item, index) => ({
     value: item.count,
     label: item.genre_name,
@@ -95,7 +98,7 @@ export function GenreStatsSection() {
 
   return (
     <View style={styles.section}>
-      <Text style={styles.totalLabel}>총 {totalCount}개 작품 등록됨</Text>
+      <Text style={styles.totalLabel}>총 {totalLibraryItems}개 작품 · 장르 기준 분포</Text>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -111,7 +114,7 @@ export function GenreStatsSection() {
             <PieChart
               centerLabelComponent={() => (
                 <View style={styles.donutCenter}>
-                  <Text style={styles.donutCount}>{totalCount}</Text>
+                  <Text style={styles.donutCount}>{totalLibraryItems}</Text>
                   <Text style={styles.donutLabel}>작품</Text>
                 </View>
               )}
@@ -240,21 +243,6 @@ function EmptyStats() {
 
 function genreColor(index: number): string {
   return GENRE_COLORS[index % GENRE_COLORS.length] ?? colors.primary;
-}
-
-function createDisplayGenreStats(stats: GenreStat[]): GenreStat[] {
-  const counts = new Map<string, number>();
-
-  stats.forEach((stat) => {
-    const displayName = getGenreDisplayName(stat.genre_name);
-    if (!displayName) return;
-
-    counts.set(displayName, (counts.get(displayName) ?? 0) + Number(stat.count));
-  });
-
-  return Array.from(counts, ([genre_name, count]) => ({ genre_name, count })).sort(
-    (a, b) => b.count - a.count || a.genre_name.localeCompare(b.genre_name, "ko-KR")
-  );
 }
 
 const styles = StyleSheet.create({

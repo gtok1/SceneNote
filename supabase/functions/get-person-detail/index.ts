@@ -20,6 +20,7 @@ interface PersonCredit {
   poster_url: string | null;
   content_type: ContentType;
   air_year: number | null;
+  air_date: string | null;
   role: string | null;
 }
 
@@ -142,6 +143,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
         ? "movie"
         : inferTmdbTvContentType({ originCountry: item.origin_country, genreIds: item.genre_ids }),
       air_year: yearFromDate(item.release_date ?? item.first_air_date),
+      air_date: dateOnly(item.release_date ?? item.first_air_date),
       role: item.character?.trim() || null
     }));
   const displayName = detail.name?.trim() || "Unknown";
@@ -212,6 +214,8 @@ const ANILIST_STAFF_DETAIL_QUERY = `
             }
             startDate {
               year
+              month
+              day
             }
             episodes
             format
@@ -245,7 +249,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
               id: number;
               title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
               coverImage?: { large?: string | null } | null;
-              startDate?: { year?: number | null } | null;
+              startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
               format?: string | null;
             } | null;
           }[] | null;
@@ -266,7 +270,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
               id: number;
               title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
               coverImage?: { large?: string | null } | null;
-              startDate?: { year?: number | null } | null;
+              startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
               format?: string | null;
             } | null;
           }[] | null;
@@ -328,6 +332,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
         poster_url: media.coverImage?.large ?? null,
         content_type: "anime",
         air_year: media.startDate?.year ?? null,
+        air_date: dateFromParts(media.startDate),
         role
       };
     });
@@ -466,6 +471,7 @@ async function enrichAniListCreditWithKoreanTitle(
       return {
         ...credit,
         title,
+        air_date: dateOnly(match.first_air_date ?? match.release_date) ?? credit.air_date,
         poster_url: match?.poster_path
           ? `https://image.tmdb.org/t/p/w342${match.poster_path}`
           : credit.poster_url
@@ -494,6 +500,19 @@ function yearFromDate(value: unknown): number | null {
   if (typeof value !== "string" || value.length < 4) return null;
   const year = Number.parseInt(value.slice(0, 4), 10);
   return Number.isFinite(year) ? year : null;
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
+function dateFromParts(date?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
+  if (!date?.year || !date.month) return null;
+  const month = String(date.month).padStart(2, "0");
+  const day = String(date.day ?? 1).padStart(2, "0");
+  return `${date.year}-${month}-${day}`;
 }
 
 function formatAniListDate(date?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
@@ -684,9 +703,15 @@ function isCloseYear(candidate: number | null, expected?: number | null): boolea
 
 function sortCreditsByDate(credits: PersonCredit[]): PersonCredit[] {
   return [...credits].sort((a, b) => {
-    const bYear = b.air_year ?? -1;
-    const aYear = a.air_year ?? -1;
-    if (bYear !== aYear) return bYear - aYear;
+    const bMonth = parseYearMonthSortValue(b.air_date, b.air_year);
+    const aMonth = parseYearMonthSortValue(a.air_date, a.air_year);
+    if (bMonth !== aMonth) return bMonth - aMonth;
     return a.title.localeCompare(b.title);
   });
+}
+
+function parseYearMonthSortValue(airDate?: string | null, airYear?: number | null): number {
+  const match = typeof airDate === "string" ? /^(\d{4})-(\d{2})/.exec(airDate) : null;
+  if (match?.[1] && match[2]) return Number.parseInt(`${match[1]}${match[2]}`, 10);
+  return typeof airYear === "number" && Number.isFinite(airYear) ? airYear * 100 : -1;
 }

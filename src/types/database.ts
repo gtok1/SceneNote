@@ -120,6 +120,7 @@ export type Database = {
           air_year: number | null
           content_type: Database["public"]["Enums"]["content_type"]
           created_at: string
+          end_date: string | null
           id: string
           overview: string | null
           poster_url: string | null
@@ -134,6 +135,7 @@ export type Database = {
           air_year?: number | null
           content_type: Database["public"]["Enums"]["content_type"]
           created_at?: string
+          end_date?: string | null
           id?: string
           overview?: string | null
           poster_url?: string | null
@@ -148,6 +150,7 @@ export type Database = {
           air_year?: number | null
           content_type?: Database["public"]["Enums"]["content_type"]
           created_at?: string
+          end_date?: string | null
           id?: string
           overview?: string | null
           poster_url?: string | null
@@ -630,7 +633,9 @@ export type Database = {
         Row: {
           added_at: string
           content_id: string
+          first_watched_at: string | null
           id: string
+          last_watched_at: string | null
           status: Database["public"]["Enums"]["watch_status"]
           status_flags: Database["public"]["Enums"]["watch_status"][]
           updated_at: string
@@ -640,7 +645,9 @@ export type Database = {
         Insert: {
           added_at?: string
           content_id: string
+          first_watched_at?: string | null
           id?: string
+          last_watched_at?: string | null
           status?: Database["public"]["Enums"]["watch_status"]
           status_flags?: Database["public"]["Enums"]["watch_status"][]
           updated_at?: string
@@ -650,7 +657,9 @@ export type Database = {
         Update: {
           added_at?: string
           content_id?: string
+          first_watched_at?: string | null
           id?: string
+          last_watched_at?: string | null
           status?: Database["public"]["Enums"]["watch_status"]
           status_flags?: Database["public"]["Enums"]["watch_status"][]
           updated_at?: string

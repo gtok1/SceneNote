@@ -20,6 +20,7 @@ interface SearchResult {
   overview: string | null;
   localized_overview?: string | null;
   air_year: number | null;
+  air_date: string | null;
   has_seasons: boolean;
   episode_count: number | null;
   matched_people?: string[];
@@ -200,6 +201,7 @@ function mapTmdbCreditToSearchResult(item: TmdbCreditItem): SearchResult {
     poster_url: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
     overview: cleanText(item.overview),
     air_year: yearFromDate(item.release_date ?? item.first_air_date),
+    air_date: dateOnly(item.release_date ?? item.first_air_date),
     has_seasons: item.media_type !== "movie",
     episode_count: null,
     matched_people: item.matched_person_name ? [item.matched_person_name] : []
@@ -219,7 +221,11 @@ const STAFF_QUERY = `
             title { romaji english native }
             coverImage { large }
             description(asHtml: false)
-            startDate { year }
+            startDate {
+              year
+              month
+              day
+            }
             episodes
             format
           }
@@ -244,7 +250,7 @@ async function searchAniListStaff(query: string): Promise<{ people: PersonResult
               title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
               coverImage?: { large?: string | null } | null;
               description?: string | null;
-              startDate?: { year?: number | null } | null;
+              startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
               episodes?: number | null;
               format?: string | null;
             }[] | null;
@@ -285,6 +291,7 @@ async function searchAniListStaff(query: string): Promise<{ people: PersonResult
       poster_url: media.coverImage?.large ?? null,
       overview: cleanText(media.description),
       air_year: media.startDate?.year ?? null,
+      air_date: dateFromParts(media.startDate),
       has_seasons: media.format !== "MOVIE",
       episode_count: media.episodes ?? null,
       matched_people: [person.name?.native?.trim() || person.name?.full?.trim() || ""].filter(Boolean)
@@ -316,6 +323,19 @@ function yearFromDate(value: unknown): number | null {
   if (typeof value !== "string" || value.length < 4) return null;
   const year = Number.parseInt(value.slice(0, 4), 10);
   return Number.isFinite(year) ? year : null;
+}
+
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
+function dateFromParts(date?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
+  if (!date?.year || !date.month) return null;
+  const month = String(date.month).padStart(2, "0");
+  const day = String(date.day ?? 1).padStart(2, "0");
+  return `${date.year}-${month}-${day}`;
 }
 
 function dedupePeople(people: PersonResult[]): PersonResult[] {

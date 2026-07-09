@@ -71,11 +71,25 @@ interface AniListResponse {
 
 interface TmdbSearchResponse {
   results?: {
+    id?: number | null;
     name?: string | null;
     overview?: string | null;
     poster_path?: string | null;
     first_air_date?: string | null;
   }[];
+}
+
+interface TmdbTranslationResponse {
+  translations?: {
+    translations?: {
+      iso_639_1?: string | null;
+      iso_3166_1?: string | null;
+      data?: {
+        name?: string | null;
+        title?: string | null;
+      } | null;
+    }[];
+  };
 }
 
 export async function searchAniList({
@@ -143,9 +157,8 @@ function normalizeAniListItem(item: AniListMedia): SearchResult {
 function dateFromParts(parts?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
   const year = parts?.year;
   const month = parts?.month;
-  const day = parts?.day;
-  if (!year || !month || !day) return null;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!year || !month) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(parts?.day ?? 1).padStart(2, "0")}`;
 }
 
 async function enrichWithTmdbKorean(
@@ -178,10 +191,13 @@ async function enrichWithTmdbKorean(
       const payload = (await response.json()) as TmdbSearchResponse;
       const tmdb = payload.results?.[0];
       if (!tmdb) continue;
+      const koreanTitle = typeof tmdb.id === "number"
+        ? await fetchTmdbKoreanTitle(tmdb.id, apiKey, signal)
+        : null;
 
       return {
         ...result,
-        title_primary: tmdb.name?.trim() || result.title_primary,
+        title_primary: (koreanTitle ?? tmdb.name?.trim()) || result.title_primary,
         poster_url: tmdb.poster_path
           ? `https://image.tmdb.org/t/p/w500${tmdb.poster_path}`
           : result.poster_url,
@@ -194,6 +210,35 @@ async function enrichWithTmdbKorean(
   }
 
   return result;
+}
+
+async function fetchTmdbKoreanTitle(
+  tmdbId: number,
+  apiKey: string,
+  signal: AbortSignal
+): Promise<string | null> {
+  const url = new URL(`https://api.themoviedb.org/3/tv/${tmdbId}`);
+  url.searchParams.set("language", TMDB_LANGUAGE);
+  url.searchParams.set("append_to_response", "translations");
+
+  try {
+    const response = await fetch(url, {
+      headers: applyTmdbAuth(url, apiKey),
+      signal
+    });
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as TmdbTranslationResponse;
+    const translations = payload.translations?.translations ?? [];
+    const korean = translations.find(
+      (translation) => translation.iso_639_1 === "ko" || translation.iso_3166_1 === "KR"
+    );
+    const title = korean?.data?.name?.trim() || korean?.data?.title?.trim();
+
+    return title && hasHangul(title) ? title : null;
+  } catch {
+    return null;
+  }
 }
 
 function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
@@ -212,4 +257,8 @@ function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
 
 function looksLikeJwt(value: string): boolean {
   return value.startsWith("eyJ") || value.split(".").length === 3;
+}
+
+function hasHangul(value: string): boolean {
+  return /[가-힣]/.test(value);
 }

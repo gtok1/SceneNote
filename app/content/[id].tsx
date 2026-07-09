@@ -26,7 +26,8 @@ import { useAddFavoritePerson, useFavoritePeople } from "@/hooks/usePeople";
 import { useWatchProviders } from "@/hooks/useWatchProviders";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
-import { createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 
 const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
@@ -42,10 +43,22 @@ export default function ContentDetailScreen() {
     overview?: string;
     contentType?: SearchResult["content_type"];
     airYear?: string;
+    airDate?: string;
+    endDate?: string;
     hasSeasons?: string;
     episodeCount?: string;
+    status?: string;
+    libraryType?: string;
+    genre?: string;
+    rating?: string;
+    q?: string;
+    year?: string;
+    sort?: string;
+    view?: string;
   }>();
   const router = useRouter();
+  const libraryRouteState = parseLibraryRouteParams(params);
+  const libraryReturnParams = createLibraryRouteParams(libraryRouteState, libraryRouteState.viewMode);
   const isExternal = Boolean(params.source && params.externalId);
   const content = useContent(isExternal ? undefined : params.id);
   const library = useLibrary("all");
@@ -80,6 +93,9 @@ export default function ContentDetailScreen() {
   const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
   const updateWatchCount = useUpdateLibraryWatchCount();
+  const openLibraryList = () => {
+    router.replace({ pathname: "/library", params: libraryReturnParams });
+  };
 
   const externalResult: SearchResult | null =
     isExternal && params.source && params.externalId
@@ -92,6 +108,8 @@ export default function ContentDetailScreen() {
           poster_url: params.posterUrl || null,
           overview: params.overview || null,
           air_year: params.airYear ? Number(params.airYear) : null,
+          air_date: params.airDate || null,
+          end_date: params.endDate || null,
           has_seasons: params.hasSeasons === "true",
           episode_count: params.episodeCount ? Number(params.episodeCount) : null
         }
@@ -109,6 +127,8 @@ export default function ContentDetailScreen() {
           externalResult.overview,
         contentType: externalDetail.data?.content.content_type ?? externalResult.content_type,
         airYear: externalDetail.data?.content.air_year ?? externalResult.air_year,
+        airDate: externalDetail.data?.content.air_date ?? externalResult.air_date ?? null,
+        endDate: externalDetail.data?.content.end_date ?? externalResult.end_date ?? null,
         hasSeasons: externalDetail.data?.content.has_seasons ?? externalResult.has_seasons,
         episodeCount: externalDetail.data?.content.episode_count ?? externalResult.episode_count,
         genres: externalDetail.data?.content.genres ?? externalResult.genres ?? [],
@@ -126,6 +146,8 @@ export default function ContentDetailScreen() {
             dbContent.overview,
           contentType: externalDetail.data?.content.content_type ?? dbContent.content_type,
           airYear: externalDetail.data?.content.air_year ?? dbContent.air_year,
+          airDate: externalDetail.data?.content.air_date ?? dbContent.air_date,
+          endDate: externalDetail.data?.content.end_date ?? dbContent.end_date,
           hasSeasons: externalDetail.data?.content.has_seasons ?? dbContent.content_type !== "movie",
           episodeCount: externalDetail.data?.content.episode_count ?? libraryItem?.episode_count ?? null,
           genres: externalDetail.data?.content.genres ?? dbContent.genres ?? libraryItem?.genres ?? [],
@@ -174,7 +196,7 @@ export default function ContentDetailScreen() {
     deleteLibraryItem.mutate(
       { libraryItemId: libraryItem.library_item_id },
       {
-        onSuccess: () => router.replace("/library"),
+        onSuccess: openLibraryList,
         onError: (error) => Alert.alert("삭제 실패", error.message)
       }
     );
@@ -226,6 +248,7 @@ export default function ContentDetailScreen() {
     favoritePeople.data?.map((person) => `${person.source}:${person.external_id}`) ?? []
   );
   const resolvedEpisodeCount = view.episodeCount ?? libraryItem?.episode_count ?? null;
+  const airDateLabel = createAirDateLabel(view.airDate, view.airYear);
   const episodeLabel = createEpisodeCountLabel(resolvedEpisodeCount);
   const watchCountLabel = createWatchCountLabel(libraryItem?.watch_count, {
     includeZero: Boolean(libraryItem)
@@ -248,7 +271,7 @@ export default function ContentDetailScreen() {
         <Text style={styles.title}>{view.title}</Text>
         {view.originalTitle ? <Text style={styles.original}>{view.originalTitle}</Text> : null}
         <Text style={styles.meta}>
-          {[view.airYear, view.contentType, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+          {[airDateLabel, view.contentType, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
         </Text>
         {externalDetail.isError ? (
           <Text style={styles.warning}>상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다.</Text>
@@ -377,7 +400,18 @@ export default function ContentDetailScreen() {
           </View>
         ) : null}
 
-        {libraryItem ? <ContentReviewEditor contentId={libraryItem.content_id} /> : null}
+        {libraryItem ? (
+          <ContentReviewEditor
+            contentId={libraryItem.content_id}
+            contentAirDate={view.airDate}
+            contentEndDate={view.endDate}
+            contentAirYear={view.airYear}
+            firstWatchedAt={libraryItem.first_watched_at}
+            lastWatchedAt={libraryItem.last_watched_at}
+            libraryItemId={libraryItem.library_item_id}
+            onSaved={openLibraryList}
+          />
+        ) : null}
 
         {!externalResult || libraryItem ? (
           <View style={styles.actions}>
@@ -419,6 +453,13 @@ export default function ContentDetailScreen() {
               style={styles.secondaryButton}
             >
               <Text style={styles.secondaryText}>핀 목록</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={openLibraryList}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryText}>목록</Text>
             </Pressable>
           </View>
         ) : null}

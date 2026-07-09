@@ -25,7 +25,7 @@ export const queryKeys = {
       ["search", query, mediaType, page] as const
   },
   recommendations: {
-    popular: (userId: string) => ["recommendations", userId, "popular"] as const
+    popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const
   },
   library: {
     all: (userId: string) => ["library", userId] as const,
@@ -60,6 +60,7 @@ export const queryKeys = {
       ["reviews", userId, "content", contentId] as const
   },
   profile: {
+    detail: (userId: string) => ["profile", userId, "detail"] as const,
     stats: (userId: string) => ["profile", userId, "stats"] as const
   },
   genreStats: (userId: string) => ["genre-stats", userId] as const

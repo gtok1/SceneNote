@@ -31,6 +31,12 @@ interface DirectLibraryShareRow {
   created_at: string;
 }
 
+interface OptionalWebShareNavigator {
+  share?: (data: { title?: string; text?: string; url?: string }) => Promise<void>;
+}
+
+export type LibraryShareDeliveryResult = "shared" | "copied" | "ready";
+
 const SHARE_TABLE_MISSING_MESSAGE =
   "공유 테이블이 아직 DB에 없습니다. Supabase 마이그레이션 0012_library_shares.sql을 적용한 뒤 다시 시도해 주세요.";
 
@@ -49,11 +55,11 @@ export async function createLibraryShare(params: {
 
   if (!error && data) return toLibraryShareSummary(data);
 
-  if (error && shouldFallbackToDirectInsert(error.message)) {
+  if (error && shouldFallbackToDirectShare(error)) {
     return createLibraryShareDirectly(params);
   }
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(toFunctionErrorMessage(error));
   throw new Error("공유 링크 생성 응답이 비어 있습니다.");
 }
 
@@ -66,14 +72,29 @@ function toLibraryShareSummary(data: CreateLibraryShareResponse): LibraryShareSu
   };
 }
 
-function shouldFallbackToDirectInsert(message: string): boolean {
+function shouldFallbackToDirectShare(error: unknown): boolean {
+  const status = getFunctionHttpStatus(error);
+  if (status === 404) return true;
+
+  const message = toFunctionErrorMessage(error);
   return [
     "Failed to send a request to the Edge Function",
     "FunctionsFetchError",
     "NetworkError",
     "Load failed",
+    "Function not found",
+    "404",
     "fetch"
   ].some((needle) => message.toLocaleLowerCase().includes(needle.toLocaleLowerCase()));
+}
+
+function getFunctionHttpStatus(error: unknown): number | null {
+  const context = (error as { context?: { status?: unknown } | null } | null)?.context;
+  return typeof context?.status === "number" ? context.status : null;
+}
+
+function toFunctionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function createLibraryShareDirectly(params: {
@@ -135,11 +156,11 @@ export async function getLibraryShare(id: string): Promise<LibraryShareDetail> {
     body: { id }
   });
 
-  if (error && shouldFallbackToDirectInsert(error.message)) {
+  if (error && shouldFallbackToDirectShare(error)) {
     return getLibraryShareDirectly(id);
   }
 
-  if (error) throw new Error(toCreateShareErrorMessage(error.message));
+  if (error) throw new Error(toCreateShareErrorMessage(toFunctionErrorMessage(error)));
   if (!data) throw new Error("공유 목록 응답이 비어 있습니다.");
 
   return {
@@ -182,15 +203,43 @@ async function getLibraryShareDirectly(id: string): Promise<LibraryShareDetail> 
 }
 
 export function buildLibraryShareUrl(shareId: string): string {
+  const path = `/share?id=${encodeURIComponent(shareId)}`;
   if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}/share/${shareId}`;
+    return `${window.location.origin}${path}`;
   }
 
-  return `/share/${shareId}`;
+  return path;
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return false;
   await navigator.clipboard.writeText(text);
   return true;
+}
+
+export async function shareLibraryUrl(params: {
+  title: string;
+  url: string;
+}): Promise<LibraryShareDeliveryResult> {
+  if (typeof navigator !== "undefined") {
+    const webNavigator = navigator as OptionalWebShareNavigator;
+    if (webNavigator.share) {
+      try {
+        await webNavigator.share({
+          title: params.title,
+          text: "SceneNote 라이브러리 공유 목록",
+          url: params.url
+        });
+        return "shared";
+      } catch (error) {
+        if (isShareCancelled(error)) return "ready";
+      }
+    }
+  }
+
+  return (await copyTextToClipboard(params.url)) ? "copied" : "ready";
+}
+
+function isShareCancelled(error: unknown): boolean {
+  return typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
 }

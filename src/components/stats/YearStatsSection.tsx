@@ -3,33 +3,37 @@ import { ActivityIndicator, type DimensionValue, Pressable, StyleSheet, Text, Vi
 
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
-import type { LibraryListItem, WatchStatus } from "@/types/library";
+import type { LibraryListItem } from "@/types/library";
+import {
+  countItemsWithWatchedDate,
+  isWatchedLibraryItem,
+  yearFromDate
+} from "@/utils/profileStats";
 
 type YearStatsMode = "recorded" | "aired";
 
 interface YearStat {
-  year: number;
+  year: number | null;
   itemCount: number;
   watchCount: number;
 }
 
-const WATCHED_STATUSES = new Set<WatchStatus>([
-  "watching",
-  "completed",
-  "recommended",
-  "not_recommended",
-  "dropped"
-]);
-
 export function YearStatsSection() {
   const library = useLibrary("all");
-  const [mode, setMode] = useState<YearStatsMode>("recorded");
+  const [selectedMode, setSelectedMode] = useState<YearStatsMode | null>(null);
 
+  const defaultMode = useMemo<YearStatsMode>(() => {
+    return countItemsWithWatchedDate(library.data ?? []) >= 10 ? "recorded" : "aired";
+  }, [library.data]);
+  const mode = selectedMode ?? defaultMode;
   const stats = useMemo(() => createYearStats(library.data ?? [], mode), [library.data, mode]);
   const totalItems = stats.reduce((sum, stat) => sum + stat.itemCount, 0);
   const totalWatches = stats.reduce((sum, stat) => sum + stat.watchCount, 0);
   const peakYear = stats.reduce<YearStat | null>(
-    (peak, stat) => (!peak || stat.watchCount > peak.watchCount ? stat : peak),
+    (peak, stat) => {
+      if (stat.year === null) return peak;
+      return !peak || stat.watchCount > peak.watchCount ? stat : peak;
+    },
     null
   );
 
@@ -57,24 +61,24 @@ export function YearStatsSection() {
         <View style={styles.headerText}>
           <Text style={styles.title}>연도별 감상 통계</Text>
           <Text style={styles.subtitle}>
-            {mode === "recorded" ? "내 목록에서 마지막으로 기록한 연도 기준" : "작품 방영연도 기준"}
+            {mode === "recorded" ? "마지막으로 본 날 기준" : "작품 방영연도 기준"}
           </Text>
         </View>
         <View style={styles.modeTabs}>
-          <ModeButton label="기록" selected={mode === "recorded"} onPress={() => setMode("recorded")} />
-          <ModeButton label="방영" selected={mode === "aired"} onPress={() => setMode("aired")} />
+          <ModeButton label="기록" selected={mode === "recorded"} onPress={() => setSelectedMode("recorded")} />
+          <ModeButton label="방영" selected={mode === "aired"} onPress={() => setSelectedMode("aired")} />
         </View>
       </View>
 
       <View style={styles.summary}>
         <SummaryItem label="본 작품" value={`${totalItems}개`} />
         <SummaryItem label="시청 횟수" value={`${totalWatches}회`} />
-        <SummaryItem label="가장 많음" value={peakYear ? `${peakYear.year}년` : "--"} />
+        <SummaryItem label="가장 많음" value={peakYear?.year ? `${peakYear.year}년` : "--"} />
       </View>
 
       <View style={styles.yearList}>
         {stats.map((stat) => (
-          <YearStatRow key={stat.year} max={maxWatchCount} stat={stat} />
+          <YearStatRow key={stat.year ?? "unknown"} max={maxWatchCount} stat={stat} />
         ))}
       </View>
     </View>
@@ -118,7 +122,7 @@ function YearStatRow({ stat, max }: { stat: YearStat; max: number }) {
   return (
     <View style={styles.yearRow}>
       <View style={styles.yearMeta}>
-        <Text style={styles.yearLabel}>{stat.year}년</Text>
+        <Text style={styles.yearLabel}>{stat.year ? `${stat.year}년` : "감상일 미상"}</Text>
         <Text style={styles.yearCount}>
           {stat.itemCount}개 · {stat.watchCount}회
         </Text>
@@ -131,32 +135,26 @@ function YearStatRow({ stat, max }: { stat: YearStat; max: number }) {
 }
 
 function createYearStats(items: LibraryListItem[], mode: YearStatsMode): YearStat[] {
-  const stats = new Map<number, YearStat>();
+  const stats = new Map<number | "unknown", YearStat>();
 
-  items.filter(isWatchedItem).forEach((item) => {
-    const year = mode === "recorded" ? yearFromDate(item.updated_at) : item.air_year;
-    if (!year) return;
+  items.filter(isWatchedLibraryItem).forEach((item) => {
+    const year = mode === "recorded" ? yearFromDate(item.last_watched_at) : item.air_year;
+    if (!year && mode === "aired") return;
 
-    const previous = stats.get(year) ?? { year, itemCount: 0, watchCount: 0 };
-    stats.set(year, {
+    const key = year ?? "unknown";
+    const previous = stats.get(key) ?? { year, itemCount: 0, watchCount: 0 };
+    stats.set(key, {
       year,
       itemCount: previous.itemCount + 1,
       watchCount: previous.watchCount + Math.max(0, item.watch_count ?? 0)
     });
   });
 
-  return Array.from(stats.values()).sort((a, b) => b.year - a.year);
-}
-
-function isWatchedItem(item: LibraryListItem): boolean {
-  if ((item.watch_count ?? 0) > 0) return true;
-  return item.statuses.some((status) => WATCHED_STATUSES.has(status));
-}
-
-function yearFromDate(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const year = new Date(value).getFullYear();
-  return Number.isFinite(year) ? year : null;
+  return Array.from(stats.values()).sort((a, b) => {
+    if (a.year === null) return 1;
+    if (b.year === null) return -1;
+    return b.year - a.year;
+  });
 }
 
 const styles = StyleSheet.create({

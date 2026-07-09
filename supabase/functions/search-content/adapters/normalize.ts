@@ -139,6 +139,7 @@ function mergeSearchResult(left: SearchResult, right: SearchResult): SearchResul
     localized_overview: preferred.localized_overview ?? fallback.localized_overview,
     air_year: preferred.air_year ?? fallback.air_year,
     air_date: preferred.air_date ?? fallback.air_date,
+    end_date: preferred.end_date ?? fallback.end_date,
     episode_count: preferred.episode_count ?? fallback.episode_count,
     genres: Array.from(new Set([...(preferred.genres ?? []), ...(fallback.genres ?? [])])),
     has_seasons: preferred.has_seasons || fallback.has_seasons
@@ -175,6 +176,7 @@ function completenessScore(result: SearchResult): number {
     result.localized_overview,
     result.air_year,
     result.air_date,
+    result.end_date,
     result.episode_count,
     result.title_original
   ].filter(Boolean).length;

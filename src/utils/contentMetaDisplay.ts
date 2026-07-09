@@ -3,6 +3,15 @@ export function createEpisodeCountLabel(episodeCount: number | null | undefined)
   return totalCount > 0 ? `${totalCount}화` : null;
 }
 
+export function createAirDateLabel(
+  airDate: string | null | undefined,
+  airYear: number | null | undefined
+): string | null {
+  const monthMatch = typeof airDate === "string" ? /^(\d{4})-(\d{2})/.exec(airDate) : null;
+  if (monthMatch?.[1] && monthMatch[2]) return `${monthMatch[1]}.${monthMatch[2]}`;
+  return typeof airYear === "number" && Number.isFinite(airYear) ? String(airYear) : null;
+}
+
 export function createWatchCountLabel(
   watchCount: number | null | undefined,
   options: { includeZero?: boolean } = {}

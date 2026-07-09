@@ -15,6 +15,7 @@ interface PopularRecommendation {
   overview: string | null;
   localized_overview?: string | null;
   air_year: number | null;
+  air_date: string | null;
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
@@ -60,6 +61,7 @@ interface AniListMedia {
   startDate?: {
     year?: number | null;
     month?: number | null;
+    day?: number | null;
   } | null;
   episodes?: number | null;
   format?: string | null;
@@ -83,6 +85,19 @@ interface TmdbAnimeSearchResponse {
     poster_path?: string | null;
     first_air_date?: string | null;
   }[];
+}
+
+interface TmdbTranslationResponse {
+  translations?: {
+    translations?: {
+      iso_639_1?: string | null;
+      iso_3166_1?: string | null;
+      data?: {
+        name?: string | null;
+        title?: string | null;
+      } | null;
+    }[];
+  };
 }
 
 const TMDB_LANGUAGE = "ko-KR";
@@ -132,6 +147,7 @@ const ANILIST_TRENDING_QUERY = `
         startDate {
           year
           month
+          day
         }
         episodes
         format
@@ -303,6 +319,7 @@ function normalizeTmdbDrama(
     poster_url: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
     overview: cleanText(item.overview),
     air_year: yearFromDate(item.first_air_date),
+    air_date: dateOnly(item.first_air_date),
     release_month: monthFromDate(item.first_air_date),
     has_seasons: true,
     episode_count: null,
@@ -368,6 +385,7 @@ function normalizeAniListAnime(item: AniListMedia): Omit<PopularRecommendation, 
     poster_url: item.coverImage?.large ?? null,
     overview: cleanText(item.description),
     air_year: item.startDate?.year ?? null,
+    air_date: dateFromParts(item.startDate),
     release_month: item.startDate?.month ?? null,
     has_seasons: item.format !== "MOVIE",
     episode_count: item.episodes ?? null,
@@ -407,15 +425,17 @@ async function enrichAnimeWithTmdbKorean(
           isCloseYear(yearFromDate(result.first_air_date), item.air_year)
         ) ?? payload.results?.[0];
       if (!match) continue;
+      const koreanTitle = await fetchTmdbKoreanTitle(match.id, apiKey);
 
       return {
         ...item,
-        title_primary: match.name?.trim() || item.title_primary,
+        title_primary: (koreanTitle ?? match.name?.trim()) || item.title_primary,
         poster_url: match.poster_path
           ? `https://image.tmdb.org/t/p/w500${match.poster_path}`
           : item.poster_url,
         overview: cleanText(match.overview) ?? item.overview,
         localized_overview: cleanText(match.overview),
+        air_date: dateOnly(match.first_air_date) ?? item.air_date,
         release_month: monthFromDate(match.first_air_date) ?? item.release_month
       };
     } catch {
@@ -424,6 +444,30 @@ async function enrichAnimeWithTmdbKorean(
   }
 
   return item;
+}
+
+async function fetchTmdbKoreanTitle(tmdbId: number, apiKey: string): Promise<string | null> {
+  const url = new URL(`https://api.themoviedb.org/3/tv/${tmdbId}`);
+  url.searchParams.set("language", TMDB_LANGUAGE);
+  url.searchParams.set("append_to_response", "translations");
+
+  try {
+    const payload = await fetchJson<TmdbTranslationResponse>(
+      url.toString(),
+      { headers: applyTmdbAuth(url, apiKey) },
+      3000
+    );
+
+    const translations = payload.translations?.translations ?? [];
+    const korean = translations.find(
+      (translation) => translation.iso_639_1 === "ko" || translation.iso_3166_1 === "KR"
+    );
+    const title = korean?.data?.name?.trim() || korean?.data?.title?.trim();
+
+    return title && hasHangul(title) ? title : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 5000): Promise<T> {
@@ -477,6 +521,22 @@ function monthFromDate(value: unknown): number | null {
   return Number.isFinite(month) && month >= 1 && month <= 12 ? month : null;
 }
 
+function dateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
+}
+
+function dateFromParts(parts?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
+  const year = parts?.year;
+  const month = parts?.month;
+  if (!year || !month) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(parts?.day ?? 1).padStart(2, "0")}`;
+}
+
 function isCloseYear(candidate: number | null, expected?: number | null): boolean {
   if (!candidate || !expected) return true;
   return Math.abs(candidate - expected) <= 1;
@@ -498,6 +558,10 @@ function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
 
 function looksLikeJwt(value: string): boolean {
   return value.startsWith("eyJ") || value.split(".").length === 3;
+}
+
+function hasHangul(value: string): boolean {
+  return /[가-힣]/.test(value);
 }
 
 async function getUserLibraryExternalKeys(userId: string): Promise<Set<string>> {

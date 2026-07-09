@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
+import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
@@ -15,6 +16,7 @@ import type {
   PopularRecommendation
 } from "@/services/popularRecommendations";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
+import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 
 const CATEGORY_OPTIONS: { value: RecommendationCategory; label: string }[] = [
   { value: "drama", label: "드라마 Top 10" },
@@ -36,7 +38,6 @@ export function PopularRecommendationSection() {
     drama: 0,
     anime: 0
   });
-  const emptyAlertKeyRef = useRef<string | null>(null);
   const libraryKeys = useMemo(
     () =>
       new Set(
@@ -70,42 +71,6 @@ export function PopularRecommendationSection() {
   );
   const hasRecommendations = activeItems.length > 0;
   const isLoading = recommendations.isLoading || library.isLoading;
-  const activePage = pageByCategory[category];
-
-  useEffect(() => {
-    if (
-      category !== "drama" ||
-      isLoading ||
-      recommendations.isError ||
-      !recommendations.data ||
-      hasRecommendations
-    ) {
-      return;
-    }
-
-    const alertKey = [
-      category,
-      activePage,
-      recommendations.data.generated_at,
-      excludedRecommendationKeys.length,
-      libraryKeys.size,
-      addedKeys.size
-    ].join(":");
-    if (emptyAlertKeyRef.current === alertKey) return;
-
-    emptyAlertKeyRef.current = alertKey;
-    Alert.alert("최신 작품 없음", "최신 작품은 없습니다.");
-  }, [
-    activePage,
-    addedKeys.size,
-    category,
-    excludedRecommendationKeys.length,
-    hasRecommendations,
-    isLoading,
-    libraryKeys.size,
-    recommendations.data,
-    recommendations.isError
-  ]);
 
   const openRecommendation = (item: PopularRecommendation) => {
     router.push({
@@ -120,6 +85,8 @@ export function PopularRecommendationSection() {
         overview: item.localized_overview ?? item.overview ?? "",
         contentType: item.content_type,
         airYear: item.air_year ? String(item.air_year) : "",
+        airDate: item.air_date ?? "",
+        endDate: item.end_date ?? "",
         hasSeasons: item.has_seasons ? "true" : "false",
         episodeCount: item.episode_count ? String(item.episode_count) : ""
       }
@@ -242,8 +209,14 @@ export function PopularRecommendationSection() {
 
       {!isLoading && !recommendations.isError && !hasRecommendations ? (
         <View style={styles.emptyFrame}>
-          <Ionicons color={colors.textMuted} name="albums-outline" size={24} />
-          <Text style={styles.emptyText}>표시할 인기 추천이 없습니다.</Text>
+          <EmptyState
+            actionLabel="다시 시도"
+            description="이미 등록했거나 제외한 작품을 빼면 표시할 후보가 부족합니다."
+            onAction={() => {
+              refreshRecommendations();
+            }}
+            title="표시할 인기 추천이 없어요"
+          />
         </View>
       ) : null}
 
@@ -271,6 +244,8 @@ function RecommendationCard({
   onExclude: () => void;
   onPress: () => void;
 }) {
+  const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
+
   return (
     <View style={styles.card}>
       <Pressable accessibilityRole="button" onPress={onPress} style={styles.posterButton}>
@@ -290,7 +265,7 @@ function RecommendationCard({
           {item.title_primary}
         </Text>
         <Text numberOfLines={1} style={styles.meta}>
-          {[item.air_year, item.content_type, item.trend_source].filter(Boolean).join(" · ")}
+          {[airDateLabel, item.content_type].filter(Boolean).join(" · ")}
         </Text>
         <GenreBadgeList genres={item.genres} maxVisible={2} />
       </View>
@@ -350,10 +325,13 @@ function createVisibleRecommendations(
     });
 
   if (!eligibleItems.length) return [];
-  const startIndex = page * VISIBLE_TOP_LIMIT;
-  if (startIndex >= eligibleItems.length) return [];
+  const startIndex = (page * VISIBLE_TOP_LIMIT) % eligibleItems.length;
+  const pageItems = [
+    ...eligibleItems.slice(startIndex),
+    ...eligibleItems.slice(0, startIndex)
+  ].slice(0, VISIBLE_TOP_LIMIT);
 
-  return eligibleItems.slice(startIndex, startIndex + VISIBLE_TOP_LIMIT).map((item, index) => ({
+  return pageItems.map((item, index) => ({
     ...item,
     rank: index + 1
   }));
@@ -539,14 +517,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     justifyContent: "center",
     marginHorizontal: spacing.lg,
-    minHeight: 396,
-    paddingHorizontal: spacing.lg
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center"
+    minHeight: 164,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md
   },
   partialText: {
     color: colors.warning,

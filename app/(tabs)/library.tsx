@@ -15,7 +15,7 @@ import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
-import { buildLibraryShareUrl, copyTextToClipboard, createLibraryShare } from "@/services/libraryShare";
+import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
@@ -30,6 +30,7 @@ import {
   type ContentTypeFilter,
   type RatingFilter
 } from "@/utils/libraryFilters";
+import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 
 type ShareFeedback =
   | { status: "loading"; message: string; url?: undefined }
@@ -37,15 +38,24 @@ type ShareFeedback =
   | { status: "error"; message: string; url?: undefined };
 
 export default function LibraryScreen() {
-  const params = useLocalSearchParams<{ status?: string }>();
-  const initialStatusFilter = parseLibraryStatusParam(params.status) ?? "all";
-  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(initialStatusFilter);
-  const [contentTypeFilter, setContentTypeFilter] = useState<ContentTypeFilter>("all");
-  const [genreFilter, setGenreFilter] = useState(ALL_GENRE_FILTER);
-  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [year, setYear] = useState("");
-  const [sortOrder, setSortOrder] = useState<DateSortOrder>("latest");
+  const params = useLocalSearchParams<{
+    status?: string;
+    libraryType?: string;
+    genre?: string;
+    rating?: string;
+    q?: string;
+    year?: string;
+    sort?: string;
+    view?: string;
+  }>();
+  const routeState = parseLibraryRouteParams(params);
+  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(routeState.statusFilter);
+  const [contentTypeFilter, setContentTypeFilter] = useState<ContentTypeFilter>(routeState.contentTypeFilter);
+  const [genreFilter, setGenreFilter] = useState(routeState.genreFilter);
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>(routeState.ratingFilter);
+  const [searchQuery, setSearchQuery] = useState(routeState.searchQuery);
+  const [year, setYear] = useState(routeState.year);
+  const [sortOrder, setSortOrder] = useState<DateSortOrder>(routeState.sortOrder);
   const [showFilters, setShowFilters] = useState(false);
   const [visibleItemCount, setVisibleItemCount] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
@@ -86,6 +96,10 @@ export default function LibraryScreen() {
     () => filterLibraryItems(library.data ?? [], filters),
     [filters, library.data]
   );
+  const libraryRouteParams = useMemo(
+    () => createLibraryRouteParams(filters, viewMode),
+    [filters, viewMode]
+  );
   const visibleItems = useMemo(
     () => filteredItems.slice(0, visibleItemCount),
     [filteredItems, visibleItemCount]
@@ -94,8 +108,25 @@ export default function LibraryScreen() {
   const hasMoreItems = visibleItemEnd < filteredItems.length;
 
   useEffect(() => {
-    setStatusFilter(parseLibraryStatusParam(params.status) ?? "all");
-  }, [params.status]);
+    setStatusFilter(routeState.statusFilter);
+    setContentTypeFilter(routeState.contentTypeFilter);
+    setGenreFilter(routeState.genreFilter);
+    setRatingFilter(routeState.ratingFilter);
+    setSearchQuery(routeState.searchQuery);
+    setYear(routeState.year);
+    setSortOrder(routeState.sortOrder);
+    if (routeState.viewMode) setViewMode(routeState.viewMode);
+  }, [
+    routeState.contentTypeFilter,
+    routeState.genreFilter,
+    routeState.ratingFilter,
+    routeState.searchQuery,
+    routeState.sortOrder,
+    routeState.statusFilter,
+    routeState.viewMode,
+    routeState.year,
+    setViewMode
+  ]);
 
   useEffect(() => {
     setVisibleItemCount(pageSize);
@@ -135,10 +166,16 @@ export default function LibraryScreen() {
       setShareFeedback({ status: "success", message: "공유 링크를 생성했습니다.", url });
 
       try {
-        const copied = await copyTextToClipboard(url);
+        const delivery = await shareLibraryUrl({ title, url });
+        const message =
+          delivery === "shared"
+            ? "공유 앱으로 보낼 준비를 마쳤습니다."
+            : delivery === "copied"
+              ? "공유 링크를 생성하고 클립보드에 복사했습니다."
+              : "공유 링크를 생성했습니다.";
         setShareFeedback({
           status: "success",
-          message: copied ? "공유 링크를 생성하고 클립보드에 복사했습니다." : "공유 링크를 생성했습니다.",
+          message,
           url
         });
       } catch {
@@ -415,24 +452,34 @@ export default function LibraryScreen() {
           isGallery ? (
             <ContentGalleryCard
               item={item}
-              onPress={() => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
+              onOpenEpisodes={() =>
+                router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id } })
+              }
+              onPress={() =>
+                router.push({
+                  pathname: "/content/[id]",
+                  params: { id: item.content_id, ...libraryRouteParams }
+                })
+              }
             />
           ) : (
             <ContentCard
               item={item}
-              onPress={() => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
+              onOpenEpisodes={() =>
+                router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id } })
+              }
+              onPress={() =>
+                router.push({
+                  pathname: "/content/[id]",
+                  params: { id: item.content_id, ...libraryRouteParams }
+                })
+              }
             />
           )
         )}
       />
     </View>
   );
-}
-
-function parseLibraryStatusParam(status: string | string[] | undefined): LibraryStatusFilter | null {
-  const value = Array.isArray(status) ? status[0] : status;
-  if (!value) return null;
-  return STATUS_FILTERS.includes(value as LibraryStatusFilter) ? (value as LibraryStatusFilter) : null;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

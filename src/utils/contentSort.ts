@@ -26,14 +26,14 @@ export function sortByYear<T extends YearSortableItem>(
   order: DateSortOrder
 ): T[] {
   return [...items].sort((a, b) => {
-    const aDate = dateSortValue(a);
-    const bDate = dateSortValue(b);
-    const aHasDate = aDate !== null;
-    const bHasDate = bDate !== null;
-    if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
+    const aMonth = monthSortValue(a);
+    const bMonth = monthSortValue(b);
+    const aHasMonth = aMonth !== null;
+    const bHasMonth = bMonth !== null;
+    if (aHasMonth !== bHasMonth) return aHasMonth ? -1 : 1;
 
-    if (aDate !== null && bDate !== null && aDate !== bDate) {
-      return order === "latest" ? bDate - aDate : aDate - bDate;
+    if (aMonth !== null && bMonth !== null && aMonth !== bMonth) {
+      return order === "latest" ? bMonth - aMonth : aMonth - bMonth;
     }
 
     const aTitle = a.title_primary ?? a.title ?? "";
@@ -42,22 +42,21 @@ export function sortByYear<T extends YearSortableItem>(
   });
 }
 
-function dateSortValue(item: YearSortableItem): number | null {
-  const parsedDate = parseDateValue(item.air_date);
-  if (parsedDate !== null) return parsedDate;
-  return typeof item.air_year === "number" ? item.air_year * 10000 : null;
+function monthSortValue(item: YearSortableItem): number | null {
+  const parsedMonth = parseYearMonthValue(item.air_date);
+  if (parsedMonth !== null) return parsedMonth;
+  return typeof item.air_year === "number" ? item.air_year * 100 : null;
 }
 
-function parseDateValue(value: string | null | undefined): number | null {
+function parseYearMonthValue(value: string | null | undefined): number | null {
   if (!value) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const match = /^(\d{4})-(\d{2})/.exec(value);
   if (!match) return null;
-  const [, yearValue, monthValue, dayValue] = match;
-  if (!yearValue || !monthValue || !dayValue) return null;
+  const [, yearValue, monthValue] = match;
+  if (!yearValue || !monthValue) return null;
   const year = Number.parseInt(yearValue, 10);
   const month = Number.parseInt(monthValue, 10);
-  const day = Number.parseInt(dayValue, 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return year * 10000 + month * 100 + day;
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  if (month < 1 || month > 12) return null;
+  return year * 100 + month;
 }

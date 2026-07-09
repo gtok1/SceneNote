@@ -7,10 +7,29 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../src/types/database";
 
 type ContentRow = Database["public"]["Tables"]["contents"]["Row"];
+type ContentCandidate = Pick<
+  ContentRow,
+  "id" | "content_type" | "source_api" | "source_id" | "title_primary" | "air_year"
+> & {
+  air_date?: string | null;
+};
 
 interface DateLookupResult {
   airDate: string | null;
   airYear: number | null;
+}
+
+interface SeasonRow {
+  id: string;
+  season_number: number;
+  episode_count: number | null;
+}
+
+interface EpisodeLookupResult {
+  episode_number: number;
+  title: string | null;
+  air_date: string | null;
+  duration_seconds: number | null;
 }
 
 loadEnvFile(".env");
@@ -35,24 +54,37 @@ const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
 void main();
 
 async function main() {
-  const { data, error } = await supabase
+  const hasContentAirDate = await hasContentAirDateColumn();
+  let query = supabase
     .from("contents")
-    .select("id,content_type,source_api,source_id,title_primary,air_year,air_date")
-    .is("air_date", null)
+    .select("*")
     .neq("source_api", "manual")
     .limit(limit);
+  if (hasContentAirDate) query = query.is("air_date", null);
+
+  const { data, error } = await query;
 
   if (error) {
-    fail(`Failed to load contents. Apply supabase/migrations/0013_content_air_date.sql first. ${error.message}`);
+    fail(`Failed to load contents. ${error.message}`);
   }
 
-  const contents = data ?? [];
-  let updated = 0;
+  const contents = (data ?? []) as unknown as ContentCandidate[];
+  const contentIdsWithEpisodeDate = hasContentAirDate
+    ? new Set<string>()
+    : await getContentIdsWithEpisodeDates(contents.map((content) => content.id));
+  let updatedContents = 0;
+  let updatedEpisodes = 0;
+  let skippedExisting = 0;
   let skipped = 0;
   let failed = 0;
 
   for (const content of contents) {
     try {
+      if (!hasContentAirDate && contentIdsWithEpisodeDate.has(content.id)) {
+        skippedExisting += 1;
+        continue;
+      }
+
       const lookup = await lookupAirDate(content);
       if (!lookup.airDate) {
         skipped += 1;
@@ -60,17 +92,26 @@ async function main() {
         continue;
       }
 
-      const { error: updateError } = await supabase
-        .from("contents")
-        .update({
-          air_date: lookup.airDate,
-          air_year: lookup.airYear ?? content.air_year
-        })
-        .eq("id", content.id);
+      if (hasContentAirDate) {
+        const { error: updateError } = await supabase
+          .from("contents")
+          .update({
+            air_date: lookup.airDate,
+            air_year: lookup.airYear ?? content.air_year
+          })
+          .eq("id", content.id);
 
-      if (updateError) throw new Error(updateError.message);
-      updated += 1;
-      console.log(`updated: ${content.title_primary} -> ${lookup.airDate}`);
+        if (updateError) throw new Error(updateError.message);
+        updatedContents += 1;
+      }
+
+      const episodeCount = await backfillFirstSeasonEpisodes(content, lookup.airDate);
+      updatedEpisodes += episodeCount;
+      console.log(
+        `updated: ${content.title_primary} -> ${lookup.airDate}${
+          episodeCount > 0 ? `, episodes=${episodeCount}` : ""
+        }`
+      );
     } catch (error) {
       failed += 1;
       console.warn(
@@ -81,10 +122,24 @@ async function main() {
     }
   }
 
-  console.log(`done: updated=${updated}, skipped=${skipped}, failed=${failed}, scanned=${contents.length}`);
+  console.log(
+    `done: updated_contents=${updatedContents}, updated_episodes=${updatedEpisodes}, skipped_existing=${skippedExisting}, skipped=${skipped}, failed=${failed}, scanned=${contents.length}, content_air_date_column=${hasContentAirDate}`
+  );
 }
 
-async function lookupAirDate(content: Pick<ContentRow, "content_type" | "source_api" | "source_id">): Promise<DateLookupResult> {
+async function hasContentAirDateColumn(): Promise<boolean> {
+  const { error } = await supabase
+    .from("contents")
+    .select("id,air_date")
+    .limit(1);
+  if (!error) return true;
+  if (isMissingColumnError(error)) return false;
+  throw new Error(error.message);
+}
+
+async function lookupAirDate(
+  content: Pick<ContentRow, "content_type" | "source_api" | "source_id">
+): Promise<DateLookupResult> {
   switch (content.source_api) {
     case "tmdb":
       return lookupTmdbAirDate(content.source_id, content.content_type === "movie" ? "movie" : "tv");
@@ -99,6 +154,96 @@ async function lookupAirDate(content: Pick<ContentRow, "content_type" | "source_
     default:
       return assertNever(content.source_api);
   }
+}
+
+async function getContentIdsWithEpisodeDates(contentIds: string[]): Promise<Set<string>> {
+  if (!contentIds.length) return new Set();
+
+  const result = new Set<string>();
+  const chunkSize = 100;
+  for (let index = 0; index < contentIds.length; index += chunkSize) {
+    const chunk = contentIds.slice(index, index + chunkSize);
+    const { data, error } = await supabase
+      .from("episodes")
+      .select("content_id")
+      .in("content_id", chunk)
+      .not("air_date", "is", null);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      result.add(row.content_id);
+    }
+  }
+
+  return result;
+}
+
+async function backfillFirstSeasonEpisodes(content: ContentCandidate, airDate: string): Promise<number> {
+  if (content.content_type === "movie") return 0;
+
+  const episodes = await lookupFirstSeasonEpisodes(content, airDate);
+  const usefulEpisodes = episodes.filter((episode) => episode.air_date || episode.title || episode.duration_seconds);
+  if (!usefulEpisodes.length) return 0;
+
+  const season = await ensureSeason(content);
+  const { error } = await supabase.from("episodes").upsert(
+    usefulEpisodes.map((episode) => ({
+      season_id: season.id,
+      content_id: content.id,
+      episode_number: episode.episode_number,
+      title: episode.title,
+      air_date: episode.air_date,
+      duration_seconds: episode.duration_seconds
+    })),
+    { onConflict: "season_id,episode_number" }
+  );
+  if (error) throw new Error(error.message);
+  return usefulEpisodes.length;
+}
+
+async function lookupFirstSeasonEpisodes(
+  content: ContentCandidate,
+  airDate: string
+): Promise<EpisodeLookupResult[]> {
+  if (content.source_api === "tmdb") return lookupTmdbEpisodes(content.source_id, 1);
+  if (content.source_api === "tvmaze") return lookupTvmazeEpisodes(content.source_id, 1);
+  if (content.source_api === "anilist" || content.source_api === "kitsu") {
+    return [
+      {
+        episode_number: 1,
+        title: null,
+        air_date: airDate,
+        duration_seconds: null
+      }
+    ];
+  }
+  return [];
+}
+
+async function ensureSeason(content: ContentCandidate): Promise<SeasonRow> {
+  const { data: existingSeason, error: existingError } = await supabase
+    .from("seasons")
+    .select("id,season_number,episode_count")
+    .eq("content_id", content.id)
+    .eq("season_number", 1)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+  if (existingSeason) return existingSeason as SeasonRow;
+
+  const { data: createdSeason, error: createError } = await supabase
+    .from("seasons")
+    .insert({
+      content_id: content.id,
+      season_number: 1,
+      title: null,
+      episode_count: null,
+      air_year: content.air_year
+    })
+    .select("id,season_number,episode_count")
+    .single();
+
+  if (createError || !createdSeason) throw new Error(createError?.message ?? "Failed to create season");
+  return createdSeason as SeasonRow;
 }
 
 async function lookupTmdbAirDate(sourceId: string, preferredMediaType: "movie" | "tv"): Promise<DateLookupResult> {
@@ -119,6 +264,34 @@ async function lookupTmdbAirDate(sourceId: string, preferredMediaType: "movie" |
   }
 
   return { airDate: null, airYear: null };
+}
+
+async function lookupTmdbEpisodes(sourceId: string, seasonNumber: number): Promise<EpisodeLookupResult[]> {
+  const apiKey = readEnv("TMDB_API_KEY");
+  if (!apiKey) return [];
+
+  const url = new URL(`https://api.themoviedb.org/3/tv/${sourceId}/season/${seasonNumber}`);
+  url.searchParams.set("language", "ko-KR");
+  const response = await fetch(url, { headers: tmdbHeaders(url, apiKey) });
+  if (!response.ok) return [];
+
+  const payload = (await response.json()) as {
+    episodes?: {
+      episode_number?: number | null;
+      name?: string | null;
+      air_date?: string | null;
+      runtime?: number | null;
+    }[];
+  };
+
+  return (payload.episodes ?? [])
+    .filter((episode) => typeof episode.episode_number === "number" && episode.episode_number > 0)
+    .map((episode) => ({
+      episode_number: episode.episode_number as number,
+      title: episode.name ?? null,
+      air_date: dateOnly(episode.air_date),
+      duration_seconds: durationMinutesToSeconds(episode.runtime)
+    }));
 }
 
 async function lookupAniListAirDate(sourceId: string): Promise<DateLookupResult> {
@@ -168,6 +341,29 @@ async function lookupTvmazeAirDate(sourceId: string): Promise<DateLookupResult> 
   return { airDate, airYear: yearFromDate(airDate) };
 }
 
+async function lookupTvmazeEpisodes(sourceId: string, seasonNumber: number): Promise<EpisodeLookupResult[]> {
+  const baseUrl = readEnv("TVMAZE_API_URL") ?? "https://api.tvmaze.com";
+  const response = await fetch(`${baseUrl}/shows/${sourceId}/episodes`);
+  if (!response.ok) return [];
+
+  const payload = (await response.json()) as {
+    season?: number | null;
+    number?: number | null;
+    name?: string | null;
+    airdate?: string | null;
+    runtime?: number | null;
+  }[];
+
+  return payload
+    .filter((episode) => episode.season === seasonNumber && typeof episode.number === "number" && episode.number > 0)
+    .map((episode) => ({
+      episode_number: episode.number as number,
+      title: episode.name ?? null,
+      air_date: dateOnly(episode.airdate),
+      duration_seconds: durationMinutesToSeconds(episode.runtime)
+    }));
+}
+
 function tmdbHeaders(url: URL, apiKey: string): HeadersInit {
   if (apiKey.startsWith("eyJ") || apiKey.split(".").length === 3) {
     return {
@@ -192,9 +388,13 @@ function dateOnly(value: unknown): string | null {
 function dateFromParts(parts?: { year?: number | null; month?: number | null; day?: number | null } | null): string | null {
   const year = parts?.year;
   const month = parts?.month;
-  const day = parts?.day;
-  if (!year || !month || !day) return null;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!year || !month) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(parts?.day ?? 1).padStart(2, "0")}`;
+}
+
+function durationMinutesToSeconds(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value * 60);
 }
 
 function yearFromDate(value: string | null): number | null {
@@ -225,6 +425,10 @@ function readEnv(name: string): string | undefined {
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
+}
+
+function isMissingColumnError(error: { code?: string; message?: string }): boolean {
+  return error.code === "42703" || /column .* does not exist/i.test(error.message ?? "");
 }
 
 function assertNever(value: never): never {

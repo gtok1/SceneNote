@@ -15,6 +15,7 @@ import { useGenreStats } from "@/hooks/useGenreStats";
 import { useLibrary, useLibraryStats } from "@/hooks/useLibrary";
 import { queryClient, queryKeys } from "@/lib/query";
 import { getProfile, updateProfileDisplayName } from "@/services/profile";
+import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import {
   countCurrentYearWatchedItems,
   createContentTypeStats,
@@ -30,6 +31,9 @@ export default function ProfileScreen() {
   const stats = useLibraryStats();
   const library = useLibrary("all");
   const genreStats = useGenreStats();
+  const recommendationExclusionCount = useRecommendationUiStore(
+    (state) => state.excludedRecommendations.length
+  );
   const [previewVisible, setPreviewVisible] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState("");
@@ -242,6 +246,18 @@ export default function ProfileScreen() {
         <TypeStatsSection />
         <YearStatsSection />
         <GenreStatsSection />
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push("/settings/excluded-recommendations")}
+          style={styles.settingsRow}
+        >
+          <View style={styles.settingsRowCopy}>
+            <Text style={styles.settingsRowTitle}>추천에서 제외한 작품</Text>
+            <Text style={styles.settingsRowMeta}>{recommendationExclusionCount}개</Text>
+          </View>
+          <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+        </Pressable>
 
         <Pressable
           accessibilityRole="button"
@@ -466,6 +482,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm
+  },
+  settingsRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 64,
+    paddingHorizontal: spacing.lg
+  },
+  settingsRowCopy: {
+    gap: 2
+  },
+  settingsRowTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  settingsRowMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800"
   },
   stat: {
     backgroundColor: colors.surface,

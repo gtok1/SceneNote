@@ -5,6 +5,7 @@ import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useR
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import { ToastViewport } from "@/components/common/ToastViewport";
 import {
   ArchiveBoxIcon,
   CompassIcon,
@@ -30,10 +31,12 @@ export default function RootLayout() {
           <Stack.Screen name="share/index" />
           <Stack.Screen name="share/[id]" />
           <Stack.Screen name="people/[id]" />
+          <Stack.Screen name="settings/excluded-recommendations" />
         </Stack>
         <AuthRedirect />
         <AuthLinkHandler />
         <GlobalBottomNav />
+        <ToastViewport />
         <AuthLoadingOverlay />
       </AppProviders>
     </GestureHandlerRootView>

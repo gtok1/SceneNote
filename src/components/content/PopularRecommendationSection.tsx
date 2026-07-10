@@ -15,6 +15,7 @@ import type {
   RecommendationCategory,
   PopularRecommendation
 } from "@/services/popularRecommendations";
+import { useAppUIStore } from "@/stores/appUIStore";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import {
@@ -34,7 +35,8 @@ export function PopularRecommendationSection() {
   const recommendations = usePopularRecommendations();
   const library = useLibrary("all");
   const addToLibrary = useAddToLibrary();
-  const { excludedRecommendationKeys, excludeRecommendation } = useRecommendationUiStore();
+  const { excludedRecommendationKeys, excludeRecommendation, removeExclusion } = useRecommendationUiStore();
+  const addToast = useAppUIStore((state) => state.addToast);
   const [category, setCategory] = useState<RecommendationCategory>("drama");
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [addedKeys, setAddedKeys] = useState<Set<string>>(() => new Set());
@@ -118,7 +120,13 @@ export function PopularRecommendationSection() {
   };
 
   const excludeRecommendationItem = (item: PopularRecommendation) => {
-    excludeRecommendation(createRecommendationKey(item));
+    const key = createRecommendationKey(item);
+    excludeRecommendation(key, item.title_primary);
+    addToast("제외됨", "info", {
+      actionLabel: "되돌리기",
+      durationMs: 5_000,
+      onAction: () => removeExclusion(key)
+    });
   };
 
   const refreshRecommendations = () => {

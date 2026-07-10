@@ -12,6 +12,11 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { YearSelect } from "@/components/common/YearSelect";
 import { ContentCard } from "@/components/content/ContentCard";
 import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
+import {
+  LibraryFilterBottomSheet,
+  type LibrarySheetFilterState
+} from "@/components/library/LibraryFilterBottomSheet";
+import { LibraryStatusFilter as LibraryStatusFilterBar } from "@/components/library/LibraryStatusFilter";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary } from "@/hooks/useLibrary";
@@ -25,12 +30,14 @@ import {
   CONTENT_TYPE_LABELS,
   createLibraryShareTitle,
   filterLibraryItems,
+  parseGenreFilters,
   RATING_FILTERS,
   STATUS_FILTERS,
   type ContentTypeFilter,
   type RatingFilter
 } from "@/utils/libraryFilters";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
+import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
 
 type ShareFeedback =
   | { status: "loading"; message: string; url?: undefined }
@@ -61,10 +68,12 @@ export default function LibraryScreen() {
   const [isSharing, setIsSharing] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null);
   const listRef = useRef<FlashListRef<LibraryListItem>>(null);
+  const filterButtonRef = useRef<View>(null);
   const loadMoreQueuedRef = useRef(false);
   const viewMode = useLibraryUiStore((state) => state.viewMode);
   const setViewMode = useLibraryUiStore((state) => state.setViewMode);
   const { width } = useWindowDimensions();
+  const { galleryColumns, isDesktop, isMobile } = getLibraryResponsiveLayout(width);
   const library = useLibrary(statusFilter);
   const router = useRouter();
   const filters = useMemo(
@@ -79,13 +88,10 @@ export default function LibraryScreen() {
     }),
     [contentTypeFilter, genreFilter, ratingFilter, searchQuery, sortOrder, statusFilter, year]
   );
-  const advancedFilterCount = [
-    genreFilter !== ALL_GENRE_FILTER,
-    ratingFilter !== "all",
-    Boolean(year),
-    sortOrder !== "latest"
-  ].filter(Boolean).length;
-  const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 3;
+  const advancedFilterCount =
+    (isMobile && contentTypeFilter !== "all" ? 1 : 0) +
+    parseGenreFilters(genreFilter).length +
+    [ratingFilter !== "all", Boolean(year), sortOrder !== "latest"].filter(Boolean).length;
   const isGallery = viewMode === "gallery";
   const pageSize = isGallery ? galleryColumns * 2 : 4;
   const genreOptions = useMemo(
@@ -106,6 +112,14 @@ export default function LibraryScreen() {
   );
   const visibleItemEnd = Math.min(visibleItemCount, filteredItems.length);
   const hasMoreItems = visibleItemEnd < filteredItems.length;
+  const hasActiveFilter =
+    statusFilter !== "all" ||
+    contentTypeFilter !== "all" ||
+    genreFilter !== ALL_GENRE_FILTER ||
+    ratingFilter !== "all" ||
+    Boolean(searchQuery.trim()) ||
+    Boolean(year) ||
+    sortOrder !== "latest";
 
   useEffect(() => {
     setStatusFilter(routeState.statusFilter);
@@ -142,6 +156,62 @@ export default function LibraryScreen() {
       loadMoreQueuedRef.current = false;
     });
   }, [filteredItems.length, hasMoreItems, pageSize]);
+
+  const commitFilters = useCallback(
+    (patch: Partial<typeof filters>) => {
+      const next = { ...filters, ...patch };
+      setStatusFilter(next.statusFilter);
+      setContentTypeFilter(next.contentTypeFilter);
+      setGenreFilter(next.genreFilter);
+      setRatingFilter(next.ratingFilter);
+      setSearchQuery(next.searchQuery);
+      setYear(next.year);
+      setSortOrder(next.sortOrder);
+      router.setParams({
+        ...createLibraryRouteParams(next, viewMode),
+        q: next.searchQuery.trim() || undefined,
+        year: next.year.trim() || undefined
+      });
+    },
+    [filters, router, viewMode]
+  );
+
+  const changeViewMode = useCallback(
+    (nextViewMode: "detail" | "gallery") => {
+      setViewMode(nextViewMode);
+      router.setParams({ view: nextViewMode });
+    },
+    [router, setViewMode]
+  );
+
+  const resetFilters = useCallback(() => {
+    commitFilters({
+      statusFilter: "all",
+      contentTypeFilter: "all",
+      genreFilter: ALL_GENRE_FILTER,
+      ratingFilter: "all",
+      searchQuery: "",
+      year: "",
+      sortOrder: "latest"
+    });
+  }, [commitFilters]);
+
+  const restoreFilterButtonFocus = useCallback(() => {
+    (filterButtonRef.current as unknown as { focus?: () => void } | null)?.focus?.();
+  }, []);
+
+  const closeMobileFilters = useCallback(() => {
+    setShowFilters(false);
+    setTimeout(restoreFilterButtonFocus, 0);
+  }, [restoreFilterButtonFocus]);
+
+  const applySheetFilters = useCallback(
+    (next: LibrarySheetFilterState) => {
+      commitFilters(next);
+      closeMobileFilters();
+    },
+    [closeMobileFilters, commitFilters]
+  );
 
   const shareCurrentView = async () => {
     if (!filteredItems.length) {
@@ -198,12 +268,75 @@ export default function LibraryScreen() {
       <View style={styles.filterSection}>
         <TextInput
           accessibilityLabel="라이브러리 검색"
-          onChangeText={setSearchQuery}
+          onChangeText={(value) => commitFilters({ searchQuery: value })}
           placeholder="작품명, 출연자, 성우 검색"
           style={styles.searchInput}
           value={searchQuery}
         />
-        <View style={styles.quickBar}>
+        {isMobile ? (
+          <>
+            <LibraryStatusFilterBar compact onChange={(value) => commitFilters({ statusFilter: value })} value={statusFilter} />
+            <View style={styles.mobileToolRow}>
+              <View style={styles.mobileToolGroup}>
+                <Pressable
+                  accessibilityLabel="엑셀 업로드"
+                  accessibilityRole="button"
+                  onPress={() => router.push("/library/import")}
+                  style={styles.mobileIconButton}
+                >
+                  <Ionicons color={colors.textMuted} name="cloud-upload-outline" size={19} />
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={isSharing ? "공유 중" : "라이브러리 공유"}
+                  accessibilityRole="button"
+                  disabled={isSharing || library.isLoading}
+                  onPress={shareCurrentView}
+                  style={[styles.mobileIconButton, isSharing || library.isLoading ? styles.toolButtonDisabled : null]}
+                >
+                  <Ionicons color={colors.textMuted} name="share-social-outline" size={19} />
+                </Pressable>
+              </View>
+              <View style={styles.mobileToolGroup}>
+                {[
+                  { label: "자세히 보기", value: "detail" as const, icon: "list-outline" as const },
+                  { label: "갤러리 보기", value: "gallery" as const, icon: "grid-outline" as const }
+                ].map((item) => {
+                  const selected = item.value === viewMode;
+                  return (
+                    <Pressable
+                      accessibilityLabel={item.label}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      aria-pressed={selected}
+                      key={item.value}
+                      onPress={() => changeViewMode(item.value)}
+                      style={[styles.mobileIconButton, selected ? styles.filterSelected : null]}
+                    >
+                      <Ionicons color={selected ? colors.surface : colors.textMuted} name={item.icon} size={19} />
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showFilters }}
+                  ref={filterButtonRef}
+                  onPress={() => setShowFilters(true)}
+                  style={[styles.mobileFilterButton, advancedFilterCount > 0 ? styles.filterSelected : null]}
+                >
+                  <Ionicons
+                    color={advancedFilterCount > 0 ? colors.surface : colors.textMuted}
+                    name="options-outline"
+                    size={18}
+                  />
+                  <Text style={[styles.filterText, advancedFilterCount > 0 ? styles.filterTextSelected : null]}>
+                    {advancedFilterCount > 0 ? `필터 ${advancedFilterCount}` : "필터"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </>
+        ) : (
+        <View style={[styles.quickBar, !isDesktop ? styles.quickBarTablet : null]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -223,7 +356,7 @@ export default function LibraryScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
                   key={item}
-                  onPress={() => setStatusFilter(item)}
+                  onPress={() => commitFilters({ statusFilter: item })}
                   style={[styles.filter, selected && styles.filterSelected]}
                 >
                   <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
@@ -242,7 +375,7 @@ export default function LibraryScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: contentTypeFilter === "all" }}
-              onPress={() => setContentTypeFilter("all")}
+              onPress={() => commitFilters({ contentTypeFilter: "all" })}
               style={[styles.filter, contentTypeFilter === "all" && styles.filterSelected]}
             >
               <Text style={[styles.filterText, contentTypeFilter === "all" && styles.filterTextSelected]}>
@@ -256,7 +389,7 @@ export default function LibraryScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
                   key={item}
-                  onPress={() => setContentTypeFilter(item)}
+                  onPress={() => commitFilters({ contentTypeFilter: item })}
                   style={[styles.filter, selected && styles.filterSelected]}
                 >
                   <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
@@ -297,7 +430,7 @@ export default function LibraryScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
                   key={item.value}
-                  onPress={() => setViewMode(item.value)}
+                  onPress={() => changeViewMode(item.value)}
                   style={[styles.toolButton, selected && styles.filterSelected]}
                 >
                   <Ionicons
@@ -335,11 +468,12 @@ export default function LibraryScreen() {
             </Pressable>
           </View>
         </View>
+        )}
 
-        {showFilters ? (
+        {showFilters && !isMobile ? (
           <View style={styles.advancedFilters}>
             <View style={styles.dateRow}>
-              <YearSelect onChange={setYear} value={year} />
+              <YearSelect onChange={(value) => commitFilters({ year: value })} value={year} />
               {[
                 { label: "최신순", value: "latest" as const },
                 { label: "오래된순", value: "oldest" as const }
@@ -349,7 +483,7 @@ export default function LibraryScreen() {
                   <Pressable
                     accessibilityRole="button"
                     key={item.value}
-                    onPress={() => setSortOrder(item.value)}
+                    onPress={() => commitFilters({ sortOrder: item.value })}
                     style={[styles.filter, selected && styles.filterSelected]}
                   >
                     <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{item.label}</Text>
@@ -357,14 +491,19 @@ export default function LibraryScreen() {
                 );
               })}
             </View>
-            <GenreFilterChips genres={genreOptions} onChange={setGenreFilter} value={genreFilter} />
+            <GenreFilterChips
+              genres={genreOptions}
+              multiple
+              onChange={(value) => commitFilters({ genreFilter: value })}
+              value={genreFilter}
+            />
             <View style={styles.ratingFilterGroup}>
               <Text style={styles.ratingFilterLabel}>추천점수</Text>
               <View style={styles.ratingFilterChips}>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ selected: ratingFilter === "all" }}
-                  onPress={() => setRatingFilter("all")}
+                  onPress={() => commitFilters({ ratingFilter: "all" })}
                   style={[styles.filter, ratingFilter === "all" && styles.filterSelected]}
                 >
                   <Text style={[styles.filterText, ratingFilter === "all" && styles.filterTextSelected]}>전체</Text>
@@ -376,7 +515,7 @@ export default function LibraryScreen() {
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       key={rating}
-                      onPress={() => setRatingFilter(rating)}
+                      onPress={() => commitFilters({ ratingFilter: rating })}
                       style={[styles.filter, selected && styles.filterSelected]}
                     >
                       <Text style={[styles.filterText, selected && styles.filterTextSelected]}>{rating}/10</Text>
@@ -418,14 +557,14 @@ export default function LibraryScreen() {
       {library.isError ? <ErrorState onRetry={() => library.refetch()} /> : null}
       {!library.isLoading && !filteredItems.length ? (
         <EmptyState
-          actionLabel="작품 검색하기"
+          actionLabel={hasActiveFilter ? "필터 초기화" : "작품 검색하기"}
           description={
-            library.data?.length
+            hasActiveFilter
               ? "선택한 조건에 맞는 작품이 없습니다."
               : "검색에서 작품을 추가하면 라이브러리가 채워집니다."
           }
-          onAction={() => router.push("/search")}
-          title={library.data?.length ? "조건에 맞는 작품이 없어요" : "라이브러리가 비어 있어요"}
+          onAction={hasActiveFilter ? resetFilters : () => router.push("/search")}
+          title={hasActiveFilter ? "조건에 맞는 작품이 없어요" : "라이브러리가 비어 있어요"}
         />
       ) : null}
 
@@ -478,6 +617,16 @@ export default function LibraryScreen() {
           )
         )}
       />
+      {isMobile ? (
+        <LibraryFilterBottomSheet
+          filters={filters}
+          genreOptions={genreOptions}
+          onApply={applySheetFilters}
+          onClose={closeMobileFilters}
+          onClosed={restoreFilterButtonFocus}
+          visible={showFilters}
+        />
+      ) : null}
     </View>
   );
 }
@@ -547,6 +696,39 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.sm,
     justifyContent: "space-between"
+  },
+  quickBarTablet: {
+    alignItems: "stretch",
+    flexDirection: "column"
+  },
+  mobileToolRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  mobileToolGroup: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  mobileIconButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
+  mobileFilterButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingHorizontal: spacing.md
   },
   primaryFiltersScroll: {
     flex: 1,

@@ -30,6 +30,7 @@ export function formatUpcomingAiringLabel(airDate: string | null, today: Date = 
   if (airDay === null) return "";
 
   const diff = airDay - getKstDayNumber(today);
+  if (diff === -1) return "어제 방영";
   if (diff === 0) return "오늘";
   if (diff === 1) return "내일";
 
@@ -37,6 +38,12 @@ export function formatUpcomingAiringLabel(airDate: string | null, today: Date = 
   if (!date) return "";
 
   return `${date.month}월 ${date.day}일 (${getKoreanWeekday(date.dayNumber)})`;
+}
+
+export function isAiringToday(airDate: string | null, today: Date = new Date()): boolean {
+  const airDay = parseDateOnlyDayNumber(airDate);
+  if (airDay === null) return false;
+  return airDay === getKstDayNumber(today);
 }
 
 function getKstDayNumber(date: Date): number {

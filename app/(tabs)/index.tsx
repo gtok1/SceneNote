@@ -11,12 +11,13 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
 import { PopularRecommendationSection } from "@/components/content/PopularRecommendationSection";
+import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
 import { RecentPinCard } from "@/components/pins/RecentPinCard";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useLibrary, useUpcomingAiring } from "@/hooks/useLibrary";
 import { useAllPins } from "@/hooks/useTimelinePins";
-import type { LibraryListItem } from "@/types/library";
-import { formatUpcomingAiringLabel } from "@/utils/upcomingAiring";
+import type { LibraryListItem, WatchStatus } from "@/types/library";
+import { formatUpcomingAiringLabel, isAiringToday } from "@/utils/upcomingAiring";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -39,7 +40,7 @@ export default function HomeScreen() {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <View style={styles.hero}>
         <Text style={styles.title}>SceneNote</Text>
-        <Text style={styles.subtitle}>보고 있는 작품과 다시 찾고 싶은 장면</Text>
+        <Text style={styles.subtitle}>내가 본 작품과 장면을 기록하고, 취향을 나누는 공간</Text>
         <Pressable
           accessibilityRole="button"
           onPress={() => router.push("/search")}
@@ -51,7 +52,12 @@ export default function HomeScreen() {
 
       {recentPins.length ? (
         <>
-          <SectionHeader title="최근 핀" action="전체 보기" onAction={() => router.push("/pins")} />
+          <SectionHeader
+            eyebrow="내 기록"
+            title="최근 핀"
+            action="전체 보기"
+            onAction={() => router.push("/pins")}
+          />
           <View style={styles.recentPinGrid}>
             {recentPins.map((pin) => (
               <View key={pin.id} style={[styles.recentPinCell, { width: recentPinCardWidth }]}>
@@ -69,14 +75,8 @@ export default function HomeScreen() {
         </>
       ) : null}
 
-      <UpcomingAiringSection
-        items={upcomingAiringItems}
-        onPressItem={(item) => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
-      />
-
-      <PopularRecommendationSection />
-
       <SectionHeader
+        eyebrow="라이브러리"
         title="보는 중"
         action="전체 보기"
         onAction={() =>
@@ -118,6 +118,13 @@ export default function HomeScreen() {
           title="보는 중인 작품이 없어요"
         />
       ) : null}
+
+      <UpcomingAiringSection
+        items={upcomingAiringItems}
+        onPressItem={(item) => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
+      />
+
+      <PopularRecommendationSection />
     </ScrollView>
   );
 }
@@ -133,58 +140,71 @@ function UpcomingAiringSection({
 
   return (
     <View style={styles.upcomingSection}>
-      <View style={styles.upcomingHeader}>
-        <Text style={styles.upcomingEyebrow}>라이브러리</Text>
-        <Text style={styles.upcomingTitle}>곧 방영 시작</Text>
-      </View>
+      <SectionHeader eyebrow="라이브러리" title="곧 방영 시작" />
       <ScrollView
         contentContainerStyle={styles.upcomingList}
         horizontal
         showsHorizontalScrollIndicator={false}
       >
-        {items.map((item) => (
-          <Pressable
-            accessibilityRole="button"
-            key={item.library_item_id}
-            onPress={() => onPressItem(item)}
-            style={styles.upcomingCard}
-          >
-            <Image
-              accessibilityLabel={item.title_primary}
-              contentFit="cover"
-              source={item.poster_url ? { uri: item.poster_url } : null}
-              style={styles.upcomingPoster}
-            />
-            <View style={styles.upcomingBody}>
-              <Text numberOfLines={2} style={styles.upcomingCardTitle}>
-                {item.title_primary}
-              </Text>
-              <Text numberOfLines={1} style={styles.upcomingDate}>
-                {formatUpcomingAiringLabel(item.air_date)}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
+        {items.map((item) => {
+          const airingToday = isAiringToday(item.air_date);
+
+          return (
+            <Pressable
+              accessibilityRole="button"
+              key={item.library_item_id}
+              onPress={() => onPressItem(item)}
+              style={[styles.upcomingCard, airingToday ? styles.upcomingCardToday : null]}
+            >
+              <Image
+                accessibilityLabel={item.title_primary}
+                contentFit="cover"
+                source={item.poster_url ? { uri: item.poster_url } : null}
+                style={styles.upcomingPoster}
+              />
+              <View style={styles.upcomingBody}>
+                <Text numberOfLines={2} style={styles.upcomingCardTitle}>
+                  {item.title_primary}
+                </Text>
+                <Text numberOfLines={1} style={styles.upcomingDate}>
+                  {formatUpcomingAiringLabel(item.air_date)}
+                </Text>
+                <WatchStatusBadge size="sm" status={upcomingBadgeStatus(item)} />
+              </View>
+            </Pressable>
+          );
+        })}
       </ScrollView>
     </View>
   );
 }
 
+function upcomingBadgeStatus(item: LibraryListItem): WatchStatus {
+  return item.statuses.includes("watching") ? "watching" : "wishlist";
+}
+
 function SectionHeader({
+  eyebrow,
   title,
   action,
   onAction
 }: {
+  eyebrow?: string;
   title: string;
-  action: string;
-  onAction: () => void;
+  action?: string;
+  onAction?: () => void;
 }) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Pressable accessibilityRole="button" onPress={onAction}>
-        <Text style={styles.sectionAction}>{action}</Text>
-      </Pressable>
+      <View style={styles.sectionHeaderText}>
+        {eyebrow ? <Text style={styles.sectionEyebrow}>{eyebrow}</Text> : null}
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {action && onAction ? (
+        <Pressable accessibilityRole="button" onPress={onAction}>
+          <Text style={styles.sectionAction}>{action}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -231,20 +251,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.md
   },
-  upcomingHeader: {
-    gap: 2,
-    paddingHorizontal: spacing.lg
-  },
-  upcomingEyebrow: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "900"
-  },
-  upcomingTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900"
-  },
   upcomingList: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
@@ -257,6 +263,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
     width: 132
+  },
+  upcomingCardToday: {
+    borderColor: colors.primary,
+    borderWidth: 1.5
   },
   upcomingPoster: {
     backgroundColor: colors.surfaceMuted,
@@ -280,16 +290,25 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   sectionHeader: {
-    alignItems: "center",
+    alignItems: "flex-end",
     flexDirection: "row",
     justifyContent: "space-between",
     minHeight: 22,
-    paddingHorizontal: spacing.lg
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm
+  },
+  sectionHeaderText: {
+    gap: 2
+  },
+  sectionEyebrow: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900"
   },
   sectionTitle: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: "800"
+    fontSize: 18,
+    fontWeight: "900"
   },
   sectionAction: {
     color: colors.primary,
@@ -303,6 +322,7 @@ const styles = StyleSheet.create({
   recentPinGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    maxWidth: 1024,
     paddingHorizontal: spacing.sm
   },
   recentPinCell: {

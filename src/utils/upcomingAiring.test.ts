@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { WatchStatus } from "@/types/library";
-import { filterUpcomingAiringItems, formatUpcomingAiringLabel } from "./upcomingAiring";
+import { filterUpcomingAiringItems, formatUpcomingAiringLabel, isAiringToday } from "./upcomingAiring";
 
 describe("upcoming airing utilities", () => {
   const today = new Date("2026-07-09T03:00:00.000Z");
@@ -37,9 +37,17 @@ describe("upcoming airing utilities", () => {
   });
 
   it("formats labels relative to KST dates", () => {
+    assert.equal(formatUpcomingAiringLabel("2026-07-08", today), "어제 방영");
     assert.equal(formatUpcomingAiringLabel("2026-07-09", today), "오늘");
     assert.equal(formatUpcomingAiringLabel("2026-07-10", today), "내일");
     assert.equal(formatUpcomingAiringLabel("2026-07-12", today), "7월 12일 (일)");
+  });
+
+  it("detects items airing today in KST", () => {
+    assert.equal(isAiringToday("2026-07-09", today), true);
+    assert.equal(isAiringToday("2026-07-08", today), false);
+    assert.equal(isAiringToday("2026-07-10", today), false);
+    assert.equal(isAiringToday(null, today), false);
   });
 
   it("uses KST day boundaries", () => {

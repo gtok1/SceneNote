@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import { Image as ExpoImage, type ImageProps as ExpoImageProps } from "expo-image";
 import {
   Platform,
@@ -6,26 +6,39 @@ import {
   type ImageStyle
 } from "react-native";
 
+import { colors } from "@/constants/theme";
+
 type AppImageProps = Pick<
   ExpoImageProps,
   "accessibilityLabel" | "contentFit" | "source" | "style" | "testID"
 >;
 
 export function AppImage({ contentFit = "cover", source, style, ...props }: AppImageProps) {
+  const sourceKey = getImageSourceKey(source);
+  const [failedSourceKey, setFailedSourceKey] = useState<string | null>(null);
+  const sourceFailed = failedSourceKey === sourceKey;
+
   if (Platform.OS === "web") {
     const uri = getImageUri(source);
     const flattenedStyle = StyleSheet.flatten(style) as ImageStyle | undefined;
 
-    if (!uri) {
+    if (!uri || sourceFailed) {
       return createElement("div", {
-        "aria-label": props.accessibilityLabel,
-        style: flattenedStyle
+        "aria-label": props.accessibilityLabel ?? "이미지 없음",
+        "data-testid": props.testID,
+        role: "img",
+        style: {
+          ...flattenedStyle,
+          backgroundColor: colors.surfaceMuted
+        }
       });
     }
 
     return createElement("img", {
       alt: props.accessibilityLabel ?? "",
+      "data-testid": props.testID,
       draggable: false,
+      onError: () => setFailedSourceKey(sourceKey),
       src: uri,
       style: {
         ...flattenedStyle,
@@ -35,8 +48,34 @@ export function AppImage({ contentFit = "cover", source, style, ...props }: AppI
     });
   }
 
-  return <ExpoImage {...props} contentFit={contentFit} source={source ?? null} style={style} />;
+  if (!source || sourceFailed) {
+    return (
+      <ExpoImage
+        {...props}
+        accessibilityLabel={props.accessibilityLabel ?? "이미지 없음"}
+        contentFit={contentFit}
+        source={null}
+        style={[style, styles.placeholder]}
+      />
+    );
+  }
+
+  return (
+    <ExpoImage
+      {...props}
+      contentFit={contentFit}
+      onError={() => setFailedSourceKey(sourceKey)}
+      source={source}
+      style={style}
+    />
+  );
 }
+
+const styles = StyleSheet.create({
+  placeholder: {
+    backgroundColor: colors.surfaceMuted
+  }
+});
 
 function getObjectFit(contentFit: AppImageProps["contentFit"]) {
   switch (contentFit) {
@@ -62,4 +101,18 @@ function getImageUri(source: AppImageProps["source"]) {
   if ("uri" in source) return source.uri;
 
   return undefined;
+}
+
+function getImageSourceKey(source: AppImageProps["source"]): string {
+  const uri = getImageUri(source);
+  if (uri) return `uri:${uri}`;
+  if (typeof source === "number") return `asset:${source}`;
+  if (Array.isArray(source)) return source.map(getImageSourceKey).join("|");
+  if (!source) return "empty";
+
+  try {
+    return `source:${JSON.stringify(source)}`;
+  } catch {
+    return "source:unknown";
+  }
 }

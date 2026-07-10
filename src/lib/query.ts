@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 
 import type { MediaTypeFilter } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
+import { createRecommendationFeedKey } from "@/utils/recommendationFeed";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,10 +23,14 @@ export const queryKeys = {
   },
   search: {
     results: (query: string, mediaType: MediaTypeFilter, page: number) =>
-      ["search", query, mediaType, page] as const
+      ["search", query, mediaType, page] as const,
+    similar: (anchorKey: string, focus: string, mediaType: MediaTypeFilter, sort: string, filters: string) =>
+      ["search", "similar", "hybrid-v1-no-embeddings", anchorKey, focus, mediaType, sort, filters] as const
   },
   recommendations: {
-    popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const
+    popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
+    personalized: (userId: string, mediaType: MediaTypeFilter) =>
+      [...createRecommendationFeedKey(userId, mediaType), "ko-metadata-v2"] as const
   },
   library: {
     all: (userId: string) => ["library", userId] as const,

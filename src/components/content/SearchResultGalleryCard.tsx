@@ -15,6 +15,8 @@ interface SearchResultGalleryCardProps {
   addLabel?: string;
   isAddDisabled?: boolean;
   libraryItem?: LibraryListItem | null;
+  recommendationReason?: string | null;
+  onFindSimilar?: () => void;
 }
 
 export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
@@ -23,7 +25,9 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   onAddToLibrary,
   addLabel = "추가",
   isAddDisabled = false,
-  libraryItem = null
+  libraryItem = null,
+  recommendationReason,
+  onFindSimilar
 }: SearchResultGalleryCardProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
   const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
@@ -34,8 +38,14 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   return (
     <View style={styles.cell}>
       <View style={styles.card}>
-        <Pressable accessibilityRole="button" onPress={onPress} style={styles.mainButton}>
+        <Pressable
+          accessibilityLabel={`${result.title_primary} 상세 보기`}
+          accessibilityRole="button"
+          onPress={onPress}
+          style={styles.mainButton}
+        >
           <Image
+            accessibilityLabel={`${result.title_primary} 포스터`}
             contentFit="cover"
             source={result.poster_url ? { uri: result.poster_url } : null}
             style={styles.poster}
@@ -48,6 +58,11 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
               {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
             </Text>
             <GenreBadgeList genres={result.genres} maxVisible={2} />
+            {recommendationReason !== undefined ? (
+              <Text numberOfLines={1} style={styles.recommendationReason}>
+                {recommendationReason?.trim() || "\u00A0"}
+              </Text>
+            ) : null}
             {result.matched_people?.length ? (
               <Text numberOfLines={1} style={styles.matchedPeople}>
                 {result.matched_people.join(", ")}
@@ -58,10 +73,17 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
 
         <View style={styles.footer}>
           <Text style={styles.source}>{result.external_source.toUpperCase()}</Text>
+          <View style={styles.actions}>
+          {onFindSimilar ? (
+            <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
+              <Text style={styles.similarText}>비슷한 작품</Text>
+            </Pressable>
+          ) : null}
           {onAddToLibrary ? (
             <Pressable
+              accessibilityLabel={`${result.title_primary} ${addLabel}`}
               accessibilityRole="button"
-              accessibilityState={{ disabled: isAddDisabled }}
+              accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
               disabled={isAddDisabled}
               onPress={onAddToLibrary}
               style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
@@ -69,6 +91,7 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
               <Text style={styles.addText}>{addLabel}</Text>
             </Pressable>
           ) : null}
+          </View>
         </View>
       </View>
     </View>
@@ -116,6 +139,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800"
   },
+  recommendationReason: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 15
+  },
   footer: {
     alignItems: "center",
     flexDirection: "row",
@@ -124,6 +153,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     paddingHorizontal: spacing.sm
   },
+  actions: { alignItems: "center", flexDirection: "row", gap: spacing.xs },
+  similarButton: { borderColor: colors.primary, borderRadius: radius.sm, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  similarText: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   source: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.sm,

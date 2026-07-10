@@ -29,6 +29,7 @@ export interface TimelinePin {
   content_id: string;
   episode_id: string | null;
   content_title?: string | null | undefined;
+  content_poster_url?: string | null | undefined;
   content_source_api?: string | null | undefined;
   content_source_id?: string | null | undefined;
   genres?: string[] | undefined;

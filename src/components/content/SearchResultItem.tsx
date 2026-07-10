@@ -15,6 +15,8 @@ interface SearchResultItemProps {
   addLabel?: string;
   isAddDisabled?: boolean;
   libraryItem?: LibraryListItem | null;
+  recommendationReason?: string | null;
+  onFindSimilar?: () => void;
 }
 
 export const SearchResultItem = memo(function SearchResultItem({
@@ -23,7 +25,9 @@ export const SearchResultItem = memo(function SearchResultItem({
   onAddToLibrary,
   addLabel = "추가",
   isAddDisabled = false,
-  libraryItem = null
+  libraryItem = null,
+  recommendationReason,
+  onFindSimilar
 }: SearchResultItemProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
   const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
@@ -33,8 +37,14 @@ export const SearchResultItem = memo(function SearchResultItem({
 
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" onPress={onPress} style={styles.mainButton}>
+      <Pressable
+        accessibilityLabel={`${result.title_primary} 상세 보기`}
+        accessibilityRole="button"
+        onPress={onPress}
+        style={styles.mainButton}
+      >
         <Image
+          accessibilityLabel={`${result.title_primary} 포스터`}
           source={result.poster_url ? { uri: result.poster_url } : null}
           style={styles.poster}
           contentFit="cover"
@@ -55,6 +65,11 @@ export const SearchResultItem = memo(function SearchResultItem({
             {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
           </Text>
           <GenreBadgeList genres={result.genres} maxVisible={2} />
+          {recommendationReason !== undefined ? (
+            <Text numberOfLines={1} style={styles.recommendationReason}>
+              {recommendationReason?.trim() || "\u00A0"}
+            </Text>
+          ) : null}
           {result.matched_people?.length ? (
             <Text numberOfLines={1} style={styles.matchedPeople}>
               {result.matched_people.join(", ")} 출연/참여
@@ -63,10 +78,17 @@ export const SearchResultItem = memo(function SearchResultItem({
           {result.duplicate_hint ? <Text style={styles.hint}>비슷한 검색 결과가 있습니다</Text> : null}
         </View>
       </Pressable>
+      <View style={styles.actions}>
+      {onFindSimilar ? (
+        <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
+          <Text style={styles.similarText}>비슷한 작품</Text>
+        </Pressable>
+      ) : null}
       {onAddToLibrary ? (
         <Pressable
+          accessibilityLabel={`${result.title_primary} ${addLabel}`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isAddDisabled }}
+          accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
           disabled={isAddDisabled}
           onPress={onAddToLibrary}
           style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
@@ -74,6 +96,7 @@ export const SearchResultItem = memo(function SearchResultItem({
           <Text style={styles.addText}>{addLabel}</Text>
         </Pressable>
       ) : null}
+      </View>
     </View>
   );
 });
@@ -139,6 +162,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800"
   },
+  recommendationReason: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 16
+  },
   hint: {
     color: colors.warning,
     fontSize: 12
@@ -149,6 +178,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
+  actions: { alignItems: "stretch", gap: spacing.xs },
+  similarButton: { borderColor: colors.primary, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  similarText: { color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: "center" },
   addButtonDisabled: {
     opacity: 0.6
   },

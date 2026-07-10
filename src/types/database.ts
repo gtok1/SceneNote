@@ -676,6 +676,42 @@ export type Database = {
           },
         ]
       }
+      user_recommendation_impressions: {
+        Row: {
+          canonical_content_id: string
+          first_seen_at: string
+          id: string
+          identity_keys: string[]
+          last_seen_at: string
+          media_type: string
+          source: string
+          source_id: string
+          user_id: string
+        }
+        Insert: {
+          canonical_content_id: string
+          first_seen_at?: string
+          id?: string
+          identity_keys?: string[]
+          last_seen_at?: string
+          media_type: string
+          source: string
+          source_id: string
+          user_id: string
+        }
+        Update: {
+          canonical_content_id?: string
+          first_seen_at?: string
+          id?: string
+          identity_keys?: string[]
+          last_seen_at?: string
+          media_type?: string
+          source?: string
+          source_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

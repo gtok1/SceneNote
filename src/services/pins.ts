@@ -15,6 +15,7 @@ type RawPinRow = TimelinePin & {
   timeline_pin_tags?: RawPinTag[];
   contents?: {
     title_primary: string | null;
+    poster_url: string | null;
     source_api: string | null;
     source_id: string | null;
     content_genres?: ContentGenreJoin[] | null;
@@ -26,7 +27,7 @@ type RawPinRow = TimelinePin & {
 };
 
 const PIN_SELECT =
-  "*,contents(title_primary,source_api,source_id,content_genres(genres(name))),episodes(episode_number,title),timeline_pin_tags(tag_id,tags(*))";
+  "*,contents(title_primary,poster_url,source_api,source_id,content_genres(genres(name))),episodes(episode_number,title),timeline_pin_tags(tag_id,tags(*))";
 
 export async function getAllPins(): Promise<TimelinePin[]> {
   const { data, error } = await supabase
@@ -155,6 +156,7 @@ function mapPin(row: RawPinRow): TimelinePin {
     content_id: row.content_id,
     episode_id: row.episode_id,
     content_title: row.contents?.title_primary ?? row.content_title ?? null,
+    content_poster_url: row.contents?.poster_url ?? row.content_poster_url ?? null,
     content_source_api: (row.contents?.source_api ?? row.content_source_api ?? null) as TimelinePin["content_source_api"],
     content_source_id: row.contents?.source_id ?? row.content_source_id ?? null,
     genres: extractGenreNames(row.contents?.content_genres),

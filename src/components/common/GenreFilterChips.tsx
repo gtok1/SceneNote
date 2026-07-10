@@ -2,21 +2,35 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import { ALL_GENRE_FILTER, createGenreFilterOptions } from "@/utils/genre";
+import { parseGenreFilters, serializeGenreFilters } from "@/utils/libraryFilters";
 
 interface GenreFilterChipsProps {
   value: string;
   onChange: (value: string) => void;
   genres?: string[] | null | undefined;
   label?: string;
+  multiple?: boolean;
 }
 
 export function GenreFilterChips({
   value,
   onChange,
   genres,
-  label = "장르"
+  label = "장르",
+  multiple = false
 }: GenreFilterChipsProps) {
   const options = createGenreFilterOptions(genres);
+  const selectedGenres = multiple ? parseGenreFilters(value) : value === ALL_GENRE_FILTER ? [] : [value];
+  const changeGenre = (genre: string) => {
+    if (!multiple) {
+      onChange(genre);
+      return;
+    }
+    const nextGenres = selectedGenres.includes(genre)
+      ? selectedGenres.filter((item) => item !== genre)
+      : [...selectedGenres, genre];
+    onChange(serializeGenreFilters(nextGenres));
+  };
 
   return (
     <View style={styles.container}>
@@ -27,13 +41,13 @@ export function GenreFilterChips({
         contentContainerStyle={styles.options}
         style={styles.scroller}
       >
-        <GenreChip label="전체" selected={value === ALL_GENRE_FILTER} onPress={() => onChange(ALL_GENRE_FILTER)} />
+        <GenreChip label="전체" selected={!selectedGenres.length} onPress={() => onChange(ALL_GENRE_FILTER)} />
         {options.map((genre) => (
           <GenreChip
             key={genre}
             label={genre}
-            selected={value === genre}
-            onPress={() => onChange(genre)}
+            selected={selectedGenres.includes(genre)}
+            onPress={() => changeGenre(genre)}
           />
         ))}
       </ScrollView>

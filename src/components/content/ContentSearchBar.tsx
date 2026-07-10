@@ -36,6 +36,8 @@ interface ContentSearchBarProps {
   statusFilter?: LibraryStatusFilter;
   onStatusFilterChange?: (value: LibraryStatusFilter) => void;
   autoFocus?: boolean;
+  examples?: readonly string[];
+  onExamplePress?: (value: string) => void;
 }
 
 export function ContentSearchBar({
@@ -53,7 +55,9 @@ export function ContentSearchBar({
   onGenreFilterChange,
   statusFilter = "all",
   onStatusFilterChange,
-  autoFocus = false
+  autoFocus = false,
+  examples = [],
+  onExamplePress
 }: ContentSearchBarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount = [
@@ -94,7 +98,7 @@ export function ContentSearchBar({
           autoFocus={autoFocus}
           onChangeText={onChangeText}
           onSubmitEditing={onSubmit}
-          placeholder="작품명, 배우, 성우 검색"
+          placeholder="작품명 또는 ‘도깨비 같은 드라마’로 검색"
           returnKeyType="search"
           style={styles.input}
           value={value}
@@ -103,6 +107,15 @@ export function ContentSearchBar({
           <Text style={styles.buttonText}>검색</Text>
         </Pressable>
       </View>
+      {examples.length > 0 ? (
+        <View style={styles.examples}>
+          {examples.map((example) => (
+            <Pressable accessibilityLabel={`예시 검색: ${example}`} accessibilityRole="button" key={example} onPress={() => onExamplePress?.(example)} style={styles.exampleChip}>
+              <Text numberOfLines={1} style={styles.exampleText}>{example}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       <View style={styles.toolbar}>
         <Pressable
           accessibilityRole="button"
@@ -238,6 +251,9 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.sm
   },
+  examples: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  exampleChip: { backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  exampleText: { color: colors.primary, fontSize: 11, fontWeight: "700" },
   toolButton: {
     alignItems: "center",
     borderColor: colors.border,

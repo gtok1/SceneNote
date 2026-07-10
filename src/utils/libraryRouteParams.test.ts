@@ -9,7 +9,7 @@ describe("library route params", () => {
       {
         statusFilter: "completed",
         contentTypeFilter: "kdrama",
-        genreFilter: "Romance",
+        genreFilter: "Romance|Comedy",
         ratingFilter: 7,
         searchQuery: "  채원  ",
         year: "2026",
@@ -21,7 +21,7 @@ describe("library route params", () => {
     assert.deepEqual(params, {
       status: "completed",
       libraryType: "kdrama",
-      genre: "Romance",
+      genre: "Romance|Comedy",
       rating: "7",
       q: "채원",
       year: "2026",
@@ -31,13 +31,17 @@ describe("library route params", () => {
     assert.deepEqual(parseLibraryRouteParams(params), {
       statusFilter: "completed",
       contentTypeFilter: "kdrama",
-      genreFilter: "Romance",
+      genreFilter: "Romance|Comedy",
       ratingFilter: 7,
       searchQuery: "채원",
       year: "2026",
       sortOrder: "oldest",
       viewMode: "gallery"
     });
+  });
+
+  it("restores the synthetic overseas drama type", () => {
+    assert.equal(parseLibraryRouteParams({ libraryType: "foreign_drama" }).contentTypeFilter, "foreign_drama");
   });
 
   it("falls back to defaults for invalid params", () => {

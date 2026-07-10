@@ -1,33 +1,45 @@
-import { useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentSearchBar } from "@/components/content/ContentSearchBar";
+import { PersonalizedRecommendationGalleryCard } from "@/components/content/PersonalizedRecommendationGalleryCard";
+import { PersonalizedRecommendationListItem } from "@/components/content/PersonalizedRecommendationListItem";
+import { RecommendationQuickViewModal } from "@/components/content/RecommendationQuickViewModal";
 import { SearchResultGalleryCard } from "@/components/content/SearchResultGalleryCard";
 import { SearchResultItem } from "@/components/content/SearchResultItem";
+import { SimilarContentQuickViewModal } from "@/components/content/SimilarContentQuickViewModal";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, usePersonContentSearch } from "@/hooks/usePeople";
-import { usePopularRecommendations } from "@/hooks/usePopularRecommendations";
-import type { PopularRecommendation } from "@/services/popularRecommendations";
+import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommendations";
+import { useSimilarContent } from "@/hooks/useSimilarContent";
+import { resolveSimilarityAnchors, shouldAutoSelectAnchor, type SimilarContentResult } from "@/services/similarContent";
+import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
+import { useAppUIStore } from "@/stores/appUIStore";
 import { useSearchUiStore } from "@/stores/searchUiStore";
-import type { ContentType, MediaTypeFilter, SearchResult } from "@/types/content";
+import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import type { PersonSearchResult } from "@/types/people";
 import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { matchesGenreFilter } from "@/utils/genre";
+import { shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
+import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
+import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
+import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus, type SimilaritySort } from "@/utils/similarSearchIntent";
 
 const PERSONALIZED_RECOMMENDATION_LIMIT = 12;
 
 export default function SearchScreen() {
   const router = useRouter();
+  const urlParams = useLocalSearchParams<Record<string, string | string[]>>();
   const { width } = useWindowDimensions();
   const query = useSearchUiStore((state) => state.query);
   const setQuery = useSearchUiStore((state) => state.setQuery);
@@ -46,13 +58,46 @@ export default function SearchScreen() {
   const search = useContentSearch(query, mediaType);
   const personSearch = usePersonContentSearch(query, "all");
   const library = useLibrary("all");
-  const recommendations = usePopularRecommendations();
+  const personalizedRecommendations = usePersonalizedRecommendations(
+    mediaType,
+    library.data ?? [],
+    { enabled: !library.isLoading && !library.isError }
+  );
   const addToLibrary = useAddToLibrary();
   const addFavoritePerson = useAddFavoritePerson();
+  const addToast = useAppUIStore((state) => state.addToast);
   const [addedSearchKeys, setAddedSearchKeys] = useState<Set<string>>(() => new Set());
   const [addedRecommendationKeys, setAddedRecommendationKeys] = useState<Set<string>>(() => new Set());
   const [pendingSearchKey, setPendingSearchKey] = useState<string | null>(null);
-  const [pendingRecommendationKey, setPendingRecommendationKey] = useState<string | null>(null);
+  const [pendingAddIds, setPendingAddIds] = useState<Set<string>>(() => new Set());
+  const [selectedRecommendation, setSelectedRecommendation] = useState<PersonalizedRecommendation | null>(null);
+  const [similarIntent, setSimilarIntent] = useState<Extract<ParsedSearchIntent, { mode: "similarity" }> | null>(null);
+  const [similarAnchor, setSimilarAnchor] = useState<SearchResult | null>(null);
+  const [anchorCandidates, setAnchorCandidates] = useState<SearchResult[]>([]);
+  const [isResolvingAnchor, setIsResolvingAnchor] = useState(false);
+  const [anchorResolutionError, setAnchorResolutionError] = useState<string | null>(null);
+  const [selectedSimilar, setSelectedSimilar] = useState<SimilarContentResult | null>(null);
+  const similarSearch = useSimilarContent(
+    similarAnchor,
+    similarIntent?.targetMediaType ?? "all",
+    similarIntent?.focus ?? "balanced",
+    similarIntent?.sort ?? "similarity",
+    similarIntent?.modifiers ?? []
+  );
+
+  useEffect(() => {
+    if (urlParams.mode !== "similar" || typeof urlParams.anchorSource !== "string" || typeof urlParams.anchorId !== "string" || typeof urlParams.anchorTitle !== "string") return;
+    const restoredQuery = typeof urlParams.q === "string" ? urlParams.q : `${urlParams.anchorTitle} 같은 작품`;
+    const restoredIntent = parseSearchIntent(restoredQuery);
+    const focus = typeof urlParams.focus === "string" ? urlParams.focus as SimilarityFocus : "balanced";
+    const sort = typeof urlParams.similarSort === "string" ? urlParams.similarSort as SimilaritySort : "similarity";
+    const targetMediaType = typeof urlParams.target === "string" ? urlParams.target as MediaTypeFilter : "all";
+    setQuery(restoredQuery);
+    setSimilarIntent(restoredIntent.mode === "similarity" ? { ...restoredIntent, focus, sort, targetMediaType } : { mode:"similarity", normalizedQuery:restoredQuery, anchorText:urlParams.anchorTitle, focus, sort, targetMediaType, modifiers:[] });
+    setSimilarAnchor({external_source:urlParams.anchorSource as SearchResult["external_source"],external_id:urlParams.anchorId,content_type:(typeof urlParams.anchorType==="string"?urlParams.anchorType:"other") as SearchResult["content_type"],title_primary:urlParams.anchorTitle,title_original:null,poster_url:null,overview:null,air_year:null,has_seasons:false,episode_count:null});
+    // URL restoration intentionally runs once; subsequent changes are handled by explicit navigation actions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const yearFilter = normalizeYearFilter(year);
   const libraryItemsByExternalKey = useMemo(() => {
     return new Map(
@@ -87,40 +132,71 @@ export default function SearchScreen() {
     () => baseResults.filter((result) => matchesGenreFilter(result.genres, genreFilter)),
     [baseResults, genreFilter]
   );
-  const isLoading = search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
-  const isError = search.isError && personSearch.isError;
-  const error = search.error ?? personSearch.error;
+  const isSimilarityMode = similarIntent !== null;
+  const isLoading = isSimilarityMode ? isResolvingAnchor || similarSearch.isLoading : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
+  const isError = isSimilarityMode ? similarSearch.isError : search.isError && personSearch.isError;
+  const error = isSimilarityMode ? similarSearch.error : search.error ?? personSearch.error;
   const isGallery = viewMode === "gallery";
-  const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 3;
+  const galleryColumns = getResponsiveRecommendationColumns(width);
+  const showRecommendationFeed = !isSimilarityMode && shouldShowRecommendationFeed(query);
+  const hasSearchInput = !showRecommendationFeed;
   const hasSearchQuery = query.trim().length >= 2;
-  const recommendationPool = useMemo(
-    () => [
-      ...(recommendations.data?.categories.drama ?? []),
-      ...(recommendations.data?.categories.anime ?? [])
-    ],
-    [recommendations.data?.categories.anime, recommendations.data?.categories.drama]
-  );
-  const locallyAddedKeys = useMemo(
-    () => new Set([...addedSearchKeys, ...addedRecommendationKeys]),
-    [addedSearchKeys, addedRecommendationKeys]
-  );
-  const personalizedRecommendations = useMemo(
+  const activeRecommendations = useMemo(
     () =>
-      createPersonalizedRecommendations({
-        addedKeys: locallyAddedKeys,
-        items: recommendationPool,
-        libraryItems: library.data ?? [],
-        mediaType
-      }),
-    [library.data, locallyAddedKeys, mediaType, recommendationPool]
+      personalizedRecommendations.recommendations.filter(
+        (item) =>
+          !addedRecommendationKeys.has(createExternalKey(item)) &&
+          !isRegisteredRecommendation(item, library.data ?? [])
+      ),
+    [addedRecommendationKeys, library.data, personalizedRecommendations.recommendations]
   );
-  const recommendationIsLoading = !hasSearchQuery && (recommendations.isLoading || library.isLoading);
-  const displayedResults = hasSearchQuery ? activeResults : personalizedRecommendations;
-  const displayedAsGallery = !hasSearchQuery || isGallery;
+  const recommendationIsLoading =
+    showRecommendationFeed &&
+    (personalizedRecommendations.isInitialLoading || library.isLoading);
+  const recommendationIsContinuing =
+    showRecommendationFeed &&
+    !recommendationIsLoading &&
+    !personalizedRecommendations.isError &&
+    activeRecommendations.length === 0 &&
+    !personalizedRecommendations.isExhausted;
+  const displayedResults: SearchResult[] = isSimilarityMode ? similarSearch.data?.items ?? [] : hasSearchInput ? activeResults : activeRecommendations;
+  const recommendationPresentations = useMemo(
+    () => new Map(activeRecommendations.map((item) => [item.canonical_id, mapRecommendationToCardViewModel(item)])),
+    [activeRecommendations]
+  );
+  const displayedAsGallery = isGallery;
   const refetch = () => {
-    void search.refetch();
-    void personSearch.refetch();
+    if (!hasSearchQuery) return;
+    const intent = parseSearchIntent(query);
+    if (intent.mode === "similarity") { void resolveAndStartSimilarity(intent); return; }
+    setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null);
+    void search.refetch(); void personSearch.refetch();
   };
+
+  const resolveAndStartSimilarity = async (intent: Extract<ParsedSearchIntent, { mode: "similarity" }>) => {
+    setSimilarIntent(intent); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null); setIsResolvingAnchor(true);
+    try {
+      const candidates = await resolveSimilarityAnchors(intent.anchorText, "all");
+      if (candidates.length === 0) { setAnchorResolutionError("기준 작품을 찾지 못했어요. 작품명을 확인하거나 일반 검색으로 전환해 주세요."); return; }
+      if (shouldAutoSelectAnchor(intent.anchorText, candidates)) { startSimilarity(candidates[0] as SearchResult, intent); return; }
+      setAnchorCandidates(candidates);
+    } catch (resolveError) { setAnchorResolutionError(resolveError instanceof Error ? resolveError.message : "기준 작품을 찾지 못했습니다"); }
+    finally { setIsResolvingAnchor(false); }
+  };
+
+  const startSimilarity = (anchor: SearchResult, intent: Extract<ParsedSearchIntent, { mode: "similarity" }>, pushHistory = true) => {
+    setSimilarIntent(intent); setSimilarAnchor(anchor); setAnchorCandidates([]); setAnchorResolutionError(null); setIsResolvingAnchor(false);
+    if (pushHistory) router.push({pathname:"/search",params:{mode:"similar",q:intent.normalizedQuery,anchorSource:anchor.external_source,anchorId:anchor.external_id,anchorTitle:anchor.title_primary,anchorType:anchor.content_type,focus:intent.focus,target:intent.targetMediaType,similarSort:intent.sort}});
+  };
+
+  const findSimilarFromCard = (anchor: SearchResult) => {
+    const naturalQuery = `${anchor.title_primary} 같은 작품`;
+    const parsed = parseSearchIntent(naturalQuery);
+    if (parsed.mode !== "similarity") return;
+    setQuery(naturalQuery); startSimilarity(anchor, parsed);
+  };
+
+  const handleQueryChange = (value: string) => { setQuery(value); if (isSimilarityMode && value !== similarIntent?.normalizedQuery) { setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null); } };
 
   const openResult = (result: SearchResult) => {
     router.push({
@@ -173,45 +249,115 @@ export default function SearchScreen() {
     );
   };
 
-  const addRecommendationResult = (result: SearchResult) => {
+  const addRecommendationResult = (result: PersonalizedRecommendation) => {
     const key = createExternalKey(result);
-    if (isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)) return;
+    if (
+      pendingAddIds.has(result.canonical_id) ||
+      isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)
+    ) {
+      return;
+    }
 
-    setPendingRecommendationKey(key);
+    const removed = personalizedRecommendations.removeOptimistically(result.canonical_id);
+    if (!removed) return;
+    setPendingAddIds((current) => new Set(current).add(result.canonical_id));
 
     addToLibrary.mutate(
       { result, status: "wishlist" },
       {
         onSuccess: () => {
           setAddedRecommendationKeys((previous) => new Set(previous).add(key));
+          void personalizedRecommendations.refill(removed).then((refillResult) => {
+            if (refillResult === "refilled") {
+              addToast("라이브러리에 추가했어요. 새로운 추천을 불러왔습니다.", "success");
+              return;
+            }
+
+            if (refillResult === "failed") {
+              addToast("라이브러리에 추가했어요. 새 추천은 다시 시도해 주세요.", "success");
+              return;
+            }
+
+            addToast("라이브러리에 추가했어요.", "success");
+          });
         },
         onError: (error) => {
-          Alert.alert("라이브러리 추가 실패", error.message);
+          personalizedRecommendations.restore(removed);
+          addToast(error.message || "라이브러리에 추가하지 못했습니다.", "error");
         },
         onSettled: () => {
-          setPendingRecommendationKey(null);
+          setPendingAddIds((current) => {
+            const next = new Set(current);
+            next.delete(result.canonical_id);
+            return next;
+          });
         }
       }
     );
   };
 
-  const getAddState = (result: SearchResult) => {
+  const getSearchAddState = (result: SearchResult) => {
     const key = createExternalKey(result);
-    const isPending = addToLibrary.isPending && (pendingSearchKey === key || pendingRecommendationKey === key);
+    const isPending = pendingSearchKey === key;
     const isAdded = isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys);
 
     return {
       label: isPending ? "추가 중" : isAdded ? "추가됨" : "추가",
-      disabled: isAdded || addToLibrary.isPending
+      disabled: isAdded || pendingSearchKey !== null || pendingAddIds.size > 0
     };
   };
+
+  const getRecommendationAddState = (result: PersonalizedRecommendation) => {
+    const isPending = pendingAddIds.has(result.canonical_id);
+    const isAdded = isResultAlreadyAdded(
+      result,
+      libraryItemsByExternalKey,
+      addedSearchKeys,
+      addedRecommendationKeys
+    );
+
+    return {
+      label: isPending ? "추가 중" : isAdded ? "추가됨" : "추가",
+      disabled:
+        isAdded ||
+        pendingAddIds.size > 0 ||
+        pendingSearchKey !== null ||
+        personalizedRecommendations.isRefreshing ||
+        personalizedRecommendations.isRefilling
+    };
+  };
+
+  const refreshRecommendations = async () => {
+    const refreshed = await personalizedRecommendations.refresh();
+    if (!refreshed) {
+      addToast("새 추천을 불러오지 못했습니다. 다시 시도해 주세요.", "error");
+    }
+  };
+
+  const retryRecommendationRefill = async () => {
+    const result = await personalizedRecommendations.retryRefill();
+    if (result === "refilled") {
+      addToast("새로운 추천을 불러왔습니다.", "success");
+    } else if (result === "failed") {
+      addToast("새 추천을 다시 불러오지 못했습니다.", "error");
+    }
+  };
+
+  const recommendationActionsDisabled =
+    personalizedRecommendations.isRefreshing ||
+    personalizedRecommendations.isRefilling ||
+    pendingAddIds.size > 0 ||
+    recommendationIsLoading ||
+    library.isError;
 
   return (
     <View style={styles.container}>
       <ContentSearchBar
         autoFocus
+        examples={showRecommendationFeed ? SIMILAR_SEARCH_EXAMPLES : []}
         mediaTypeFilter={mediaType}
-        onChangeText={setQuery}
+        onChangeText={handleQueryChange}
+        onExamplePress={(example) => { setQuery(example); const parsed=parseSearchIntent(example); if(parsed.mode==="similarity") void resolveAndStartSimilarity(parsed); }}
         onMediaTypeChange={setMediaType}
         onGenreFilterChange={setGenreFilter}
         onSortOrderChange={setSortOrder}
@@ -226,7 +372,7 @@ export default function SearchScreen() {
         year={year}
       />
 
-      {personSearch.data?.people.length ? (
+      {!isSimilarityMode && hasSearchQuery && personSearch.data?.people.length ? (
         <View style={styles.peopleSection}>
           <Text style={styles.sectionTitle}>찾은 인물</Text>
           <View style={styles.peopleList}>
@@ -245,7 +391,7 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      {search.data?.partial || personSearch.data?.failedSources.length ? (
+      {!isSimilarityMode && hasSearchQuery && (search.data?.partial || personSearch.data?.failedSources.length) ? (
         <Text style={styles.partial}>일부 외부 API 결과가 표시되지 않을 수 있습니다.</Text>
       ) : null}
 
@@ -276,35 +422,141 @@ export default function SearchScreen() {
         })}
       </View>
 
-      {hasSearchQuery && isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
-      {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
-      {recommendationIsLoading ? <LoadingSkeleton count={6} variant="search-result" /> : null}
-      {!hasSearchQuery && recommendations.isError ? (
-        <ErrorState
-          message="추천 작품을 불러오지 못했습니다"
-          onRetry={() => recommendations.refetch()}
-        />
+      {isSimilarityMode ? (
+        <View style={styles.similarHeader}>
+          <Text style={styles.recommendationTitle}>비슷한 작품 찾기</Text>
+          {similarAnchor ? <Text style={styles.resultsHint}>기준 작품: {similarAnchor.title_primary} · {focusLabel(similarIntent.focus)} 중심</Text> : null}
+          <View style={styles.similarFilters}>
+            {(["similarity","latest","popular"] as const).map((value)=><Pressable accessibilityRole="button" accessibilityState={{selected:similarIntent.sort===value}} key={value} onPress={()=>{setSimilarIntent((current)=>current?{...current,sort:value}:current);router.setParams({similarSort:value});}} style={[styles.similarChip,similarIntent.sort===value&&styles.similarChipSelected]}><Text style={[styles.similarChipText,similarIntent.sort===value&&styles.similarChipTextSelected]}>{value==="similarity"?"유사도순":value==="latest"?"최신순":"인기순"}</Text></Pressable>)}
+            {(["balanced","mood","story","genre"] as const).map((value)=><Pressable accessibilityRole="button" accessibilityState={{selected:similarIntent.focus===value}} key={value} onPress={()=>{setSimilarIntent((current)=>current?{...current,focus:value}:current);router.setParams({focus:value});}} style={[styles.similarChip,similarIntent.focus===value&&styles.similarChipSelected]}><Text style={[styles.similarChipText,similarIntent.focus===value&&styles.similarChipTextSelected]}>{focusLabel(value)}</Text></Pressable>)}
+            {similarIntent.modifiers.map((modifier)=><Pressable accessibilityLabel={`${modifier.label} 필터 제거`} accessibilityRole="button" key={`${modifier.direction}:${modifier.key}`} onPress={()=>setSimilarIntent((current)=>current?{...current,modifiers:current.modifiers.filter((item)=>item!==modifier)}:current)} style={styles.appliedChip}><Text style={styles.appliedChipText}>{modifier.label} ×</Text></Pressable>)}
+          </View>
+          <Text accessibilityLiveRegion="polite" style={styles.liveStatus}>{isResolvingAnchor?"기준 작품을 찾고 있습니다.":similarSearch.isLoading?"비슷한 작품을 찾고 있습니다.":similarAnchor?`비슷한 작품 ${similarSearch.data?.items.length??0}개가 표시되었습니다.`:"기준 작품을 선택해 주세요."}</Text>
+          {similarSearch.data?.warnings[0] ? <Text style={styles.recommendationNotice}>{similarSearch.data.warnings[0]}</Text> : null}
+        </View>
       ) : null}
-      {!isLoading && hasSearchQuery && activeResults.length === 0 ? (
-        <EmptyState description="작품명, 배우, 성우 이름을 다른 키워드로 검색해 보세요." title="검색 결과가 없습니다" />
-      ) : null}
-      {!hasSearchQuery && !recommendationIsLoading && !recommendations.isError && personalizedRecommendations.length === 0 ? (
-        <EmptyState
-          description="라이브러리에 작품을 더 등록하면 취향 추천이 더 정교해집니다."
-          title="추천할 작품을 찾고 있어요"
-        />
-      ) : null}
+      {anchorCandidates.length>0 ? <View accessibilityLabel="기준 작품 선택" accessibilityRole="summary" style={styles.anchorDialog}><Text style={styles.sectionTitle}>어떤 작품을 기준으로 찾을까요?</Text><View style={styles.anchorOptions}>{anchorCandidates.map((candidate)=><Pressable accessibilityRole="button" key={createExternalKey(candidate)} onPress={()=>startSimilarity(candidate,similarIntent as Extract<ParsedSearchIntent,{mode:"similarity"}>)} style={styles.anchorOption}><Text style={styles.anchorTitle}>{candidate.title_primary}</Text><Text style={styles.resultsHint}>{[candidate.air_year,candidate.content_type,candidate.external_source.toUpperCase()].filter(Boolean).join(" · ")}</Text></Pressable>)}</View></View>:null}
+      {anchorResolutionError ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{anchorResolutionError}</Text><Pressable accessibilityRole="button" onPress={()=>{setSimilarIntent(null);setAnchorResolutionError(null);void search.refetch();}} style={styles.inlineRetryButton}><Text style={styles.inlineRetryText}>일반 검색으로 보기</Text></Pressable></View>:null}
 
-      {!hasSearchQuery && !recommendationIsLoading && personalizedRecommendations.length > 0 ? (
+      {showRecommendationFeed ? (
         <View style={styles.resultsHeader}>
-          <Text style={styles.sectionTitle}>내 취향 추천</Text>
-          <Text style={styles.resultsHint}>
-            등록한 작품은 제외하고 {PERSONALIZED_RECOMMENDATION_LIMIT}개를 먼저 보여줍니다.
+          <View style={styles.recommendationHeaderRow}>
+            <View style={styles.recommendationHeaderText}>
+              <Text style={styles.recommendationTitle}>내 취향 최신 추천</Text>
+              <Text style={styles.resultsHint}>
+                추가한 작품을 분석해 아직 등록하지 않은 최신 드라마·애니 12개를 보여드려요.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel="새 추천 12개 불러오기"
+              accessibilityRole="button"
+              accessibilityState={{
+                busy: personalizedRecommendations.isRefreshing,
+                disabled: recommendationActionsDisabled
+              }}
+              disabled={recommendationActionsDisabled}
+              onPress={() => void refreshRecommendations()}
+              style={({ pressed }) => [
+                styles.refreshButton,
+                pressed ? styles.refreshButtonPressed : null,
+                recommendationActionsDisabled ? styles.refreshButtonDisabled : null
+              ]}
+            >
+              {personalizedRecommendations.isRefreshing ? (
+                <ActivityIndicator color={colors.primary} size="small" />
+              ) : (
+                <Ionicons color={colors.primary} name="refresh-outline" size={17} />
+              )}
+              <Text style={styles.refreshButtonText}>새 추천 12개</Text>
+            </Pressable>
+          </View>
+          {personalizedRecommendations.data?.profile_mode === "cold_start" ? (
+            <Text style={styles.recommendationNotice}>
+              작품을 추가하면 취향에 맞는 추천이 더 정확해져요.
+            </Text>
+          ) : null}
+          <Text accessibilityLiveRegion="polite" style={styles.liveStatus}>
+            {recommendationIsLoading || recommendationIsContinuing
+              ? "최신 작품부터 이전 공개작까지 새로운 추천을 찾고 있어요."
+              : personalizedRecommendations.isRefreshing
+              ? "새 추천 12개를 불러오는 중입니다."
+              : personalizedRecommendations.isRefilling
+                ? "빈 자리에 표시할 새 추천을 불러오는 중입니다."
+                : `추천 작품 ${activeRecommendations.length}개가 표시되었습니다.`}
           </Text>
         </View>
       ) : null}
 
-      {hasSearchQuery && !isLoading && activeResults.length > 0 ? (
+      {hasSearchQuery && isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
+      {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
+      {recommendationIsLoading || recommendationIsContinuing ? (
+        <LoadingSkeleton
+          columns={displayedAsGallery ? galleryColumns : 1}
+          count={PERSONALIZED_RECOMMENDATION_LIMIT}
+          variant="recommendation-card"
+        />
+      ) : null}
+      {showRecommendationFeed && library.isError ? (
+        <ErrorState
+          message="라이브러리 정보를 불러오지 못해 취향을 분석할 수 없습니다"
+          onRetry={() => void library.refetch()}
+        />
+      ) : null}
+      {showRecommendationFeed && personalizedRecommendations.isError && activeRecommendations.length === 0 ? (
+        <ErrorState
+          message="추천 데이터를 불러오지 못했습니다. 다시 시도해 주세요."
+          onRetry={() => void personalizedRecommendations.refetch()}
+        />
+      ) : null}
+      {showRecommendationFeed && personalizedRecommendations.refreshError ? (
+        <View style={styles.inlineError}>
+          <Text style={styles.inlineErrorText}>{personalizedRecommendations.refreshError}</Text>
+          <Pressable
+            accessibilityLabel="새 추천 12개 다시 시도"
+            accessibilityRole="button"
+            onPress={() => void refreshRecommendations()}
+            style={styles.inlineRetryButton}
+          >
+            <Text style={styles.inlineRetryText}>다시 시도</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {showRecommendationFeed && personalizedRecommendations.refillError ? (
+        <View style={styles.inlineError}>
+          <Text style={styles.inlineErrorText}>{personalizedRecommendations.refillError}</Text>
+          <Pressable
+            accessibilityLabel="빈 추천 자리 다시 채우기"
+            accessibilityRole="button"
+            disabled={personalizedRecommendations.isRefilling}
+            onPress={() => void retryRecommendationRefill()}
+            style={styles.inlineRetryButton}
+          >
+            <Text style={styles.inlineRetryText}>1개 다시 불러오기</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {hasSearchInput && !hasSearchQuery ? (
+        <EmptyState description="검색어를 한 글자 더 입력해 주세요." title="두 글자 이상 입력해 주세요" />
+      ) : null}
+      {!isSimilarityMode && !isLoading && hasSearchQuery && activeResults.length === 0 ? (
+        <EmptyState description="작품명, 배우, 성우 이름을 다른 키워드로 검색해 보세요." title="검색 결과가 없습니다" />
+      ) : null}
+      {isSimilarityMode && similarAnchor && !isLoading && !isError && (similarSearch.data?.items.length ?? 0) === 0 ? (
+        <EmptyState description="분위기나 장르 기준으로 바꾸거나 콘텐츠 유형 제한을 해제해 보세요." title="이 작품과 비슷한 결과를 찾지 못했어요" />
+      ) : null}
+      {showRecommendationFeed &&
+      !recommendationIsLoading &&
+      !library.isError &&
+      !personalizedRecommendations.isError &&
+      personalizedRecommendations.isExhausted &&
+      activeRecommendations.length === 0 ? (
+        <EmptyState
+          description="새 작품이 데이터 소스에 추가되면 다시 추천을 시작합니다."
+          title="현재 제공되는 모든 작품을 확인했어요"
+        />
+      ) : null}
+
+      {!isSimilarityMode && hasSearchQuery && !isLoading && activeResults.length > 0 ? (
         <View style={styles.resultsHeader}>
           <Text style={styles.sectionTitle}>검색 결과</Text>
           <Text style={styles.resultsHint}>
@@ -313,37 +565,101 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      <FlashList
-        contentContainerStyle={styles.resultsList}
-        ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
-        data={displayedResults}
-        key={`${hasSearchQuery ? "search" : "recommendations"}-${viewMode}`}
-        keyExtractor={(item) => `${item.external_source}:${item.external_id}`}
-        numColumns={displayedAsGallery ? galleryColumns : 1}
-        renderItem={({ item }) => {
-          const addState = getAddState(item);
-
-          return displayedAsGallery ? (
-            <SearchResultGalleryCard
-              addLabel={addState.label}
-              isAddDisabled={addState.disabled}
-              libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
-              onAddToLibrary={() => (hasSearchQuery ? addResult(item) : addRecommendationResult(item))}
-              onPress={() => openResult(item)}
-              result={item}
-            />
-          ) : (
-            <SearchResultItem
-              addLabel={addState.label}
-              isAddDisabled={addState.disabled}
-              libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
-              onAddToLibrary={() => addResult(item)}
-              onPress={() => openResult(item)}
-              result={item}
-            />
-          );
+      <View
+        accessibilityState={{
+          busy: personalizedRecommendations.isRefreshing || personalizedRecommendations.isRefilling
         }}
+        style={styles.listContainer}
+      >
+        <FlashList
+          contentContainerStyle={styles.resultsList}
+          data={displayedResults}
+          extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${library.data?.length ?? 0}`}
+          ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
+          key={`${hasSearchInput ? "search" : "recommendations"}-${mediaType}-${viewMode}`}
+          keyExtractor={(item) => `${item.external_source}:${item.external_id}`}
+          numColumns={displayedAsGallery ? galleryColumns : 1}
+          renderItem={({ item }) => {
+            const similarResult = isSimilarContentResult(item) ? item : null;
+            const recommendation = isPersonalizedRecommendation(item) ? item : null;
+            const addState = recommendation
+              ? getRecommendationAddState(recommendation)
+              : getSearchAddState(item);
+
+            if (similarResult) {
+              return displayedAsGallery ? (
+                <SearchResultGalleryCard addLabel={addState.label} isAddDisabled={addState.disabled} libraryItem={libraryItemsByExternalKey.get(createExternalKey(item))??null} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+              ) : (
+                <SearchResultItem addLabel={addState.label} isAddDisabled={addState.disabled} libraryItem={libraryItemsByExternalKey.get(createExternalKey(item))??null} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+              );
+            }
+
+            if (recommendation) {
+              const presentation = recommendationPresentations.get(recommendation.canonical_id) ??
+                mapRecommendationToCardViewModel(recommendation);
+              return displayedAsGallery ? (
+                <PersonalizedRecommendationGalleryCard
+                  addLabel={addState.label}
+                  isAddDisabled={addState.disabled}
+                  onAddToLibrary={() => addRecommendationResult(recommendation)}
+                  onOpenQuickView={() => setSelectedRecommendation(recommendation)}
+                  presentation={presentation}
+                  result={recommendation}
+                />
+              ) : (
+                <PersonalizedRecommendationListItem
+                  addLabel={addState.label}
+                  isAddDisabled={addState.disabled}
+                  onAddToLibrary={() => addRecommendationResult(recommendation)}
+                  onOpenQuickView={() => setSelectedRecommendation(recommendation)}
+                  presentation={presentation}
+                  result={recommendation}
+                />
+              );
+            }
+
+            return displayedAsGallery ? (
+              <SearchResultGalleryCard
+                addLabel={addState.label}
+                isAddDisabled={addState.disabled}
+                libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
+                onAddToLibrary={() => addResult(item)}
+                onFindSimilar={() => findSimilarFromCard(item)}
+                onPress={() => openResult(item)}
+                result={item}
+              />
+            ) : (
+              <SearchResultItem
+                addLabel={addState.label}
+                isAddDisabled={addState.disabled}
+                libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
+                onAddToLibrary={() => addResult(item)}
+                onFindSimilar={() => findSimilarFromCard(item)}
+                onPress={() => openResult(item)}
+                result={item}
+              />
+            );
+          }}
+        />
+      </View>
+      <RecommendationQuickViewModal
+        addLabel={selectedRecommendation ? getRecommendationAddState(selectedRecommendation).label : "추가"}
+        isAddDisabled={selectedRecommendation ? getRecommendationAddState(selectedRecommendation).disabled : true}
+        item={selectedRecommendation}
+        onAdd={(item) => {
+          setSelectedRecommendation(null);
+          addRecommendationResult(item);
+        }}
+        onClose={() => setSelectedRecommendation(null)}
+        onOpenDetails={(item) => {
+          setSelectedRecommendation(null);
+          openResult(item);
+        }}
+        presentation={selectedRecommendation
+          ? recommendationPresentations.get(selectedRecommendation.canonical_id) ?? mapRecommendationToCardViewModel(selectedRecommendation)
+          : null}
       />
+      <SimilarContentQuickViewModal addLabel={selectedSimilar?getSearchAddState(selectedSimilar).label:"추가"} isAddDisabled={selectedSimilar?getSearchAddState(selectedSimilar).disabled:true} item={selectedSimilar} onAdd={(item)=>{setSelectedSimilar(null);addResult(item);}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
     </View>
   );
 }
@@ -359,6 +675,20 @@ function createExternalKey(result: SearchResult): string {
   return `${result.external_source}:${result.external_id}`;
 }
 
+function isPersonalizedRecommendation(
+  result: SearchResult
+): result is PersonalizedRecommendation {
+  return "canonical_id" in result && typeof result.canonical_id === "string";
+}
+
+function isSimilarContentResult(result: SearchResult): result is SimilarContentResult {
+  return "similarity_reason" in result && typeof result.similarity_reason === "string";
+}
+
+function focusLabel(focus: SimilarityFocus): string {
+  return ({balanced:"균형",mood:"분위기",story:"스토리",setting:"세계관",relationship:"관계성",genre:"장르",character:"캐릭터"})[focus];
+}
+
 function isResultAlreadyAdded(
   result: SearchResult,
   libraryItemsByExternalKey: Map<string, LibraryListItem>,
@@ -367,100 +697,6 @@ function isResultAlreadyAdded(
 ): boolean {
   const key = createExternalKey(result);
   return libraryItemsByExternalKey.has(key) || addedSearchKeys.has(key) || addedRecommendationKeys.has(key);
-}
-
-function createPersonalizedRecommendations({
-  items,
-  libraryItems,
-  addedKeys,
-  mediaType
-}: {
-  items: PopularRecommendation[];
-  libraryItems: LibraryListItem[];
-  addedKeys: Set<string>;
-  mediaType: MediaTypeFilter;
-}): PopularRecommendation[] {
-  const profile = createPreferenceProfile(libraryItems);
-  const dedupedItems = dedupeRecommendations(items);
-
-  return dedupedItems
-    .filter((item) => filterResultsByMediaType([item], mediaType).length > 0)
-    .filter((item) => !addedKeys.has(createExternalKey(item)))
-    .filter((item) => !isRegisteredRecommendation(item, libraryItems))
-    .map((item, index) => ({
-      item,
-      score: scoreRecommendation(item, profile, index)
-    }))
-    .sort((left, right) => right.score - left.score || left.item.rank - right.item.rank)
-    .slice(0, PERSONALIZED_RECOMMENDATION_LIMIT)
-    .map(({ item }, index) => ({ ...item, rank: index + 1 }));
-}
-
-function dedupeRecommendations(items: PopularRecommendation[]): PopularRecommendation[] {
-  const deduped: PopularRecommendation[] = [];
-
-  for (const item of items) {
-    if (
-      deduped.some((previous) =>
-        isSameExternalResult(previous, item) || isSameWorkResult(previous, item)
-      )
-    ) {
-      continue;
-    }
-
-    deduped.push(item);
-  }
-
-  return deduped;
-}
-
-function createPreferenceProfile(libraryItems: LibraryListItem[]) {
-  const contentTypeScores = new Map<ContentType, number>();
-  const genreScores = new Map<string, number>();
-
-  for (const item of libraryItems) {
-    const weight = getLibraryPreferenceWeight(item);
-    contentTypeScores.set(item.content_type, (contentTypeScores.get(item.content_type) ?? 0) + weight);
-
-    for (const genre of item.genres ?? []) {
-      const key = genre.toLocaleLowerCase();
-      genreScores.set(key, (genreScores.get(key) ?? 0) + weight);
-    }
-  }
-
-  return {
-    contentTypeScores,
-    genreScores,
-    hasPreferences: libraryItems.length > 0
-  };
-}
-
-function getLibraryPreferenceWeight(item: LibraryListItem): number {
-  const statuses = item.statuses;
-  if (statuses.includes("not_recommended") || statuses.includes("dropped")) return -3;
-  if (statuses.includes("recommended")) return 7;
-  if (statuses.includes("completed")) return 5 + Math.min(item.watch_count ?? 0, 3);
-  if (statuses.includes("watching")) return 4;
-  return 1;
-}
-
-function scoreRecommendation(
-  item: PopularRecommendation,
-  profile: ReturnType<typeof createPreferenceProfile>,
-  index: number
-): number {
-  const typeScore = profile.contentTypeScores.get(item.content_type) ?? 0;
-  const genreScore = (item.genres ?? []).reduce(
-    (sum, genre) => sum + (profile.genreScores.get(genre.toLocaleLowerCase()) ?? 0),
-    0
-  );
-  const preferenceScore = typeScore * 2 + genreScore;
-  const fallbackTrendScore = Math.max(0, 30 - index);
-  const rankScore = Math.max(0, 20 - item.rank);
-
-  return profile.hasPreferences
-    ? preferenceScore * 10 + rankScore + fallbackTrendScore / 10
-    : rankScore + fallbackTrendScore;
 }
 
 function isRegisteredRecommendation(result: SearchResult, libraryItems: LibraryListItem[]): boolean {
@@ -691,14 +927,110 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   resultsHeader: {
-    gap: 2,
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
+  },
+  similarHeader: { gap: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.lg },
+  similarFilters: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  similarChip: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  similarChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  similarChipText: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+  similarChipTextSelected: { color: colors.surface },
+  appliedChip: { backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  appliedChipText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
+  anchorDialog: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, marginBottom: spacing.sm, marginHorizontal: spacing.lg, padding: spacing.md },
+  anchorOptions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  anchorOption: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, minWidth: 180, padding: spacing.sm },
+  anchorTitle: { color: colors.text, fontSize: 13, fontWeight: "900" },
+  recommendationHeaderRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    justifyContent: "space-between"
+  },
+  recommendationHeaderText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 240
+  },
+  recommendationTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  refreshButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  refreshButtonPressed: {
+    backgroundColor: colors.primarySoft
+  },
+  refreshButtonDisabled: {
+    opacity: 0.55
+  },
+  refreshButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  recommendationNotice: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  liveStatus: {
+    height: 1,
+    opacity: 0,
+    position: "absolute",
+    width: 1
+  },
+  inlineError: {
+    alignItems: "center",
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.md,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+    marginHorizontal: spacing.lg,
+    padding: spacing.sm
+  },
+  inlineErrorText: {
+    color: colors.danger,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  inlineRetryButton: {
+    backgroundColor: colors.surface,
+    borderColor: colors.danger,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
+  },
+  inlineRetryText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: "900"
   },
   resultsHint: {
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: "700"
+  },
+  listContainer: {
+    flex: 1
   },
   resultsList: {
     paddingBottom: 88

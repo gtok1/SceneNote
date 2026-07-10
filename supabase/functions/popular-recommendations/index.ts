@@ -146,6 +146,8 @@ const ANIME_KOREAN_ENRICHMENT_CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
 const ANIME_KOREAN_ENRICHMENT_CONCURRENCY = 5;
 const POPULAR_CACHE_SOURCE: ExternalSource = "tmdb";
 const ANILIST_KOREAN_CACHE_SOURCE: ExternalSource = "anilist";
+const EXCLUDED_TMDB_DRAMA_GENRE_IDS: readonly number[] = [16, 10763, 10764, 10767];
+const TMDB_DRAMA_EXCLUDED_GENRES = EXCLUDED_TMDB_DRAMA_GENRE_IDS.join(",");
 const responseCache = new Map<string, { expiresAt: number; response: RecommendationsResponse }>();
 const TMDB_GENRE_NAMES = new Map<number, string>([
   [12, "Adventure"],
@@ -285,9 +287,8 @@ async function fetchDramaRecommendations(options: RecommendationOptions): Promis
       include_null_first_air_dates: "false",
       sort_by: "popularity.desc",
       watch_region: TMDB_REGION,
-      with_genres: "18",
       with_origin_country: "KR",
-      without_genres: "16"
+      without_genres: TMDB_DRAMA_EXCLUDED_GENRES
     }, fetchPages),
     fetchTmdbTvPages("/discover/tv", apiKey, {
       "first_air_date.gte": windowBounds.startDate,
@@ -295,9 +296,8 @@ async function fetchDramaRecommendations(options: RecommendationOptions): Promis
       include_null_first_air_dates: "false",
       sort_by: "popularity.desc",
       watch_region: TMDB_REGION,
-      with_genres: "18",
       with_origin_country: "JP",
-      without_genres: "16"
+      without_genres: TMDB_DRAMA_EXCLUDED_GENRES
     }, fetchPages)
   ]);
 
@@ -372,8 +372,7 @@ function normalizeTmdbDrama(
   trendSource: string
 ): Omit<PopularRecommendation, "rank"> | null {
   if (!item.id || !item.name?.trim()) return null;
-  if (item.genre_ids?.includes(16)) return null;
-  if (!item.genre_ids?.includes(18)) return null;
+  if (hasExcludedTmdbDramaGenre(item.genre_ids)) return null;
 
   const contentType = inferTmdbTvContentType({
     originCountry: item.origin_country,
@@ -628,6 +627,10 @@ function genreNamesFromIds(genreIds?: number[] | null): string[] {
         .filter((name): name is string => Boolean(name))
     )
   );
+}
+
+function hasExcludedTmdbDramaGenre(genreIds?: number[] | null): boolean {
+  return (genreIds ?? []).some((id) => EXCLUDED_TMDB_DRAMA_GENRE_IDS.includes(id));
 }
 
 function cleanText(value: unknown): string | null {

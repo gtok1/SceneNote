@@ -1,9 +1,30 @@
 import { corsHeaders, json, jsonError } from "../_shared/http.ts";
+import {
+  addDays,
+  DEFAULT_CANDIDATE_WINDOW_DAYS,
+  formatDateInput,
+  getCandidateWindowBounds,
+  isWithinCandidateWindow,
+  rankPopularRecommendations,
+  toFuzzyDateNumber
+} from "../_shared/popularRanking.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
 import type { ContentType, ExternalSource } from "../_shared/types.ts";
 
 type RecommendationCategory = "drama" | "anime";
+
+interface PopularRecommendationsRequest {
+  candidate_years?: number;
+  candidate_days?: number;
+  pool_limit?: number;
+}
+
+interface RecommendationOptions {
+  candidateWindowDays: number;
+  poolLimit: number;
+  now: Date;
+}
 
 interface PopularRecommendation {
   external_source: ExternalSource;
@@ -23,6 +44,8 @@ interface PopularRecommendation {
   rank: number;
   trend_source: string;
   release_month?: number | null;
+  popularity?: number | null;
+  trendingIndex?: number | null;
 }
 
 interface RecommendationsResponse {
@@ -41,6 +64,7 @@ interface TmdbTvItem {
   first_air_date?: string | null;
   origin_country?: string[] | null;
   genre_ids?: number[] | null;
+  popularity?: number | null;
 }
 
 interface TmdbTvResponse {
@@ -102,13 +126,15 @@ interface TmdbTranslationResponse {
 
 const TMDB_LANGUAGE = "ko-KR";
 const TMDB_REGION = "KR";
-const CURRENT_RELEASE_YEAR = new Date().getUTCFullYear();
-const CURRENT_RELEASE_MONTH = new Date().getUTCMonth() + 1;
-const CURRENT_RELEASE_MONTH_END_DATE = `${CURRENT_RELEASE_YEAR}-${String(CURRENT_RELEASE_MONTH).padStart(2, "0")}-${String(
-  new Date(Date.UTC(CURRENT_RELEASE_YEAR, CURRENT_RELEASE_MONTH, 0)).getUTCDate()
-).padStart(2, "0")}`;
-const RECOMMENDATION_POOL_LIMIT = 30;
-const TMDB_FETCH_PAGES = 2;
+const DEFAULT_CANDIDATE_YEARS = 1;
+const MAX_CANDIDATE_YEARS = 5;
+const MAX_CANDIDATE_WINDOW_DAYS = 365 * MAX_CANDIDATE_YEARS;
+const DEFAULT_RECOMMENDATION_POOL_LIMIT = 30;
+const MAX_RECOMMENDATION_POOL_LIMIT = 60;
+const POPULAR_CACHE_TTL_MS = 5 * 60_000;
+const POPULAR_CACHE_MAX_ENTRIES = 100;
+const ANIME_KOREAN_ENRICHMENT_LIMIT = 20;
+const responseCache = new Map<string, { expiresAt: number; response: RecommendationsResponse }>();
 const TMDB_GENRE_NAMES = new Map<number, string>([
   [12, "Adventure"],
   [14, "Fantasy"],
@@ -131,9 +157,15 @@ const TMDB_GENRE_NAMES = new Map<number, string>([
 ]);
 
 const ANILIST_TRENDING_QUERY = `
-  query TrendingAnime($page: Int!, $perPage: Int!) {
+  query TrendingAnime($page: Int!, $perPage: Int!, $startDateGreater: FuzzyDateInt!, $startDateLesser: FuzzyDateInt!) {
     Page(page: $page, perPage: $perPage) {
-      media(type: ANIME, sort: TRENDING_DESC, isAdult: false) {
+      media(
+        type: ANIME
+        sort: [TRENDING_DESC, START_DATE_DESC]
+        isAdult: false
+        startDate_greater: $startDateGreater
+        startDate_lesser: $startDateLesser
+      ) {
         id
         title {
           romaji
@@ -163,13 +195,26 @@ Deno.serve(async (req: Request) => {
     return jsonError(405, "METHOD_NOT_ALLOWED", "POST or GET method required");
   }
 
+  let user: { id: string; jwt: string };
   try {
-    const user = await requireUser(req);
+    user = await requireUser(req);
+  } catch {
+    return jsonError(401, "UNAUTHORIZED", "Valid JWT required");
+  }
+
+  const parsedOptions = await parseRecommendationOptions(req);
+  if (!parsedOptions.ok) return jsonError(400, "INVALID_REQUEST", parsedOptions.message);
+  const options = parsedOptions.value;
+  const cacheKey = `${user.id}:${formatDateInput(options.now)}:${options.candidateWindowDays}:${options.poolLimit}`;
+  const cachedResponse = getCachedResponse(cacheKey);
+  if (cachedResponse) return json(cachedResponse);
+
+  try {
     const excludedKeys = await getUserLibraryExternalKeys(user.id);
 
     const [dramaResult, animeResult] = await Promise.allSettled([
-      fetchDramaRecommendations(excludedKeys),
-      fetchAnimeRecommendations(excludedKeys)
+      fetchDramaRecommendations(excludedKeys, options),
+      fetchAnimeRecommendations(excludedKeys, options)
     ]);
 
     const drama = dramaResult.status === "fulfilled" ? dramaResult.value : [];
@@ -201,38 +246,46 @@ Deno.serve(async (req: Request) => {
       partial: failedSources.length > 0
     };
 
+    setCachedResponse(cacheKey, response);
     return json(response);
-  } catch {
-    return jsonError(401, "UNAUTHORIZED", "Valid JWT required");
+  } catch (error) {
+    console.error("popular-recommendations failed:", error);
+    return jsonError(500, "RECOMMENDATION_FAILED", "Failed to build popular recommendations");
   }
 });
 
-async function fetchDramaRecommendations(excludedKeys: Set<string>): Promise<PopularRecommendation[]> {
+async function fetchDramaRecommendations(
+  excludedKeys: Set<string>,
+  options: RecommendationOptions
+): Promise<PopularRecommendation[]> {
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
 
+  const windowBounds = getCandidateWindowBounds(options.now, options.candidateWindowDays);
+  const fetchPages = getTmdbFetchPages(options.poolLimit);
+
   const [trendingResult, discoveredKrResult, discoveredJpResult] = await Promise.allSettled([
-    fetchTmdbTvPages("/trending/tv/week", apiKey),
+    fetchTmdbTvPages("/trending/tv/week", apiKey, {}, fetchPages),
     fetchTmdbTvPages("/discover/tv", apiKey, {
-      "first_air_date.gte": `${CURRENT_RELEASE_YEAR}-01-01`,
-      "first_air_date.lte": CURRENT_RELEASE_MONTH_END_DATE,
+      "first_air_date.gte": windowBounds.startDate,
+      "first_air_date.lte": windowBounds.endDate,
       include_null_first_air_dates: "false",
       sort_by: "popularity.desc",
       watch_region: TMDB_REGION,
       with_genres: "18",
       with_origin_country: "KR",
       without_genres: "16"
-    }),
+    }, fetchPages),
     fetchTmdbTvPages("/discover/tv", apiKey, {
-      "first_air_date.gte": `${CURRENT_RELEASE_YEAR}-01-01`,
-      "first_air_date.lte": CURRENT_RELEASE_MONTH_END_DATE,
+      "first_air_date.gte": windowBounds.startDate,
+      "first_air_date.lte": windowBounds.endDate,
       include_null_first_air_dates: "false",
       sort_by: "popularity.desc",
       watch_region: TMDB_REGION,
       with_genres: "18",
       with_origin_country: "JP",
       without_genres: "16"
-    })
+    }, fetchPages)
   ]);
 
   const trending = settledItems(trendingResult, "TMDB weekly trending");
@@ -251,9 +304,15 @@ async function fetchDramaRecommendations(excludedKeys: Set<string>): Promise<Pop
   const merged = candidates
     .map(({ item, trendSource }) => normalizeTmdbDrama(item, trendSource))
     .filter((item): item is Omit<PopularRecommendation, "rank"> => Boolean(item))
-    .filter((item) => item.air_year === CURRENT_RELEASE_YEAR);
+    .filter((item) =>
+      isWithinCandidateWindow(
+        { air_date: item.air_date, air_year: item.air_year },
+        options.now,
+        options.candidateWindowDays
+      )
+    );
 
-  return rankRecommendations(merged, "drama", excludedKeys);
+  return rankRecommendations(merged, "drama", excludedKeys, options);
 }
 
 function settledItems<T>(result: PromiseSettledResult<T[]>, sourceName: string): T[] {
@@ -286,7 +345,7 @@ async function fetchTmdbTvPages(
   path: string,
   apiKey: string,
   extraParams: Record<string, string> = {},
-  pages = TMDB_FETCH_PAGES
+  pages = 1
 ): Promise<TmdbTvItem[]> {
   const settled = await Promise.allSettled(
     Array.from({ length: pages }, (_, index) => fetchTmdbTv(path, apiKey, extraParams, index + 1))
@@ -325,42 +384,84 @@ function normalizeTmdbDrama(
     episode_count: null,
     genres: genreNamesFromIds(item.genre_ids),
     category: "drama",
-    trend_source: trendSource
+    trend_source: trendSource,
+    popularity: positiveFiniteOrNull(item.popularity)
   };
 }
 
-async function fetchAnimeRecommendations(excludedKeys: Set<string>): Promise<PopularRecommendation[]> {
+async function fetchAnimeRecommendations(
+  excludedKeys: Set<string>,
+  options: RecommendationOptions
+): Promise<PopularRecommendation[]> {
   const configuredEndpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
   const endpointCandidates = Array.from(new Set([configuredEndpoint, "https://graphql.anilist.co"]));
-  const payload = await fetchFirstAniListPayload(endpointCandidates);
+  const perPage = Math.min(50, options.poolLimit);
+  const pages = Math.max(1, Math.ceil(options.poolLimit / perPage));
+  const windowBounds = getCandidateWindowBounds(options.now, options.candidateWindowDays);
+  const startDateGreater = toFuzzyDateNumber(addDays(new Date(windowBounds.startTime), -1));
+  const startDateLesser = toFuzzyDateNumber(addDays(new Date(windowBounds.endTime), 1));
+  const settledPayloads = await Promise.allSettled(
+    Array.from({ length: pages }, (_, index) =>
+      fetchFirstAniListPayload(
+        endpointCandidates,
+        index + 1,
+        perPage,
+        startDateGreater,
+        startDateLesser
+      )
+    )
+  );
+  const payloads = settledPayloads.flatMap((result) => {
+    if (result.status === "fulfilled") return [result.value];
+    console.error("AniList recommendation page failed:", result.reason);
+    return [];
+  });
+  if (payloads.length === 0) throw new Error("AniList recommendation pages failed");
 
-  if (payload.errors?.length) {
-    throw new Error(payload.errors[0]?.message ?? "AniList GraphQL error");
-  }
-
-  const baseResults = (payload.data?.Page?.media ?? [])
-    .map(normalizeAniListAnime)
+  const mediaItems = payloads.flatMap((payload) => payload.data?.Page?.media ?? []);
+  const baseResults = mediaItems
+    .map((item, index) => normalizeAniListAnime(item, index))
     .filter((item): item is Omit<PopularRecommendation, "rank"> => Boolean(item))
-    .filter((item) => item.air_year === CURRENT_RELEASE_YEAR);
+    .filter((item) =>
+      isWithinCandidateWindow(
+        { air_date: item.air_date, air_year: item.air_year },
+        options.now,
+        options.candidateWindowDays
+      )
+    );
 
-  const enrichedResults = await Promise.all(baseResults.map(enrichAnimeWithTmdbKorean));
+  const enrichedResults = await Promise.all(
+    baseResults.map((item, index) =>
+      index < ANIME_KOREAN_ENRICHMENT_LIMIT ? enrichAnimeWithTmdbKorean(item) : item
+    )
+  );
 
-  return rankRecommendations(enrichedResults, "anime", excludedKeys);
+  return rankRecommendations(enrichedResults, "anime", excludedKeys, options);
 }
 
-async function fetchFirstAniListPayload(endpoints: string[]): Promise<AniListResponse> {
+async function fetchFirstAniListPayload(
+  endpoints: string[],
+  page: number,
+  perPage: number,
+  startDateGreater: number,
+  startDateLesser: number
+): Promise<AniListResponse> {
   let lastError: unknown;
 
   for (const endpoint of endpoints) {
     try {
-      return await fetchJson<AniListResponse>(endpoint, {
+      const payload = await fetchJson<AniListResponse>(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: ANILIST_TRENDING_QUERY,
-          variables: { page: 1, perPage: RECOMMENDATION_POOL_LIMIT }
+          variables: { page, perPage, startDateGreater, startDateLesser }
         })
       });
+      if (payload.errors?.length) {
+        throw new Error(payload.errors[0]?.message ?? "AniList GraphQL error");
+      }
+      return payload;
     } catch (error) {
       lastError = error;
       console.error(`AniList endpoint failed (${endpoint}):`, error);
@@ -370,7 +471,10 @@ async function fetchFirstAniListPayload(endpoints: string[]): Promise<AniListRes
   throw lastError instanceof Error ? lastError : new Error("AniList endpoints failed");
 }
 
-function normalizeAniListAnime(item: AniListMedia): Omit<PopularRecommendation, "rank"> | null {
+function normalizeAniListAnime(
+  item: AniListMedia,
+  trendingIndex: number
+): Omit<PopularRecommendation, "rank"> | null {
   if (!item.id) return null;
 
   const title = item.title?.english ?? item.title?.romaji ?? item.title?.native;
@@ -391,7 +495,8 @@ function normalizeAniListAnime(item: AniListMedia): Omit<PopularRecommendation, 
     episode_count: item.episodes ?? null,
     genres: Array.from(new Set(item.genres ?? [])),
     category: "anime",
-    trend_source: "AniList 트렌딩"
+    trend_source: "AniList 트렌딩",
+    trendingIndex
   };
 }
 
@@ -564,6 +669,10 @@ function hasHangul(value: string): boolean {
   return /[가-힣]/.test(value);
 }
 
+function positiveFiniteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 async function getUserLibraryExternalKeys(userId: string): Promise<Set<string>> {
   try {
     const adminClient = createAdminClient();
@@ -592,35 +701,123 @@ async function getUserLibraryExternalKeys(userId: string): Promise<Set<string>> 
 function rankRecommendations(
   items: Omit<PopularRecommendation, "rank">[],
   category: RecommendationCategory,
-  excludedKeys: Set<string>
+  excludedKeys: Set<string>,
+  options: RecommendationOptions
 ): PopularRecommendation[] {
   const seen = new Set<string>();
-  return items
+  const eligibleItems = items
     .filter((item) => item.category === category)
-    .filter((item) => item.air_year === CURRENT_RELEASE_YEAR)
+    .filter((item) =>
+      isWithinCandidateWindow(
+        { air_date: item.air_date, air_year: item.air_year },
+        options.now,
+        options.candidateWindowDays
+      )
+    )
     .filter((item) => {
       const key = `${item.external_source}:${item.external_id}`;
       if (excludedKeys.has(key) || seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .sort(compareRecommendationRecency)
-    .slice(0, RECOMMENDATION_POOL_LIMIT)
-    .map((item, index) => ({
-      ...item,
-      rank: index + 1
-    }));
+    });
+
+  return rankPopularRecommendations(eligibleItems, {
+    now: options.now,
+    poolLimit: options.poolLimit
+  }).map((item, index) => ({
+    ...item,
+    rank: index + 1
+  }));
 }
 
-function compareRecommendationRecency(
-  a: Omit<PopularRecommendation, "rank">,
-  b: Omit<PopularRecommendation, "rank">
-): number {
-  return getReleaseMonthScore(b) - getReleaseMonthScore(a);
+async function parseRecommendationOptions(
+  req: Request
+): Promise<{ ok: true; value: RecommendationOptions } | { ok: false; message: string }> {
+  let value: PopularRecommendationsRequest = {};
+
+  if (req.method === "GET") {
+    const url = new URL(req.url);
+    const candidateYears = url.searchParams.get("candidate_years");
+    const candidateDays = url.searchParams.get("candidate_days");
+    const poolLimit = url.searchParams.get("pool_limit");
+    value = {
+      ...(candidateYears === null ? {} : { candidate_years: Number(candidateYears) }),
+      ...(candidateDays === null ? {} : { candidate_days: Number(candidateDays) }),
+      ...(poolLimit === null ? {} : { pool_limit: Number(poolLimit) })
+    };
+  } else {
+    const rawBody = await req.text();
+    if (rawBody.trim()) {
+      try {
+        const parsed = JSON.parse(rawBody) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return { ok: false, message: "Request body must be a JSON object" };
+        }
+        value = parsed as PopularRecommendationsRequest;
+      } catch {
+        return { ok: false, message: "Invalid JSON body" };
+      }
+    }
+  }
+
+  const candidateYears = value.candidate_years ?? DEFAULT_CANDIDATE_YEARS;
+  const candidateWindowDays =
+    value.candidate_days ?? (value.candidate_years === undefined ? DEFAULT_CANDIDATE_WINDOW_DAYS : candidateYears * 365);
+  const poolLimit = value.pool_limit ?? DEFAULT_RECOMMENDATION_POOL_LIMIT;
+  if (!Number.isInteger(candidateYears) || candidateYears < 1 || candidateYears > MAX_CANDIDATE_YEARS) {
+    return { ok: false, message: `candidate_years must be an integer between 1 and ${MAX_CANDIDATE_YEARS}` };
+  }
+  if (
+    !Number.isInteger(candidateWindowDays) ||
+    candidateWindowDays < 1 ||
+    candidateWindowDays > MAX_CANDIDATE_WINDOW_DAYS
+  ) {
+    return {
+      ok: false,
+      message: `candidate_days must be an integer between 1 and ${MAX_CANDIDATE_WINDOW_DAYS}`
+    };
+  }
+  if (!Number.isInteger(poolLimit) || poolLimit < 1 || poolLimit > MAX_RECOMMENDATION_POOL_LIMIT) {
+    return { ok: false, message: `pool_limit must be an integer between 1 and ${MAX_RECOMMENDATION_POOL_LIMIT}` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      candidateWindowDays,
+      poolLimit,
+      now: new Date()
+    }
+  };
 }
 
-function getReleaseMonthScore(item: Omit<PopularRecommendation, "rank">): number {
-  const month = item.release_month ?? 0;
-  if (month > 0 && month <= CURRENT_RELEASE_MONTH) return month;
-  return 0;
+function getTmdbFetchPages(poolLimit: number): number {
+  return Math.max(1, Math.min(3, Math.ceil(poolLimit / 20)));
+}
+
+function getCachedResponse(cacheKey: string): RecommendationsResponse | null {
+  const now = Date.now();
+  for (const [key, entry] of responseCache) {
+    if (entry.expiresAt <= now) responseCache.delete(key);
+  }
+
+  const entry = responseCache.get(cacheKey);
+  if (!entry) return null;
+  responseCache.delete(cacheKey);
+  responseCache.set(cacheKey, entry);
+  return entry.response;
+}
+
+function setCachedResponse(cacheKey: string, response: RecommendationsResponse): void {
+  responseCache.delete(cacheKey);
+  responseCache.set(cacheKey, {
+    expiresAt: Date.now() + POPULAR_CACHE_TTL_MS,
+    response
+  });
+
+  while (responseCache.size > POPULAR_CACHE_MAX_ENTRIES) {
+    const oldestKey = responseCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    responseCache.delete(oldestKey);
+  }
 }

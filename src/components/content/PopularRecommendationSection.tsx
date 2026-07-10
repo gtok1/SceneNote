@@ -17,12 +17,16 @@ import type {
 } from "@/services/popularRecommendations";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
+import {
+  DEFAULT_CANDIDATE_WINDOW_DAYS,
+  isWithinCandidateWindow,
+  rankPopularRecommendations
+} from "@/utils/popularRanking";
 
 const CATEGORY_OPTIONS: { value: RecommendationCategory; label: string }[] = [
   { value: "drama", label: "드라마 Top 10" },
   { value: "anime", label: "애니 Top 10" }
 ];
-const CURRENT_RELEASE_YEAR = new Date().getFullYear();
 const VISIBLE_TOP_LIMIT = 10;
 
 export function PopularRecommendationSection() {
@@ -316,9 +320,16 @@ function createVisibleRecommendations(
   excludedKeys: Set<string>,
   page: number
 ): PopularRecommendation[] {
-  const eligibleItems = items
-    .filter((item) => item.air_year === CURRENT_RELEASE_YEAR)
-    .sort(compareRecommendationRecency)
+  const rankedItems = rankPopularRecommendations(
+    items.filter((item) =>
+      isWithinCandidateWindow(
+        { air_date: item.air_date ?? null, air_year: item.air_year },
+        new Date(),
+        DEFAULT_CANDIDATE_WINDOW_DAYS
+      )
+    )
+  );
+  const eligibleItems = rankedItems
     .filter((item) => {
       const key = createRecommendationKey(item);
       return !libraryKeys.has(key) && !addedKeys.has(key) && !excludedKeys.has(key);
@@ -335,16 +346,6 @@ function createVisibleRecommendations(
     ...item,
     rank: index + 1
   }));
-}
-
-function compareRecommendationRecency(a: PopularRecommendation, b: PopularRecommendation): number {
-  return getReleaseMonthScore(b) - getReleaseMonthScore(a) || a.rank - b.rank;
-}
-
-function getReleaseMonthScore(item: PopularRecommendation): number {
-  const month = item.release_month ?? 0;
-  if (month > 0 && month <= new Date().getMonth() + 1) return month;
-  return 0;
 }
 
 const styles = StyleSheet.create({

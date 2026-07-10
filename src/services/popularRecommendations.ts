@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import { searchContent } from "@/services/contentSearch";
 import type { SearchResult } from "@/types/content";
+import {
+  DEFAULT_CANDIDATE_WINDOW_DAYS,
+  isWithinCandidateWindow,
+  rankPopularRecommendations
+} from "@/utils/popularRanking";
 
 export type RecommendationCategory = "drama" | "anime";
 
@@ -9,6 +14,8 @@ export interface PopularRecommendation extends SearchResult {
   rank: number;
   trend_source: string;
   release_month?: number | null;
+  popularity?: number | null;
+  trendingIndex?: number | null;
 }
 
 export interface PopularRecommendationsResponse {
@@ -19,7 +26,6 @@ export interface PopularRecommendationsResponse {
 }
 
 const CURRENT_RELEASE_YEAR = new Date().getFullYear();
-const CURRENT_RELEASE_MONTH = new Date().getMonth() + 1;
 const RECOMMENDATION_POOL_LIMIT = 30;
 const FALLBACK_SEARCH_BATCH_SIZE = 6;
 
@@ -125,7 +131,10 @@ const KOREAN_TITLE_OVERRIDES = new Map<string, string>(
 export async function getPopularRecommendations(): Promise<PopularRecommendationsResponse> {
   try {
     const { data, error } = await supabase.functions.invoke<PopularRecommendationsResponse>("popular-recommendations", {
-      body: {}
+      body: {
+        candidate_days: DEFAULT_CANDIDATE_WINDOW_DAYS,
+        pool_limit: RECOMMENDATION_POOL_LIMIT
+      }
     });
 
     if (error) throw new Error(error.message);
@@ -215,7 +224,7 @@ async function searchFallbackCategory(category: RecommendationCategory): Promise
       const fallback = queryBatch[batchIndex];
       result.value.results.forEach((item) => {
         if (!matchesCategory(item, category)) return;
-        if (!isCurrentRelease(item)) return;
+        if (!isPopularCandidate(item)) return;
 
         const key = `${item.external_source}:${item.external_id}`;
         if (seen.has(key)) return;
@@ -252,17 +261,18 @@ function normalizeCategory(
   const seen = new Set<string>();
   const filtered = items
     .filter((item) => matchesCategory(item, category))
-    .filter(isCurrentRelease)
+    .filter(isPopularCandidate)
     .filter((item) => {
       const key = `${item.external_source}:${item.external_id}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .sort(compareRecommendationRecency)
-    .slice(0, RECOMMENDATION_POOL_LIMIT);
+    });
+  const ranked = rankPopularRecommendations(filtered, {
+    poolLimit: RECOMMENDATION_POOL_LIMIT
+  });
 
-  return filtered.map((item, index) => ({
+  return ranked.map((item, index) => ({
     ...applyKoreanTitleFallback(item),
     category,
     rank: index + 1,
@@ -270,18 +280,12 @@ function normalizeCategory(
   }));
 }
 
-function isCurrentRelease(item: SearchResult): boolean {
-  return item.air_year === CURRENT_RELEASE_YEAR;
-}
-
-function compareRecommendationRecency(a: PopularRecommendation, b: PopularRecommendation): number {
-  return getReleaseMonthScore(b) - getReleaseMonthScore(a) || a.rank - b.rank;
-}
-
-function getReleaseMonthScore(item: PopularRecommendation): number {
-  const month = item.release_month ?? monthFromDate(item.air_date) ?? 0;
-  if (month > 0 && month <= CURRENT_RELEASE_MONTH) return month;
-  return 0;
+function isPopularCandidate(item: SearchResult): boolean {
+  return isWithinCandidateWindow(
+    { air_date: item.air_date ?? null, air_year: item.air_year },
+    new Date(),
+    DEFAULT_CANDIDATE_WINDOW_DAYS
+  );
 }
 
 function normalizeRecommendationDates(items: PopularRecommendation[]): PopularRecommendation[] {

@@ -227,6 +227,10 @@ export function PopularRecommendationSection() {
       {recommendations.data?.partial ? (
         <Text style={styles.partialText}>일부 추천 소스를 불러오지 못했습니다.</Text>
       ) : null}
+
+      {recommendations.data?.stale ? (
+        <Text style={styles.staleText}>오프라인 저장본을 표시 중입니다.</Text>
+      ) : null}
     </View>
   );
 }
@@ -526,6 +530,12 @@ const styles = StyleSheet.create({
     color: colors.warning,
     fontSize: 12,
     fontWeight: "700",
+    paddingHorizontal: spacing.lg
+  },
+  staleText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
     paddingHorizontal: spacing.lg
   }
 });

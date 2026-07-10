@@ -26,6 +26,8 @@ interface RecommendationOptions {
   now: Date;
 }
 
+type CacheClient = ReturnType<typeof createAdminClient>;
+
 interface PopularRecommendation {
   external_source: ExternalSource;
   external_id: string;
@@ -54,6 +56,13 @@ interface RecommendationsResponse {
   failedSources: ExternalSource[];
   partial: boolean;
 }
+
+type AnimeEnrichmentPayload = Partial<
+  Pick<
+    Omit<PopularRecommendation, "rank">,
+    "title_primary" | "poster_url" | "overview" | "localized_overview" | "air_date" | "release_month"
+  >
+>;
 
 interface TmdbTvItem {
   id: number;
@@ -131,9 +140,12 @@ const MAX_CANDIDATE_YEARS = 5;
 const MAX_CANDIDATE_WINDOW_DAYS = 365 * MAX_CANDIDATE_YEARS;
 const DEFAULT_RECOMMENDATION_POOL_LIMIT = 30;
 const MAX_RECOMMENDATION_POOL_LIMIT = 60;
-const POPULAR_CACHE_TTL_MS = 5 * 60_000;
+const POPULAR_CACHE_TTL_MS = 30 * 60_000;
 const POPULAR_CACHE_MAX_ENTRIES = 100;
-const ANIME_KOREAN_ENRICHMENT_LIMIT = 20;
+const ANIME_KOREAN_ENRICHMENT_CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
+const ANIME_KOREAN_ENRICHMENT_CONCURRENCY = 5;
+const POPULAR_CACHE_SOURCE: ExternalSource = "tmdb";
+const ANILIST_KOREAN_CACHE_SOURCE: ExternalSource = "anilist";
 const responseCache = new Map<string, { expiresAt: number; response: RecommendationsResponse }>();
 const TMDB_GENRE_NAMES = new Map<number, string>([
   [12, "Adventure"],
@@ -195,9 +207,8 @@ Deno.serve(async (req: Request) => {
     return jsonError(405, "METHOD_NOT_ALLOWED", "POST or GET method required");
   }
 
-  let user: { id: string; jwt: string };
   try {
-    user = await requireUser(req);
+    await requireUser(req);
   } catch {
     return jsonError(401, "UNAUTHORIZED", "Valid JWT required");
   }
@@ -205,16 +216,20 @@ Deno.serve(async (req: Request) => {
   const parsedOptions = await parseRecommendationOptions(req);
   if (!parsedOptions.ok) return jsonError(400, "INVALID_REQUEST", parsedOptions.message);
   const options = parsedOptions.value;
-  const cacheKey = `${user.id}:${formatDateInput(options.now)}:${options.candidateWindowDays}:${options.poolLimit}`;
+  const cacheKey = createPopularCacheKey(options);
   const cachedResponse = getCachedResponse(cacheKey);
   if (cachedResponse) return json(cachedResponse);
+  const adminClient = createAdminClient();
+  const persistedResponse = await getPersistedPopularResponse(adminClient, cacheKey);
+  if (persistedResponse) {
+    setCachedResponse(cacheKey, persistedResponse);
+    return json(persistedResponse);
+  }
 
   try {
-    const excludedKeys = await getUserLibraryExternalKeys(user.id);
-
     const [dramaResult, animeResult] = await Promise.allSettled([
-      fetchDramaRecommendations(excludedKeys, options),
-      fetchAnimeRecommendations(excludedKeys, options)
+      fetchDramaRecommendations(options),
+      fetchAnimeRecommendations(options, adminClient)
     ]);
 
     const drama = dramaResult.status === "fulfilled" ? dramaResult.value : [];
@@ -247,6 +262,7 @@ Deno.serve(async (req: Request) => {
     };
 
     setCachedResponse(cacheKey, response);
+    await setPersistedPopularResponse(adminClient, cacheKey, response);
     return json(response);
   } catch (error) {
     console.error("popular-recommendations failed:", error);
@@ -254,10 +270,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function fetchDramaRecommendations(
-  excludedKeys: Set<string>,
-  options: RecommendationOptions
-): Promise<PopularRecommendation[]> {
+async function fetchDramaRecommendations(options: RecommendationOptions): Promise<PopularRecommendation[]> {
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
 
@@ -312,7 +325,7 @@ async function fetchDramaRecommendations(
       )
     );
 
-  return rankRecommendations(merged, "drama", excludedKeys, options);
+  return rankRecommendations(merged, "drama", options);
 }
 
 function settledItems<T>(result: PromiseSettledResult<T[]>, sourceName: string): T[] {
@@ -390,8 +403,8 @@ function normalizeTmdbDrama(
 }
 
 async function fetchAnimeRecommendations(
-  excludedKeys: Set<string>,
-  options: RecommendationOptions
+  options: RecommendationOptions,
+  adminClient: CacheClient
 ): Promise<PopularRecommendation[]> {
   const configuredEndpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
   const endpointCandidates = Array.from(new Set([configuredEndpoint, "https://graphql.anilist.co"]));
@@ -430,13 +443,13 @@ async function fetchAnimeRecommendations(
       )
     );
 
-  const enrichedResults = await Promise.all(
-    baseResults.map((item, index) =>
-      index < ANIME_KOREAN_ENRICHMENT_LIMIT ? enrichAnimeWithTmdbKorean(item) : item
-    )
+  const enrichedResults = await mapWithConcurrency(
+    baseResults,
+    ANIME_KOREAN_ENRICHMENT_CONCURRENCY,
+    (item) => enrichAnimeWithTmdbKorean(item, adminClient)
   );
 
-  return rankRecommendations(enrichedResults, "anime", excludedKeys, options);
+  return rankRecommendations(enrichedResults, "anime", options);
 }
 
 async function fetchFirstAniListPayload(
@@ -501,8 +514,18 @@ function normalizeAniListAnime(
 }
 
 async function enrichAnimeWithTmdbKorean(
-  item: Omit<PopularRecommendation, "rank">
+  item: Omit<PopularRecommendation, "rank">,
+  adminClient: CacheClient
 ): Promise<Omit<PopularRecommendation, "rank">> {
+  const cacheKey = createAnimeKoreanCacheKey(item.external_id);
+  const cachedItem = await getPersistedAnimeEnrichment(adminClient, cacheKey);
+  if (cachedItem) {
+    return {
+      ...item,
+      ...cachedItem
+    };
+  }
+
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) return item;
 
@@ -532,7 +555,7 @@ async function enrichAnimeWithTmdbKorean(
       if (!match) continue;
       const koreanTitle = await fetchTmdbKoreanTitle(match.id, apiKey);
 
-      return {
+      const enrichedItem = {
         ...item,
         title_primary: (koreanTitle ?? match.name?.trim()) || item.title_primary,
         poster_url: match.poster_path
@@ -543,6 +566,8 @@ async function enrichAnimeWithTmdbKorean(
         air_date: dateOnly(match.first_air_date) ?? item.air_date,
         release_month: monthFromDate(match.first_air_date) ?? item.release_month
       };
+      await setPersistedAnimeEnrichment(adminClient, cacheKey, createAnimeEnrichmentPayload(enrichedItem));
+      return enrichedItem;
     } catch {
       // Korean metadata is a best-effort enhancement; keep the AniList row.
     }
@@ -673,35 +698,9 @@ function positiveFiniteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-async function getUserLibraryExternalKeys(userId: string): Promise<Set<string>> {
-  try {
-    const adminClient = createAdminClient();
-    const { data, error } = await adminClient
-      .from("user_library_items")
-      .select("contents(source_api,source_id)")
-      .eq("user_id", userId);
-
-    if (error) throw error;
-
-    return new Set(
-      ((data ?? []) as { contents?: { source_api?: string | null; source_id?: string | null } | null }[])
-        .map((row) => {
-          const source = row.contents?.source_api;
-          const id = row.contents?.source_id;
-          return source && id && source !== "manual" ? `${source}:${id}` : null;
-        })
-        .filter((key): key is string => Boolean(key))
-    );
-  } catch (error) {
-    console.error("popular-recommendations library exclusion failed:", error);
-    return new Set();
-  }
-}
-
 function rankRecommendations(
   items: Omit<PopularRecommendation, "rank">[],
   category: RecommendationCategory,
-  excludedKeys: Set<string>,
   options: RecommendationOptions
 ): PopularRecommendation[] {
   const seen = new Set<string>();
@@ -716,7 +715,7 @@ function rankRecommendations(
     )
     .filter((item) => {
       const key = `${item.external_source}:${item.external_id}`;
-      if (excludedKeys.has(key) || seen.has(key)) return false;
+      if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
@@ -789,6 +788,148 @@ async function parseRecommendationOptions(
       now: new Date()
     }
   };
+}
+
+function createPopularCacheKey(options: RecommendationOptions): string {
+  return [
+    "popular-recommendations",
+    "v2",
+    formatDateInput(options.now),
+    options.candidateWindowDays,
+    options.poolLimit
+  ].join(":");
+}
+
+function createAnimeKoreanCacheKey(anilistId: string): string {
+  return `anilist-ko:${anilistId}`;
+}
+
+async function getPersistedPopularResponse(
+  adminClient: CacheClient,
+  cacheKey: string
+): Promise<RecommendationsResponse | null> {
+  const cached = await getExternalCache<{ response?: RecommendationsResponse }>(
+    adminClient,
+    cacheKey,
+    POPULAR_CACHE_SOURCE
+  );
+  return cached?.response ?? null;
+}
+
+async function setPersistedPopularResponse(
+  adminClient: CacheClient,
+  cacheKey: string,
+  response: RecommendationsResponse
+): Promise<void> {
+  await setExternalCache(adminClient, cacheKey, POPULAR_CACHE_SOURCE, { response }, POPULAR_CACHE_TTL_MS);
+}
+
+async function getPersistedAnimeEnrichment(
+  adminClient: CacheClient,
+  cacheKey: string
+): Promise<AnimeEnrichmentPayload | null> {
+  const cached = await getExternalCache<{ item?: AnimeEnrichmentPayload }>(
+    adminClient,
+    cacheKey,
+    ANILIST_KOREAN_CACHE_SOURCE
+  );
+  return cached?.item ?? null;
+}
+
+async function setPersistedAnimeEnrichment(
+  adminClient: CacheClient,
+  cacheKey: string,
+  item: AnimeEnrichmentPayload
+): Promise<void> {
+  await setExternalCache(
+    adminClient,
+    cacheKey,
+    ANILIST_KOREAN_CACHE_SOURCE,
+    { item },
+    ANIME_KOREAN_ENRICHMENT_CACHE_TTL_MS
+  );
+}
+
+async function getExternalCache<T>(
+  adminClient: CacheClient,
+  cacheKey: string,
+  source: ExternalSource
+): Promise<T | null> {
+  try {
+    const { data, error } = await adminClient
+      .from("external_search_cache")
+      .select("response_json")
+      .eq("query_hash", cacheKey)
+      .eq("source", source)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+
+    if (error) throw error;
+    return (data?.response_json as T | undefined) ?? null;
+  } catch (error) {
+    console.error(`popular recommendation cache read failed (${cacheKey}):`, error);
+    return null;
+  }
+}
+
+async function setExternalCache(
+  adminClient: CacheClient,
+  cacheKey: string,
+  source: ExternalSource,
+  responseJson: Record<string, unknown>,
+  ttlMs: number
+): Promise<void> {
+  try {
+    const { error } = await adminClient.from("external_search_cache").upsert(
+      {
+        query_hash: cacheKey,
+        query_text: cacheKey,
+        source,
+        response_json: responseJson,
+        expires_at: new Date(Date.now() + ttlMs).toISOString()
+      },
+      { onConflict: "query_hash,source" }
+    );
+
+    if (error) throw error;
+  } catch (error) {
+    console.error(`popular recommendation cache write failed (${cacheKey}):`, error);
+  }
+}
+
+function createAnimeEnrichmentPayload(item: Omit<PopularRecommendation, "rank">): AnimeEnrichmentPayload {
+  return {
+    title_primary: item.title_primary,
+    poster_url: item.poster_url,
+    overview: item.overview,
+    localized_overview: item.localized_overview,
+    air_date: item.air_date,
+    release_month: item.release_month
+  };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        const item = items[index];
+        if (item === undefined) continue;
+        results[index] = await mapper(item, index);
+      }
+    })
+  );
+
+  return results;
 }
 
 function getTmdbFetchPages(poolLimit: number): number {

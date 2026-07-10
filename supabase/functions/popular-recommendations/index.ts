@@ -263,8 +263,10 @@ Deno.serve(async (req: Request) => {
       partial: failedSources.length > 0
     };
 
-    setCachedResponse(cacheKey, response);
-    await setPersistedPopularResponse(adminClient, cacheKey, response);
+    if (!response.partial) {
+      setCachedResponse(cacheKey, response);
+      await setPersistedPopularResponse(adminClient, cacheKey, response);
+    }
     return json(response);
   } catch (error) {
     console.error("popular-recommendations failed:", error);
@@ -796,7 +798,7 @@ async function parseRecommendationOptions(
 function createPopularCacheKey(options: RecommendationOptions): string {
   return [
     "popular-recommendations",
-    "v2",
+    "v3",
     formatDateInput(options.now),
     options.candidateWindowDays,
     options.poolLimit
@@ -816,7 +818,8 @@ async function getPersistedPopularResponse(
     cacheKey,
     POPULAR_CACHE_SOURCE
   );
-  return cached?.response ?? null;
+  const response = cached?.response;
+  return response && !response.partial ? response : null;
 }
 
 async function setPersistedPopularResponse(

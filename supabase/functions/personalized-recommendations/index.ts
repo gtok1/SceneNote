@@ -1,21 +1,19 @@
 import {
+  hasKoreanDisplayTitle,
   scanRecommendationCatalog,
   type RecommendationProvider
 } from "../_shared/recommendationCatalog.ts";
 import {
   type RecommendationCandidate,
   type RecommendationLibraryItem,
-  type RecommendationMediaType,
-  type RankedRecommendation
+  type RecommendationMediaType
 } from "../_shared/recommendationEngine.ts";
 import {
-  createRecommendationImpressionLookupKeys,
-  createRecommendationImpressionRows
+  collectRecommendationImpressionIdentityKeys,
+  createRecommendationImpressionRows,
+  RECENT_RECOMMENDATION_IMPRESSION_LIMIT
 } from "../_shared/recommendationImpressions.ts";
-import {
-  fetchRecommendationProviderPage,
-  type CatalogRecommendationCandidate
-} from "../_shared/recommendationProviders.ts";
+import { fetchRecommendationProviderPage } from "../_shared/recommendationProviders.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createUserClient, requireUser } from "../_shared/supabase.ts";
 
@@ -132,13 +130,16 @@ Deno.serve(async (req: Request) => {
     }
 
     const libraryItems = ((libraryResult.data ?? []) as unknown as RawLibraryRow[]).map(normalizeLibraryItem);
+    const recentSeenIds = await loadRecentSeenIdentityKeys(userClient, user.id);
     const result = await scanRecommendationCatalog(fetchRecommendationProviderPage, {
       limit: validated.value.limit,
       mediaType: validated.value.mediaType,
       cursor: validated.value.cursor,
-      excludeIds: validated.value.excludeIds,
+      excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
-      resolveSeenIds: (candidates) => loadSeenIdentityKeys(userClient, user.id, candidates)
+      candidateFilter: hasKoreanDisplayTitle,
+      maxMonthsPerRequest: 1,
+      maxProviderRoundsPerRequest: 1
     });
 
     if (result.allProvidersFailed) {
@@ -249,35 +250,26 @@ function isRecommendationCandidate(value: unknown): value is RecommendationCandi
   );
 }
 
-async function loadSeenIdentityKeys(
+async function loadRecentSeenIdentityKeys(
   userClient: ReturnType<typeof createUserClient>,
-  userId: string,
-  candidates: readonly RankedRecommendation<CatalogRecommendationCandidate>[]
+  userId: string
 ): Promise<string[]> {
-  const candidateKeys = createRecommendationImpressionLookupKeys(candidates);
-  if (candidateKeys.length === 0) return [];
-
   const { data, error } = await userClient
     .from("user_recommendation_impressions")
     .select("canonical_content_id,identity_keys")
     .eq("user_id", userId)
-    .overlaps("identity_keys", candidateKeys);
+    .order("last_seen_at", { ascending: false })
+    .order("canonical_content_id", { ascending: true })
+    .limit(RECENT_RECOMMENDATION_IMPRESSION_LIMIT);
   if (error) {
-    console.warn("personalized-recommendations seen lookup skipped:", {
+    console.warn("personalized-recommendations recent seen lookup skipped:", {
       code: error.code,
       message: error.message
     });
     return [];
   }
 
-  return Array.from(
-    new Set(
-      ((data ?? []) as ImpressionRow[]).flatMap((row) => [
-        row.canonical_content_id ?? "",
-        ...(row.identity_keys ?? [])
-      ]).filter(Boolean)
-    )
-  );
+  return collectRecommendationImpressionIdentityKeys((data ?? []) as ImpressionRow[]);
 }
 
 async function recordRecommendationImpressions(

@@ -30,7 +30,11 @@ export const queryKeys = {
   recommendations: {
     popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
     personalized: (userId: string, mediaType: MediaTypeFilter) =>
-      [...createRecommendationFeedKey(userId, mediaType), "ko-metadata-v2"] as const
+      [
+        ...createRecommendationFeedKey(userId, mediaType),
+        "ko-metadata-v2",
+        "recent-impressions-v1"
+      ] as const
   },
   library: {
     all: (userId: string) => ["library", userId] as const,

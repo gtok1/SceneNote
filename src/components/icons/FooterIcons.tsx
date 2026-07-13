@@ -8,10 +8,10 @@ export type FooterIconProps = SvgProps & {
   size?: number;
 };
 
-function iconProps({ color = "currentColor", size = 24, ...props }: FooterIconProps) {
+function iconProps({ active: _active, color = "currentColor", size = 24, ...props }: FooterIconProps) {
   return {
     ...props,
-    accessibilityElementsHidden: true,
+    "aria-hidden": true,
     color,
     focusable: false,
     height: size,

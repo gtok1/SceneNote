@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   decodeRecommendationCursor,
   getKstMonthKey,
+  hasKoreanDisplayTitle,
   scanRecommendationCatalog,
   type RecommendationProvider,
   type RecommendationProviderFetcher
@@ -307,7 +308,7 @@ describe("ranking, exclusions, and stream continuity", () => {
     assert.equal(first.items.some((item) => second.items.some((next) => next.external_id === item.external_id)), false);
   });
 
-  it("starts from the head after reopening but skips account-persisted impressions", async () => {
+  it("starts from the head after reopening but skips recent account-persisted impressions", async () => {
     const works = Array.from({ length: 24 }, (_, index) => candidate(`persist-${index}`, "2026-07-01", 100 - index));
     const provider = fetcher({ anilist: { "2026-07": [works] } });
     const first = await scanRecommendationCatalog(provider, { mediaType: "anime", now: NOW });
@@ -403,6 +404,32 @@ describe("provider failure semantics", () => {
     assert.equal(result.providersBlocked, true);
     assert.equal(result.allProvidersFailed, false);
     assert.equal(result.exhausted, false);
+  });
+});
+
+describe("Korean display title policy", () => {
+  it("accepts only titles containing verified Hangul", () => {
+    assert.equal(hasKoreanDisplayTitle(candidate("ko", "2026-07-01")), true);
+    assert.equal(
+      hasKoreanDisplayTitle(candidate("jp", "2026-07-01", 10, { title_primary: "救い、巣喰われ" })),
+      false
+    );
+    assert.equal(
+      hasKoreanDisplayTitle(candidate("en", "2026-07-01", 10, { title_primary: "The Boy Next World" })),
+      false
+    );
+  });
+
+  it("filters untranslated titles while continuing catalog selection", async () => {
+    const result = await scanRecommendationCatalog(
+      fetcher({ anilist: { "2026-07": [[
+        candidate("foreign", "2026-07-02", 100, { title_primary: "北方謙三 水滸伝" }),
+        candidate("korean", "2026-07-01", 90, { title_primary: "한국어 제목" })
+      ]] } }),
+      { mediaType: "anime", now: NOW, limit: 1, candidateFilter: hasKoreanDisplayTitle }
+    );
+
+    assert.deepEqual(result.items.map((item) => item.external_id), ["korean"]);
   });
 });
 

@@ -28,6 +28,33 @@ type RecommendationFeedSeed<T> = Partial<Omit<RecommendationFeedState<T>, "items
   items?: readonly T[];
 };
 
+export type EmptyRecommendationContinuationDecision =
+  | "idle"
+  | "loading"
+  | "continue"
+  | "stopped";
+
+// The Edge Function intentionally scans one provider round per request, so an
+// empty or partial batch must follow its cursor without allowing an unbounded loop.
+export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS = 32;
+export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS = 45_000;
+export const PERSONALIZED_RECOMMENDATION_BATCH_SIZE = 12;
+
+export interface EmptyRecommendationContinuationInput {
+  hasData: boolean;
+  itemCount: number;
+  targetItemCount: number;
+  isLoading: boolean;
+  hasError: boolean;
+  hasMore: boolean;
+  nextCursor: string | null;
+  isExhausted: boolean;
+  continuationAttempts: number;
+  maxContinuationAttempts: number;
+  elapsedMs: number;
+  maxDurationMs: number;
+}
+
 export function createRecommendationFeedState<T>(
   seed: RecommendationFeedSeed<T> = {}
 ): RecommendationFeedState<T> {
@@ -53,6 +80,28 @@ export function replaceRecommendationFeed<T>(
     broadened: batch.broadened ?? false,
     refreshError: null,
     refillError: null
+  };
+}
+
+export function appendRecommendationFeed<T, TId>(
+  state: RecommendationFeedState<T>,
+  batch: RecommendationFeedBatch<T>,
+  idSelector: (item: T) => TId
+): RecommendationFeedState<T> {
+  const knownIds = new Set(state.items.map(idSelector));
+  const appended = batch.items.filter((item) => {
+    const id = idSelector(item);
+    if (knownIds.has(id)) return false;
+    knownIds.add(id);
+    return true;
+  });
+
+  return {
+    ...state,
+    items: [...state.items, ...appended],
+    cursor: batch.cursor ?? null,
+    isExhausted: batch.isExhausted ?? false,
+    broadened: state.broadened || (batch.broadened ?? false)
   };
 }
 
@@ -117,6 +166,29 @@ export function setRecommendationRefillError<T>(
 
 export function shouldShowRecommendationFeed(query: string): boolean {
   return query.trim() === "";
+}
+
+export function decideEmptyRecommendationContinuation(
+  input: EmptyRecommendationContinuationInput
+): EmptyRecommendationContinuationDecision {
+  if (
+    !input.hasData ||
+    input.itemCount >= input.targetItemCount ||
+    input.isExhausted
+  ) {
+    return "idle";
+  }
+  if (input.isLoading) return "loading";
+  if (input.hasError) return "stopped";
+  if (
+    input.hasMore &&
+    Boolean(input.nextCursor) &&
+    input.continuationAttempts < input.maxContinuationAttempts &&
+    input.elapsedMs < input.maxDurationMs
+  ) {
+    return "continue";
+  }
+  return "stopped";
 }
 
 export function createRecommendationFeedKey<TMediaType extends string>(

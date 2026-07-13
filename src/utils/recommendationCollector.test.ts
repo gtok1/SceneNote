@@ -97,6 +97,24 @@ describe("recommendation continuation collection", () => {
     assert.equal(result.hasMore, true);
     assert.equal(result.exhausted, false);
   });
+
+  it("returns the collected partial batch when the request budget is reached", async () => {
+    let call = 0;
+    const result = await collectRecommendationPages(
+      async () => ({
+        items: [{ id: `item-${++call}` }],
+        nextCursor: `cursor-${call}`,
+        hasMore: true,
+        exhausted: false
+      }),
+      { ...options(12), maxRequests: 2 }
+    );
+
+    assert.deepEqual(result.items, [{ id: "item-1" }, { id: "item-2" }]);
+    assert.equal(result.requestCount, 2);
+    assert.equal(result.hasMore, true);
+    assert.equal(result.exhausted, false);
+  });
 });
 
 function options(limit: number) {

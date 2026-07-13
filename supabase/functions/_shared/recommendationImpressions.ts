@@ -4,6 +4,10 @@ import {
   type RecommendationCandidate
 } from "./recommendationEngine.ts";
 
+// Keep thirty full batches distinct while allowing older cards to re-enter the
+// pool instead of permanently exhausting recommendations as history grows.
+export const RECENT_RECOMMENDATION_IMPRESSION_LIMIT = 30 * 12;
+
 export interface RecommendationImpressionRow {
   user_id: string;
   canonical_content_id: string;
@@ -12,6 +16,11 @@ export interface RecommendationImpressionRow {
   source_id: string;
   identity_keys: string[];
   last_seen_at: string;
+}
+
+export interface RecommendationImpressionIdentityRow {
+  canonical_content_id?: string | null;
+  identity_keys?: readonly string[] | null;
 }
 
 export function createRecommendationImpressionRows(
@@ -42,6 +51,19 @@ export function createRecommendationImpressionLookupKeys(
 ): string[] {
   return Array.from(
     new Set(candidates.map(createExternalRecommendationKey).filter(Boolean))
+  );
+}
+
+export function collectRecommendationImpressionIdentityKeys(
+  rows: readonly RecommendationImpressionIdentityRow[]
+): string[] {
+  return Array.from(
+    new Set(
+      rows
+        .flatMap((row) => [row.canonical_content_id ?? "", ...(row.identity_keys ?? [])])
+        .map((key) => key.trim())
+        .filter(Boolean)
+    )
   );
 }
 

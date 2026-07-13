@@ -153,12 +153,21 @@ export default function SearchScreen() {
   const recommendationIsLoading =
     showRecommendationFeed &&
     (personalizedRecommendations.isInitialLoading || library.isLoading);
-  const recommendationIsContinuing =
+  const recommendationNeedsContinuation =
     showRecommendationFeed &&
     !recommendationIsLoading &&
     !personalizedRecommendations.isError &&
     activeRecommendations.length === 0 &&
     !personalizedRecommendations.isExhausted;
+  const recommendationIsContinuing =
+    recommendationNeedsContinuation && personalizedRecommendations.isLoadingMore;
+  const recommendationLoadingMessage = personalizedRecommendations.isRefreshing
+    ? "새 추천 12개를 불러오는 중이에요. 한국어 제목을 확인하고 있어 잠시 걸릴 수 있어요."
+    : personalizedRecommendations.isRefilling
+      ? "빈자리에 표시할 새 추천을 찾고 있어요."
+      : recommendationIsLoading || recommendationIsContinuing
+        ? "내 취향에 맞는 최신 작품을 찾는 중이에요. 잠시만 기다려 주세요."
+        : null;
   const displayedResults: SearchResult[] = isSimilarityMode ? similarSearch.data?.items ?? [] : hasSearchInput ? activeResults : activeRecommendations;
   const recommendationPresentations = useMemo(
     () => new Map(activeRecommendations.map((item) => [item.canonical_id, mapRecommendationToCardViewModel(item)])),
@@ -323,7 +332,8 @@ export default function SearchScreen() {
         pendingAddIds.size > 0 ||
         pendingSearchKey !== null ||
         personalizedRecommendations.isRefreshing ||
-        personalizedRecommendations.isRefilling
+        personalizedRecommendations.isRefilling ||
+        personalizedRecommendations.isLoadingMore
     };
   };
 
@@ -346,6 +356,7 @@ export default function SearchScreen() {
   const recommendationActionsDisabled =
     personalizedRecommendations.isRefreshing ||
     personalizedRecommendations.isRefilling ||
+    personalizedRecommendations.isLoadingMore ||
     pendingAddIds.size > 0 ||
     recommendationIsLoading ||
     library.isError;
@@ -489,6 +500,22 @@ export default function SearchScreen() {
 
       {hasSearchQuery && isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
       {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
+      {showRecommendationFeed && recommendationLoadingMessage ? (
+        <View
+          accessibilityLabel={recommendationLoadingMessage}
+          accessibilityRole="progressbar"
+          accessibilityState={{ busy: true }}
+          style={styles.recommendationLoadingBanner}
+        >
+          <ActivityIndicator color={colors.primary} size="small" />
+          <View style={styles.recommendationLoadingText}>
+            <Text accessibilityLiveRegion="polite" style={styles.recommendationLoadingTitle}>
+              추천 작품 로딩 중
+            </Text>
+            <Text style={styles.recommendationLoadingDescription}>{recommendationLoadingMessage}</Text>
+          </View>
+        </View>
+      ) : null}
       {recommendationIsLoading || recommendationIsContinuing ? (
         <LoadingSkeleton
           columns={displayedAsGallery ? galleryColumns : 1}
@@ -504,8 +531,20 @@ export default function SearchScreen() {
       ) : null}
       {showRecommendationFeed && personalizedRecommendations.isError && activeRecommendations.length === 0 ? (
         <ErrorState
-          message="추천 데이터를 불러오지 못했습니다. 다시 시도해 주세요."
+          message={personalizedRecommendations.error?.message ?? "추천 데이터를 불러오지 못했습니다. 다시 시도해 주세요."}
           onRetry={() => void personalizedRecommendations.refetch()}
+        />
+      ) : null}
+      {showRecommendationFeed &&
+      recommendationNeedsContinuation &&
+      personalizedRecommendations.emptyContinuationStopped &&
+      !personalizedRecommendations.isError ? (
+        <ErrorState
+          message={
+            personalizedRecommendations.loadMoreError ??
+            "새 추천을 찾지 못했습니다. 다시 조회해 주세요."
+          }
+          onRetry={() => void personalizedRecommendations.retryEmptyContinuation()}
         />
       ) : null}
       {showRecommendationFeed && personalizedRecommendations.refreshError ? (
@@ -567,18 +606,56 @@ export default function SearchScreen() {
 
       <View
         accessibilityState={{
-          busy: personalizedRecommendations.isRefreshing || personalizedRecommendations.isRefilling
+          busy:
+            personalizedRecommendations.isRefreshing ||
+            personalizedRecommendations.isRefilling ||
+            personalizedRecommendations.isLoadingMore
         }}
         style={styles.listContainer}
       >
         <FlashList
           contentContainerStyle={styles.resultsList}
           data={displayedResults}
-          extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${library.data?.length ?? 0}`}
+          extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${library.data?.length ?? 0}:${personalizedRecommendations.isLoadingMore}`}
           ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
           key={`${hasSearchInput ? "search" : "recommendations"}-${mediaType}-${viewMode}`}
           keyExtractor={(item) => `${item.external_source}:${item.external_id}`}
           numColumns={displayedAsGallery ? galleryColumns : 1}
+          onEndReached={() => {
+            if (
+              showRecommendationFeed &&
+              !personalizedRecommendations.isExhausted &&
+              !personalizedRecommendations.isInitialLoading &&
+              !personalizedRecommendations.isLoadingMore &&
+              !personalizedRecommendations.isRefreshing &&
+              !personalizedRecommendations.isRefilling &&
+              !personalizedRecommendations.isError
+            ) {
+              void personalizedRecommendations.loadMore();
+            }
+          }}
+          onEndReachedThreshold={0.35}
+          ListFooterComponent={showRecommendationFeed ? (
+            personalizedRecommendations.isLoadingMore ? (
+              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
+                <ActivityIndicator color={colors.primary} size="small" />
+                <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>
+                  다음 추천 12개를 불러오는 중이에요.
+                </Text>
+              </View>
+            ) : personalizedRecommendations.loadMoreError ? (
+              <View style={styles.loadMoreFooter}>
+                <Text style={styles.loadMoreErrorText}>{personalizedRecommendations.loadMoreError}</Text>
+                <Pressable accessibilityRole="button" onPress={() => void personalizedRecommendations.loadMore()} style={styles.inlineRetryButton}>
+                  <Text style={styles.inlineRetryText}>다시 시도</Text>
+                </Pressable>
+              </View>
+            ) : personalizedRecommendations.isExhausted && activeRecommendations.length > 0 ? (
+              <Text accessibilityLiveRegion="polite" style={styles.exhaustedFooterText}>
+                현재 제공되는 추천 작품을 모두 확인했어요.
+              </Text>
+            ) : null
+          ) : null}
           renderItem={({ item }) => {
             const similarResult = isSimilarContentResult(item) ? item : null;
             const recommendation = isPersonalizedRecommendation(item) ? item : null;
@@ -988,6 +1065,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700"
   },
+  recommendationLoadingBanner: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  recommendationLoadingText: {
+    flex: 1,
+    gap: 2
+  },
+  recommendationLoadingTitle: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  recommendationLoadingDescription: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 17
+  },
   liveStatus: {
     height: 1,
     opacity: 0,
@@ -1034,5 +1138,30 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     paddingBottom: 88
+  },
+  loadMoreFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    minHeight: 64,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md
+  },
+  loadMoreText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  loadMoreErrorText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  exhaustedFooterText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    padding: spacing.lg,
+    textAlign: "center"
   }
 });

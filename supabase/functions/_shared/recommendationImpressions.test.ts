@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  collectRecommendationImpressionIdentityKeys,
   createRecommendationImpressionLookupKeys,
-  createRecommendationImpressionRows
+  createRecommendationImpressionRows,
+  RECENT_RECOMMENDATION_IMPRESSION_LIMIT
 } from "./recommendationImpressions.ts";
 import type { RecommendationCandidate } from "./recommendationEngine.ts";
 
 describe("recommendation impression rows", () => {
+  it("keeps thirty full recommendation batches in the recent exclusion window", () => {
+    assert.equal(RECENT_RECOMMENDATION_IMPRESSION_LIMIT, 360);
+  });
+
   it("builds one batch row per displayed canonical work", () => {
     const rows = createRecommendationImpressionRows(
       "user-1",
@@ -42,6 +48,22 @@ describe("recommendation impression rows", () => {
 
     assert.deepEqual(keys, ["anilist:178789"]);
     assert(keys.every((key) => !key.startsWith("work:")));
+  });
+
+  it("collects unique identities from a bounded recent-impression window", () => {
+    assert.deepEqual(
+      collectRecommendationImpressionIdentityKeys([
+        {
+          canonical_content_id: "anilist:1",
+          identity_keys: ["anilist:1", "work:anime:first:2026"]
+        },
+        {
+          canonical_content_id: "tmdb:2",
+          identity_keys: ["work:anime:first:2026", " "]
+        }
+      ]),
+      ["anilist:1", "work:anime:first:2026", "tmdb:2"]
+    );
   });
 });
 

@@ -94,7 +94,14 @@ export async function collectRecommendationPages<
   }
 
   if (!lastPage) throw new Error("RECOMMENDATION_PAGE_MISSING");
-  throw new Error("RECOMMENDATION_CONTINUATION_LIMIT_REACHED");
+  return {
+    items: collected,
+    nextCursor: lastPage.nextCursor,
+    hasMore: lastPage.hasMore,
+    exhausted: lastPage.exhausted,
+    page: lastPage,
+    requestCount: maxRequests
+  };
 }
 
 function intersects(left: Set<string>, right: Set<string>): boolean {

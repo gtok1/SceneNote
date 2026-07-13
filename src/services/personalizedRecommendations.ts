@@ -54,6 +54,7 @@ export interface PersonalizedRecommendationsRequest {
   mediaType: MediaTypeFilter;
   excludeIds: readonly string[];
   cursor?: string | null;
+  signal?: AbortSignal;
 }
 
 interface PersonalizedRecommendationsApiResponse {
@@ -99,7 +100,8 @@ export async function getPersonalizedRecommendations(
         limit: continuation.limit,
         mediaType: request.mediaType,
         excludeIds: continuation.excludeIds,
-        cursor: continuation.cursor
+        cursor: continuation.cursor,
+        ...(request.signal ? { signal: request.signal } : {})
       });
       page.failedSources.forEach((source) => failedSources.add(source));
       page.warnings.forEach((warning) => warnings.add(warning));
@@ -113,7 +115,7 @@ export async function getPersonalizedRecommendations(
       cursor: request.cursor ?? null,
       excludeIds: request.excludeIds,
       identityKeys: createRecommendationIdentityAliases,
-      maxRequests: 500,
+      maxRequests: 1,
       shouldPause: (page) => page.providersBlocked
     }
   );
@@ -156,6 +158,7 @@ async function fetchPersonalizedRecommendationPage(input: {
   mediaType: MediaTypeFilter;
   excludeIds: readonly string[];
   cursor: string | null;
+  signal?: AbortSignal;
 }): Promise<PersonalizedRecommendationPage> {
   const body: Record<string, unknown> = {
     action: "recommend",
@@ -167,9 +170,11 @@ async function fetchPersonalizedRecommendationPage(input: {
 
   const { data, error } = await supabase.functions.invoke<PersonalizedRecommendationsApiResponse>(
     "personalized-recommendations",
-    { body }
+    { body, timeout: 10_000, ...(input.signal ? { signal: input.signal } : {}) }
   );
-  if (error) throw new Error(error.message || "추천 데이터를 불러오지 못했습니다");
+  if (error) {
+    throw new Error("추천 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  }
   if (!data || !Array.isArray(data.items)) {
     throw new Error("개인화 추천 응답이 올바르지 않습니다");
   }

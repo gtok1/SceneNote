@@ -554,7 +554,7 @@ function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
   return { "Content-Type": "application/json" };
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 8_000): Promise<T> {
+async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 5_000): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {

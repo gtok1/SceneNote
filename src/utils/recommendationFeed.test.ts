@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  appendRecommendationFeed,
   createRecommendationFeedKey,
   createRecommendationFeedState,
+  decideEmptyRecommendationContinuation,
+  MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
+  MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS,
+  PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
   refillRecommendationFeedItem,
   removeRecommendationFeedItem,
   replaceRecommendationFeed,
@@ -21,6 +26,82 @@ interface FeedItem {
 const itemId = (item: FeedItem) => item.id;
 
 describe("recommendation feed state", () => {
+  it("continues incomplete pages only within the bounded scan budget", () => {
+    const base = {
+      hasData: true,
+      itemCount: 0,
+      targetItemCount: PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
+      isLoading: false,
+      hasError: false,
+      hasMore: true,
+      nextCursor: "page-2",
+      isExhausted: false,
+      continuationAttempts: 0,
+      maxContinuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
+      elapsedMs: 0,
+      maxDurationMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS
+    };
+
+    assert.equal(decideEmptyRecommendationContinuation(base), "continue");
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        continuationAttempts: 25,
+        elapsedMs: 20_000
+      }),
+      "continue"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        continuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS - 1,
+        elapsedMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS - 1
+      }),
+      "continue"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({ ...base, isLoading: true }),
+      "loading"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        continuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS
+      }),
+      "stopped"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        elapsedMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS
+      }),
+      "stopped"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({ ...base, hasError: true }),
+      "stopped"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({ ...base, nextCursor: null }),
+      "stopped"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({ ...base, itemCount: 1 }),
+      "continue"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        itemCount: PERSONALIZED_RECOMMENDATION_BATCH_SIZE
+      }),
+      "idle"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({ ...base, isExhausted: true }),
+      "idle"
+    );
+  });
+
   it("replaces the current batch with twelve new recommendations", () => {
     const initial = createRecommendationFeedState<FeedItem>({
       items: itemsFrom(1),
@@ -43,6 +124,22 @@ describe("recommendation feed state", () => {
     assert.equal(next.refreshError, null);
     assert.equal(next.refillError, null);
     assert.deepEqual(initial.items.map(itemId), Array.from({ length: 12 }, (_, index) => 1 + index));
+  });
+
+  it("appends the next batch below existing cards without duplicates", () => {
+    const initial = createRecommendationFeedState<FeedItem>({
+      items: itemsFrom(1),
+      cursor: "page-2"
+    });
+    const appended = appendRecommendationFeed(
+      initial,
+      { items: [item(12), ...itemsFrom(13)], cursor: "page-3", broadened: true },
+      itemId
+    );
+
+    assert.deepEqual(appended.items.map(itemId), Array.from({ length: 24 }, (_, index) => index + 1));
+    assert.equal(appended.cursor, "page-3");
+    assert.equal(appended.broadened, true);
   });
 
   it("keeps the current recommendations when refresh fails", () => {

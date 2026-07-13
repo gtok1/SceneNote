@@ -37,6 +37,7 @@ export interface RecommendationCatalogScanOptions<T extends RecommendationCandid
   maxProviderRoundsPerRequest?: number;
   libraryItems?: readonly RecommendationLibraryItem[];
   excludeIds?: readonly string[];
+  candidateFilter?: (candidate: T) => boolean;
   resolveSeenIds?: (candidates: readonly RankedRecommendation<T>[]) => Promise<readonly string[]>;
 }
 
@@ -72,6 +73,10 @@ interface RecommendationCursorState {
 
 export const RECOMMENDATION_SORT_VERSION = "latest-popular-v2" as const;
 export const RECOMMENDATION_CATALOG_MINIMUM_MONTH = "1870-01";
+
+export function hasKoreanDisplayTitle(candidate: RecommendationCandidate): boolean {
+  return /[가-힣]/u.test(candidate.title_primary.normalize("NFKC"));
+}
 
 const DEFAULT_MAX_MONTHS_PER_REQUEST = 4;
 const DEFAULT_MAX_PROVIDER_ROUNDS_PER_REQUEST = 8;
@@ -187,7 +192,9 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     const rankedPage = dedupeRanked(
       rankCandidates(
         profile,
-        [...successfulPages.values()].flatMap((page) => page.items),
+        [...successfulPages.values()]
+          .flatMap((page) => page.items)
+          .filter((candidate) => options.candidateFilter?.(candidate) ?? true),
         { mediaType: options.mediaType, libraryItems: options.libraryItems }
       )
     );

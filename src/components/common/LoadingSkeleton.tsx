@@ -35,7 +35,7 @@ export function LoadingSkeleton({
       {Array.from({ length: count }).map((_, index) =>
         isRecommendationGrid ? (
           <View key={`${variant}-${index}`} style={[styles.recommendationCell, { width: cellWidth }]}>
-            <View accessible={false} style={styles.recommendationCard}>
+            <View accessibilityElementsHidden style={styles.recommendationCard}>
               <View style={styles.recommendationPoster} />
               <View style={styles.recommendationBody}>
                 <View style={[styles.recommendationLine, styles.recommendationTitleLine]} />
@@ -50,7 +50,7 @@ export function LoadingSkeleton({
             </View>
           </View>
         ) : (
-          <View accessible={false} key={`${variant}-${index}`} style={[styles.item, styles[variant]]} />
+          <View accessibilityElementsHidden key={`${variant}-${index}`} style={[styles.item, styles[variant]]} />
         )
       )}
     </View>

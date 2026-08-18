@@ -51,6 +51,24 @@ describe("monthly recommendation catalog scan", () => {
     ]);
   });
 
+  it("skips capped current-month niche candidates and fills the batch from the previous month", async () => {
+    const niche = Array.from({ length: 6 }, (_, index) => candidate(`niche-${index}`, "2026-07-01", 100 - index, {
+      source_tags: [{ name: "Boys' Love", source: "anilist", rank: 90 }],
+      keywords: ["Boys' Love"]
+    }));
+    const june = Array.from({ length: 20 }, (_, index) => candidate(`general-${index}`, "2026-06-01", 80 - index, {
+      genres: ["Crime", `Specific ${index}`]
+    }));
+    const result = await scanRecommendationCatalog(
+      fetcher({ anilist: { "2026-07": [niche], "2026-06": [june] } }),
+      { mediaType: "anime", now: NOW, limit: 12 }
+    );
+
+    assert.equal(result.items.length, 12);
+    assert.equal(result.items.filter((item) => item.themes.some((theme) => theme.key === "boys-love")).length, 1);
+    assert.equal(result.broadened, true);
+  });
+
   it("moves to the previous month when the current month is fully seen", async () => {
     const july = Array.from({ length: 12 }, (_, index) => candidate(`seen-${index}`, "2026-07-01"));
     const june = Array.from({ length: 12 }, (_, index) => candidate(`new-${index}`, "2026-06-01"));
@@ -202,7 +220,7 @@ describe("provider page continuation", () => {
 });
 
 describe("ranking, exclusions, and stream continuity", () => {
-  it("uses popularity before preference within the same release month", async () => {
+  it("does not let popularity overwrite a stronger preference match within the same month", async () => {
     const library = preferenceLibrary();
     const popular = candidate("popular", "2026-07-01", 100, { genres: ["Comedy"] });
     const tasteMatch = candidate("taste", "2026-07-20", 10, { genres: ["Mystery"] });
@@ -211,7 +229,7 @@ describe("ranking, exclusions, and stream continuity", () => {
       { mediaType: "anime", now: NOW, limit: 2, libraryItems: library }
     );
 
-    assert.deepEqual(result.items.map((item) => item.external_id), ["popular", "taste"]);
+    assert.deepEqual(result.items.map((item) => item.external_id), ["taste", "popular"]);
   });
 
   it("uses preference as the tie-breaker when popularity is equal", async () => {

@@ -17,6 +17,9 @@ interface RecommendationQuickViewModalProps {
   onClose: () => void;
   onAdd: (item: PersonalizedRecommendation) => void;
   onOpenDetails: (item: PersonalizedRecommendation) => void;
+  onNotInterested: (item: PersonalizedRecommendation) => void;
+  onMoreLikeThis: (item: PersonalizedRecommendation) => void;
+  onReduceTheme?: (item: PersonalizedRecommendation) => void;
 }
 
 export function RecommendationQuickViewModal({
@@ -26,7 +29,10 @@ export function RecommendationQuickViewModal({
   isAddDisabled,
   onClose,
   onAdd,
-  onOpenDetails
+  onOpenDetails,
+  onNotInterested,
+  onMoreLikeThis,
+  onReduceTheme
 }: RecommendationQuickViewModalProps) {
   const detail = useExternalContentDetail(
     item?.external_source,
@@ -103,7 +109,7 @@ export function RecommendationQuickViewModal({
 
             {overview ? <InfoSection title="작품 소개"><Text style={styles.overview}>{overview}</Text></InfoSection> : null}
             {resolvedPresentation.personalizedReason ? (
-              <InfoSection icon="sparkles-outline" title="추천 이유">
+              <InfoSection icon="sparkles-outline" title={resolvedPresentation.reasonLabel ?? "추천 이유"}>
                 <Text style={styles.overview}>{resolvedPresentation.personalizedReason}</Text>
               </InfoSection>
             ) : null}
@@ -121,6 +127,15 @@ export function RecommendationQuickViewModal({
           </ScrollView>
 
           <View style={styles.footer}>
+            <Pressable accessibilityLabel={`${item.title_primary} 관심 없음`} accessibilityRole="button" onPress={() => onNotInterested(item)} style={styles.feedbackButton}>
+              <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
+              <Text style={styles.feedbackText}>관심 없음</Text>
+            </Pressable>
+            <Pressable accessibilityLabel={`${item.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={() => onMoreLikeThis(item)} style={styles.feedbackButton}>
+              <Ionicons color={colors.textMuted} name="git-compare-outline" size={18} />
+              <Text style={styles.feedbackText}>비슷한 작품</Text>
+            </Pressable>
+            {onReduceTheme ? <Pressable accessibilityLabel={`${item.title_primary} 이런 요소 줄이기`} accessibilityRole="button" onPress={() => onReduceTheme(item)} style={styles.feedbackButton}><Ionicons color={colors.textMuted} name="options-outline" size={18} /><Text style={styles.feedbackText}>요소 줄이기</Text></Pressable> : null}
             <Pressable accessibilityLabel={`${item.title_primary} 상세 화면 열기`} accessibilityRole="button" onPress={() => onOpenDetails(item)} style={styles.secondaryButton}>
               <Text style={styles.secondaryText}>상세 보기</Text>
             </Pressable>
@@ -179,7 +194,9 @@ const styles = StyleSheet.create({
   trailerText: { color: colors.primary, fontSize: 13, fontWeight: "900" },
   source: { color: colors.textMuted, fontSize: 11 },
   muted: { color: colors.textMuted, fontSize: 12 },
-  footer: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.sm, justifyContent: "flex-end", padding: spacing.lg },
+  footer: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, justifyContent: "flex-end", padding: spacing.lg },
+  feedbackButton: { alignItems: "center", flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
+  feedbackText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
   secondaryButton: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   secondaryText: { color: colors.text, fontSize: 14, fontWeight: "900" },
   primaryButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },

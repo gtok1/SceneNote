@@ -6,6 +6,8 @@ import {
 import {
   type RecommendationCandidate,
   type RecommendationLibraryItem,
+  type RecommendationFeedback,
+  type RecommendationFeedbackAction,
   type RecommendationMediaType
 } from "../_shared/recommendationEngine.ts";
 import {
@@ -18,12 +20,13 @@ import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createUserClient, requireUser } from "../_shared/supabase.ts";
 
 interface PersonalizedRecommendationRequest {
-  action?: "recommend" | "record_impressions";
+  action?: "recommend" | "record_impressions" | "record_feedback";
   limit?: number;
   media_type?: RecommendationMediaType;
   exclude_ids?: string[];
   cursor?: string | null;
   impressions?: RecommendationCandidate[];
+  feedback?: RecommendationFeedback | RecommendationFeedback[];
 }
 
 interface RawExternalId {
@@ -39,6 +42,15 @@ interface RawSeason {
   episode_count?: number | null;
 }
 
+interface RawContentTheme {
+  family: "relationship" | "tone" | "setting" | "narrative" | "occupation" | "audience" | "format";
+  key: string;
+  label: string;
+  centrality: number;
+  source: string;
+  source_key: string;
+}
+
 interface RawContent {
   id?: string | null;
   content_type?: string | null;
@@ -51,6 +63,7 @@ interface RawContent {
   content_external_ids?: RawExternalId[] | null;
   content_genres?: RawGenreJoin[] | null;
   seasons?: RawSeason[] | null;
+  content_themes?: RawContentTheme[] | null;
 }
 
 interface RawLibraryRow {
@@ -79,10 +92,16 @@ interface ValidatedImpressionRequest {
   impressions: RecommendationCandidate[];
 }
 
-type ValidatedRequest = ValidatedRecommendationRequest | ValidatedImpressionRequest;
+interface ValidatedFeedbackRequest {
+  action: "record_feedback";
+  feedback: RecommendationFeedback[];
+}
+
+type ValidatedRequest = ValidatedRecommendationRequest | ValidatedImpressionRequest | ValidatedFeedbackRequest;
 
 const MAX_EXCLUSION_IDS = 200;
 const MAX_IMPRESSIONS_PER_REQUEST = 12;
+const MAX_FEEDBACK_PER_REQUEST = 4;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -116,21 +135,42 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  if (validated.value.action === "record_feedback") {
+    try {
+      await recordContentFeedback(userClient, user.id, validated.value.feedback);
+      return json({ saved: true });
+    } catch (error) {
+      console.error("personalized-recommendations feedback write failed:", error);
+      return jsonError(500, "FEEDBACK_WRITE_FAILED", "Failed to save recommendation feedback");
+    }
+  }
+
   try {
-    const libraryResult = await userClient
-      .from("user_library_items")
-      .select(
-        "content_id,status,status_flags,watch_count,contents(id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id),content_genres(genres(name)),seasons(episode_count))"
-      )
-      .eq("user_id", user.id);
+    const [libraryResult, feedbackResult] = await Promise.all([
+      userClient
+        .from("user_library_items")
+        .select(
+          "content_id,status,status_flags,watch_count,contents(id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id),content_genres(genres(name)),content_themes(family,key,label,centrality,source,source_key),seasons(episode_count))"
+        )
+        .eq("user_id", user.id),
+      userClient
+        .from("user_content_feedback")
+        .select("target_type,target_key,action,weight,source_content_id,updated_at")
+        .eq("user_id", user.id)
+    ]);
 
     if (libraryResult.error) {
       console.error("personalized-recommendations library query failed:", libraryResult.error);
       return jsonError(500, "LIBRARY_QUERY_FAILED", "Failed to load the user library");
     }
+    if (feedbackResult.error) {
+      console.error("personalized-recommendations feedback query failed:", feedbackResult.error);
+      return jsonError(500, "FEEDBACK_QUERY_FAILED", "Failed to load recommendation feedback");
+    }
 
     const libraryItems = ((libraryResult.data ?? []) as unknown as RawLibraryRow[]).map(normalizeLibraryItem);
     const recentSeenIds = await loadRecentSeenIdentityKeys(userClient, user.id);
+    const feedback = (feedbackResult.data ?? []) as RecommendationFeedback[];
     const result = await scanRecommendationCatalog(fetchRecommendationProviderPage, {
       limit: validated.value.limit,
       mediaType: validated.value.mediaType,
@@ -139,7 +179,8 @@ Deno.serve(async (req: Request) => {
       libraryItems,
       candidateFilter: hasKoreanDisplayTitle,
       maxMonthsPerRequest: 1,
-      maxProviderRoundsPerRequest: 1
+      maxProviderRoundsPerRequest: 1,
+      feedback
     });
 
     if (result.allProvidersFailed) {
@@ -147,8 +188,13 @@ Deno.serve(async (req: Request) => {
     }
 
     const failedSources = normalizeFailedSources(result.failedProviders);
+    const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
     return json({
-      items: result.items,
+      items: result.items.map((item) => {
+        if (includeDebug) return item;
+        const { candidate_score: _candidateScore, ...publicItem } = item;
+        return publicItem;
+      }),
       next_cursor: result.nextCursor,
       has_more: result.hasMore,
       is_exhausted: result.exhausted,
@@ -189,6 +235,19 @@ function validateRequest(
     }
     return { ok: true, value: { action, impressions: value.impressions } };
   }
+  if (action === "record_feedback") {
+    const feedback = Array.isArray(value.feedback) ? value.feedback : [value.feedback];
+    if (feedback.length < 1 || feedback.length > MAX_FEEDBACK_PER_REQUEST) {
+      return {
+        ok: false,
+        message: `feedback must contain between 1 and ${MAX_FEEDBACK_PER_REQUEST} items`
+      };
+    }
+    if (!feedback.every(isRecommendationFeedback)) {
+      return { ok: false, message: "feedback is invalid" };
+    }
+    return { ok: true, value: { action, feedback } };
+  }
   if (action !== "recommend") return { ok: false, message: "action is invalid" };
 
   const limit = value.limit ?? 12;
@@ -218,6 +277,56 @@ function validateRequest(
       cursor: value.cursor?.trim() || null
     }
   };
+}
+
+function isRecommendationFeedback(value: unknown): value is RecommendationFeedback {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const feedback = value as Partial<RecommendationFeedback>;
+  return (
+    ["content", "genre", "tag", "theme", "studio", "cast", "staff"].includes(feedback.target_type ?? "") &&
+    typeof feedback.target_key === "string" && feedback.target_key.trim().length > 0 && feedback.target_key.length <= 300 &&
+    ["more", "less", "exclude", "not_interested"].includes(feedback.action ?? "")
+  );
+}
+
+async function recordContentFeedback(
+  userClient: ReturnType<typeof createUserClient>,
+  userId: string,
+  feedback: readonly RecommendationFeedback[]
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  const rowsByTarget = new Map<string, {
+    user_id: string;
+    target_type: RecommendationFeedback["target_type"];
+    target_key: string;
+    action: RecommendationFeedbackAction;
+    weight: number;
+    source_content_id: string | null;
+    updated_at: string;
+  }>();
+
+  for (const item of feedback) {
+    const targetKey = item.target_key.trim().toLocaleLowerCase();
+    rowsByTarget.set(`${item.target_type}:${targetKey}`, {
+      user_id: userId,
+      target_type: item.target_type,
+      target_key: targetKey,
+      action: item.action as RecommendationFeedbackAction,
+      weight: item.weight ?? 1,
+      source_content_id: item.source_content_id ?? null,
+      updated_at: updatedAt
+    });
+  }
+
+  // PostgREST executes this array upsert as one SQL statement, so the batch either
+  // persists completely or fails without leaving a partial preference update.
+  const { error } = await userClient
+    .from("user_content_feedback")
+    .upsert([...rowsByTarget.values()], {
+      onConflict: "user_id,target_type,target_key",
+      ignoreDuplicates: false
+    });
+  if (error) throw error;
 }
 
 function validateIdArray(
@@ -314,6 +423,7 @@ function normalizeLibraryItem(row: RawLibraryRow): RecommendationLibraryItem {
     air_year: content?.air_year ?? null,
     air_date: content?.air_date ?? null,
     genres: extractGenreNames(content?.content_genres),
+    themes: content?.content_themes ?? [],
     episode_count: episodeCounts.length > 0 ? episodeCounts.reduce((sum, count) => sum + count, 0) : null,
     season_count: seasons.length || null,
     status: row.status ?? null,

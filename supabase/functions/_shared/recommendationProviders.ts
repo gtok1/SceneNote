@@ -5,6 +5,7 @@ import type {
 } from "./recommendationCatalog.ts";
 import type { RecommendationCandidate } from "./recommendationEngine.ts";
 import { inferTmdbTvContentType } from "./tmdbClassification.ts";
+import { normalizeContentThemes } from "./recommendationThemes.ts";
 
 export interface CatalogRecommendationCandidate extends RecommendationCandidate {
   title_original: string | null;
@@ -422,6 +423,10 @@ function normalizeAniListAnime(
   if (!item.id || !title || !hasHangul(title)) return null;
   const providerRank = (request.page - 1) * ANILIST_PAGE_SIZE + index + 1;
   const localizedOverview = hasHangul(koreanItem?.overview) ? cleanText(koreanItem?.overview) : null;
+  const sourceTags = (item.tags ?? [])
+    .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler && finiteOr(tag.rank, 0) >= 40)
+    .map((tag) => ({ name: tag.name?.trim() ?? "", source: "anilist", rank: tag.rank }))
+    .filter((tag) => Boolean(tag.name));
   return {
     external_source: "anilist",
     external_id: String(item.id),
@@ -457,6 +462,8 @@ function normalizeAniListAnime(
       .map((tag) => tag.name?.trim())
       .filter((name): name is string => Boolean(name))
       .slice(0, 8),
+    source_tags: sourceTags,
+    themes: normalizeContentThemes({ external_source: "anilist", source_tags: sourceTags }),
     people: (item.staff?.nodes ?? [])
       .map((person) => person.name?.full?.trim())
       .filter((name): name is string => Boolean(name)),

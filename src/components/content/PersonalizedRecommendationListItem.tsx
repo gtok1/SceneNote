@@ -16,6 +16,9 @@ interface Props {
   onAddToLibrary: () => void;
   addLabel: string;
   isAddDisabled: boolean;
+  onNotInterested: () => void;
+  onMoreLikeThis: () => void;
+  onReduceTheme?: () => void;
 }
 
 export const PersonalizedRecommendationListItem = memo(function PersonalizedRecommendationListItem({
@@ -24,7 +27,10 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
   onOpenQuickView,
   onAddToLibrary,
   addLabel,
-  isAddDisabled
+  isAddDisabled,
+  onNotInterested,
+  onMoreLikeThis,
+  onReduceTheme
 }: Props) {
   const reactionLabel = presentation.ratingLabel ?? presentation.popularityLabel;
   return (
@@ -52,14 +58,22 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
           </Text>
           <GenreBadgeList genres={result.genres} maxVisible={3} />
           {presentation.personalizedReason ? (
-            <View style={styles.reasonRow}>
+            <View style={[styles.reasonRow, presentation.reasonConfidence === "weak" ? styles.reasonRowWeak : null]}>
               <Ionicons color={colors.primary} name="sparkles-outline" size={12} />
-              <Text numberOfLines={2} style={styles.reasonText}>{presentation.personalizedReason}</Text>
+              <View style={styles.reasonContent}>
+                <Text style={styles.reasonLabel}>{presentation.reasonLabel ?? "추천 이유"}</Text>
+                <Text numberOfLines={2} style={styles.reasonText}>{presentation.personalizedReason}</Text>
+              </View>
             </View>
           ) : null}
         </View>
       </Pressable>
       <View style={styles.actions}>
+        <View style={styles.feedbackActions}>
+          <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} onPress={onNotInterested} style={styles.iconButton}><Ionicons color={colors.textMuted} name="close-circle-outline" size={18} /></Pressable>
+          <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} onPress={onMoreLikeThis} style={styles.iconButton}><Ionicons color={colors.textMuted} name="git-compare-outline" size={18} /></Pressable>
+          {onReduceTheme ? <Pressable accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`} onPress={onReduceTheme} style={styles.iconButton}><Ionicons color={colors.textMuted} name="options-outline" size={18} /></Pressable> : null}
+        </View>
         <Pressable accessibilityLabel={`${result.title_primary} 빠른 보기`} onPress={onOpenQuickView} style={styles.quickButton}>
           <Ionicons color={colors.text} name="eye-outline" size={15} />
           <Text style={styles.quickText}>빠른 보기</Text>
@@ -112,9 +126,14 @@ const styles = StyleSheet.create({
   hook: { color: colors.text, fontSize: 13, lineHeight: 18 },
   meta: { color: colors.textMuted, fontSize: 12, fontWeight: "700", lineHeight: 17 },
   reasonRow: { alignItems: "flex-start", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.xs, padding: spacing.sm },
-  reasonText: { color: colors.text, flex: 1, fontSize: 12, fontWeight: "700", lineHeight: 17 },
+  reasonRowWeak: { backgroundColor: colors.surfaceMuted },
+  reasonContent: { flex: 1, gap: 2 },
+  reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
+  reasonText: { color: colors.text, fontSize: 12, fontWeight: "700", lineHeight: 17 },
   actions: { alignItems: "stretch", gap: spacing.sm },
   quickButton: { alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "center", padding: spacing.xs },
+  feedbackActions: { flexDirection: "row", justifyContent: "center" },
+  iconButton: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
   addButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   disabled: { opacity: 0.55 },

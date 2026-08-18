@@ -6,8 +6,11 @@ import {
 } from "@/utils/recommendationCollector";
 import {
   createRecommendationIdentityAliases,
+  type RecommendationFeedback,
+  type RecommendationReason,
   type RecommendationSignal
 } from "../../supabase/functions/_shared/recommendationEngine";
+import { createPersonalizedRecommendationFeedbackBody } from "./personalizedRecommendationFeedback";
 
 export type RecommendationProfileMode = "cold_start" | "light" | "personalized";
 
@@ -16,6 +19,10 @@ export interface PersonalizedRecommendation extends SearchResult {
   similarity_score: number;
   recommendation_reason: string;
   recommendation_signals?: RecommendationSignal[];
+  recommendation_reason_detail?: RecommendationReason;
+  themes?: import("../../supabase/functions/_shared/recommendationThemes").ContentTheme[];
+  is_exploration?: boolean;
+  preference_evidence?: "positive" | "negative" | "unknown";
   popularity?: number | null;
   vote_count?: number | null;
   rating_score?: number | null;
@@ -33,6 +40,17 @@ export interface PersonalizedRecommendation extends SearchResult {
   rank: number;
   trend_source: string;
   release_month?: number | null;
+}
+
+export async function recordPersonalizedRecommendationFeedback(
+  feedback: RecommendationFeedback | readonly RecommendationFeedback[]
+): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<{ saved?: boolean }>(
+    "personalized-recommendations",
+    { body: createPersonalizedRecommendationFeedbackBody(feedback) }
+  );
+  if (error) throw new Error(error.message || "추천 피드백을 저장하지 못했습니다");
+  if (!data?.saved) throw new Error("추천 피드백 응답이 올바르지 않습니다");
 }
 
 export interface PersonalizedRecommendationsResponse {

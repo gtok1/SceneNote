@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query";
 import {
   getPersonalizedRecommendations,
+  recordPersonalizedRecommendationFeedback,
   recordPersonalizedRecommendationImpressions,
   type PersonalizedRecommendation,
   type PersonalizedRecommendationsRequest,
@@ -29,7 +30,10 @@ import {
   collectRecommendationSessionSeenIds,
   rememberRecommendationSessionSeenIds
 } from "@/utils/recommendationSession";
-import { createRecommendationIdentityAliases } from "../../supabase/functions/_shared/recommendationEngine";
+import {
+  createRecommendationIdentityAliases,
+  type RecommendationFeedback
+} from "../../supabase/functions/_shared/recommendationEngine";
 
 type RecommendationQueryKey = ReturnType<typeof queryKeys.recommendations.personalized>;
 
@@ -516,6 +520,39 @@ export function usePersonalizedRecommendations(
     void loadMoreRef.current();
   }, [emptyContinuationDecision]);
 
+  const submitFeedback = async (
+    item: PersonalizedRecommendation,
+    input: { targetType: "content" | "theme"; targetKey: string; action: "more" | "less" | "exclude" | "not_interested"; remove: boolean }
+  ): Promise<RecommendationRefillResult | "saved"> => {
+    const removed = input.remove ? removeOptimistically(item.canonical_id) : null;
+    try {
+      const feedback: RecommendationFeedback[] = [{
+        target_type: input.targetType,
+        target_key: input.targetKey,
+        action: input.action,
+        source_content_id: item.canonical_id,
+        weight: 1
+      }];
+      if (input.action === "more" && input.targetType === "content") {
+        feedback.push(...(item.themes ?? [])
+          .filter((theme) => theme.centrality >= 0.4)
+          .slice(0, 3)
+          .map((theme) => ({
+            target_type: "theme" as const,
+            target_key: `${theme.family}:${theme.key}`,
+            action: "more" as const,
+            source_content_id: item.canonical_id,
+            weight: theme.centrality
+          })));
+      }
+      await recordPersonalizedRecommendationFeedback(feedback);
+      if (removed) return refill(removed);
+      return "saved";
+    } catch (error) {
+      if (removed) restore(removed);
+      throw error;
+    }
+  };
   const refreshVariables = refreshMutation.variables;
   const refillVariables = refillMutation.variables;
   const loadMoreVariables = loadMoreMutation.variables;
@@ -572,7 +609,8 @@ export function usePersonalizedRecommendations(
     refill,
     retryRefill,
     loadMore,
-    retryEmptyContinuation
+    retryEmptyContinuation,
+    submitFeedback
   };
 
   function setRefreshError(targetMediaType: MediaTypeFilter, message: string | null) {

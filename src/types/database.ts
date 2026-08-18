@@ -114,6 +114,53 @@ export type Database = {
           },
         ]
       }
+      content_themes: {
+        Row: {
+          centrality: number
+          content_id: string
+          created_at: string
+          family: string
+          id: string
+          key: string
+          label: string
+          source: string
+          source_key: string
+          updated_at: string
+        }
+        Insert: {
+          centrality: number
+          content_id: string
+          created_at?: string
+          family: string
+          id?: string
+          key: string
+          label: string
+          source: string
+          source_key: string
+          updated_at?: string
+        }
+        Update: {
+          centrality?: number
+          content_id?: string
+          created_at?: string
+          family?: string
+          id?: string
+          key?: string
+          label?: string
+          source?: string
+          source_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_themes_content_id_fkey"
+            columns: ["content_id"]
+            isOneToOne: false
+            referencedRelation: "contents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contents: {
         Row: {
           air_date: string | null
@@ -675,6 +722,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_content_feedback: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          source_content_id: string | null
+          target_key: string
+          target_type: string
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          source_content_id?: string | null
+          target_key: string
+          target_type: string
+          updated_at?: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          source_content_id?: string | null
+          target_key?: string
+          target_type?: string
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: []
       }
       user_recommendation_impressions: {
         Row: {

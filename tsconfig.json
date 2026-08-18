@@ -7,7 +7,8 @@
       "@/*": ["src/*"]
     },
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true
+    "exactOptionalPropertyTypes": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "**/*.ts",

@@ -15,6 +15,7 @@ import { RecommendationQuickViewModal } from "@/components/content/Recommendatio
 import { SearchResultGalleryCard } from "@/components/content/SearchResultGalleryCard";
 import { SearchResultItem } from "@/components/content/SearchResultItem";
 import { SimilarContentQuickViewModal } from "@/components/content/SimilarContentQuickViewModal";
+import { ThemeReductionSheet } from "@/components/content/ThemeReductionSheet";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
@@ -23,6 +24,7 @@ import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommend
 import { useSimilarContent } from "@/hooks/useSimilarContent";
 import { resolveSimilarityAnchors, shouldAutoSelectAnchor, type SimilarContentResult } from "@/services/similarContent";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
+import type { ContentTheme } from "../supabase/functions/_shared/recommendationThemes";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useSearchUiStore } from "@/stores/searchUiStore";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
@@ -71,6 +73,8 @@ export default function SearchScreen() {
   const [pendingSearchKey, setPendingSearchKey] = useState<string | null>(null);
   const [pendingAddIds, setPendingAddIds] = useState<Set<string>>(() => new Set());
   const [selectedRecommendation, setSelectedRecommendation] = useState<PersonalizedRecommendation | null>(null);
+  const [themeReductionTarget, setThemeReductionTarget] = useState<PersonalizedRecommendation | null>(null);
+  const [submittingThemeKey, setSubmittingThemeKey] = useState<string | null>(null);
   const [similarIntent, setSimilarIntent] = useState<Extract<ParsedSearchIntent, { mode: "similarity" }> | null>(null);
   const [similarAnchor, setSimilarAnchor] = useState<SearchResult | null>(null);
   const [anchorCandidates, setAnchorCandidates] = useState<SearchResult[]>([]);
@@ -341,6 +345,68 @@ export default function SearchScreen() {
     const refreshed = await personalizedRecommendations.refresh();
     if (!refreshed) {
       addToast("새 추천을 불러오지 못했습니다. 다시 시도해 주세요.", "error");
+    }
+  };
+
+  const markRecommendationNotInterested = async (item: PersonalizedRecommendation) => {
+    try {
+      const result = await personalizedRecommendations.submitFeedback(item, {
+        targetType: "content",
+        targetKey: item.canonical_id,
+        action: "not_interested",
+        remove: true
+      });
+      if (selectedRecommendation?.canonical_id === item.canonical_id) setSelectedRecommendation(null);
+      addToast(result === "refilled" ? "관심 없음으로 반영하고 새 추천을 채웠어요." : "관심 없음으로 반영했어요.", "success");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+    }
+  };
+
+  const findMoreLikeRecommendation = async (item: PersonalizedRecommendation) => {
+    try {
+      await personalizedRecommendations.submitFeedback(item, {
+        targetType: "content",
+        targetKey: item.canonical_id,
+        action: "more",
+        remove: false
+      });
+      setSelectedRecommendation(null);
+      findSimilarFromCard(item);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+    }
+  };
+
+  const chooseThemeToReduce = (item: PersonalizedRecommendation) => {
+    const themes = (item.themes ?? []).filter((theme) => theme.centrality >= 0.4).slice(0, 3);
+    if (themes.length === 0) {
+      addToast("줄일 수 있는 구체적 테마 정보가 없는 작품입니다.", "error");
+      return;
+    }
+    setThemeReductionTarget({ ...item, themes });
+  };
+
+  const reduceRecommendationTheme = async (theme: ContentTheme) => {
+    if (!themeReductionTarget || submittingThemeKey) return;
+    const themeKey = `${theme.family}:${theme.key}`;
+    setSubmittingThemeKey(themeKey);
+    try {
+      await personalizedRecommendations.submitFeedback(themeReductionTarget, {
+        targetType: "theme",
+        targetKey: themeKey,
+        action: "less",
+        remove: true
+      });
+      if (selectedRecommendation?.canonical_id === themeReductionTarget.canonical_id) {
+        setSelectedRecommendation(null);
+      }
+      setThemeReductionTarget(null);
+      addToast(`${theme.label} 요소를 줄이도록 반영했어요.`, "success");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+    } finally {
+      setSubmittingThemeKey(null);
     }
   };
 
@@ -680,6 +746,9 @@ export default function SearchScreen() {
                   isAddDisabled={addState.disabled}
                   onAddToLibrary={() => addRecommendationResult(recommendation)}
                   onOpenQuickView={() => setSelectedRecommendation(recommendation)}
+                  onNotInterested={() => void markRecommendationNotInterested(recommendation)}
+                  onMoreLikeThis={() => void findMoreLikeRecommendation(recommendation)}
+                  {...((recommendation.themes?.length ?? 0) > 0 ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
                   presentation={presentation}
                   result={recommendation}
                 />
@@ -689,6 +758,9 @@ export default function SearchScreen() {
                   isAddDisabled={addState.disabled}
                   onAddToLibrary={() => addRecommendationResult(recommendation)}
                   onOpenQuickView={() => setSelectedRecommendation(recommendation)}
+                  onNotInterested={() => void markRecommendationNotInterested(recommendation)}
+                  onMoreLikeThis={() => void findMoreLikeRecommendation(recommendation)}
+                  {...((recommendation.themes?.length ?? 0) > 0 ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
                   presentation={presentation}
                   result={recommendation}
                 />
@@ -728,13 +800,23 @@ export default function SearchScreen() {
           addRecommendationResult(item);
         }}
         onClose={() => setSelectedRecommendation(null)}
+        onNotInterested={(item) => void markRecommendationNotInterested(item)}
+        onMoreLikeThis={(item) => void findMoreLikeRecommendation(item)}
         onOpenDetails={(item) => {
           setSelectedRecommendation(null);
           openResult(item);
         }}
+        {...(selectedRecommendation?.themes?.length ? { onReduceTheme: chooseThemeToReduce } : {})}
         presentation={selectedRecommendation
           ? recommendationPresentations.get(selectedRecommendation.canonical_id) ?? mapRecommendationToCardViewModel(selectedRecommendation)
           : null}
+      />
+      <ThemeReductionSheet
+        onClose={() => setThemeReductionTarget(null)}
+        onSelect={(theme) => void reduceRecommendationTheme(theme)}
+        submittingThemeKey={submittingThemeKey}
+        themes={themeReductionTarget?.themes ?? []}
+        visible={themeReductionTarget !== null}
       />
       <SimilarContentQuickViewModal addLabel={selectedSimilar?getSearchAddState(selectedSimilar).label:"추가"} isAddDisabled={selectedSimilar?getSearchAddState(selectedSimilar).disabled:true} item={selectedSimilar} onAdd={(item)=>{setSelectedSimilar(null);addResult(item);}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
     </View>

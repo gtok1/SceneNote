@@ -102,6 +102,10 @@ interface TmdbDetail {
   credits?: {
     cast?: TmdbCastMember[];
   };
+  keywords?: {
+    keywords?: { id?: number; name?: string | null }[];
+    results?: { id?: number; name?: string | null }[];
+  };
 }
 
 interface TmdbCastMember {
@@ -153,7 +157,7 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
     try {
       const url = new URL(`https://api.themoviedb.org/3/${mediaType}/${externalId}`);
       url.searchParams.set("language", TMDB_LANGUAGE);
-      url.searchParams.set("append_to_response", "translations,credits");
+      url.searchParams.set("append_to_response", "translations,credits,keywords");
       const headers = applyTmdbAuth(url, apiKey);
       detail = await fetchJson<TmdbDetail>(url.toString(), {
         headers
@@ -200,6 +204,10 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
     has_seasons: !isMovie,
     episode_count: seasons.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) || null,
     genres: normalizeGenreNames((detail.genres ?? []).map((genre) => genre.name)),
+    source_tags: [...(detail.keywords?.keywords ?? []), ...(detail.keywords?.results ?? [])]
+      .map((keyword) => keyword.name?.trim())
+      .filter((name): name is string => Boolean(name))
+      .map((name) => ({ name, source: "tmdb", rank: null })),
     seasons,
     cast
   };
@@ -388,6 +396,7 @@ const ANILIST_DETAIL_QUERY = `
       episodes
       format
       genres
+      tags { name rank isGeneralSpoiler isMediaSpoiler }
       characters(page: 1, perPage: 12, sort: [ROLE, RELEVANCE, ID]) {
         edges {
           role
@@ -439,6 +448,7 @@ interface AniListDetailResponse {
       episodes?: number | null;
       format?: string | null;
       genres?: string[] | null;
+      tags?: { name?: string | null; rank?: number | null; isGeneralSpoiler?: boolean | null; isMediaSpoiler?: boolean | null }[] | null;
       characters?: {
         edges?: {
           role?: string | null;
@@ -535,6 +545,10 @@ export async function fetchAniListDetail(externalId: string): Promise<ContentMet
     has_seasons: !isMovie,
     episode_count: episodeCount,
     genres: normalizeGenreNames(media.genres ?? []),
+    source_tags: (media.tags ?? [])
+      .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler && (tag.rank ?? 0) >= 40)
+      .map((tag) => ({ name: tag.name?.trim() ?? "", source: "anilist", rank: tag.rank }))
+      .filter((tag) => Boolean(tag.name)),
     seasons: isMovie
       ? []
       : [

@@ -16,6 +16,9 @@ interface PersonalizedRecommendationGalleryCardProps {
   onAddToLibrary: () => void;
   addLabel: string;
   isAddDisabled: boolean;
+  onNotInterested: () => void;
+  onMoreLikeThis: () => void;
+  onReduceTheme?: () => void;
 }
 
 export const PersonalizedRecommendationGalleryCard = memo(
@@ -25,7 +28,10 @@ export const PersonalizedRecommendationGalleryCard = memo(
     onOpenQuickView,
     onAddToLibrary,
     addLabel,
-    isAddDisabled
+    isAddDisabled,
+    onNotInterested,
+    onMoreLikeThis,
+    onReduceTheme
   }: PersonalizedRecommendationGalleryCardProps) {
     const reactionLabel = presentation.ratingLabel ?? presentation.popularityLabel;
 
@@ -65,10 +71,10 @@ export const PersonalizedRecommendationGalleryCard = memo(
               ) : null}
               <GenreBadgeList genres={result.genres} maxVisible={3} />
               {presentation.personalizedReason ? (
-                <View style={styles.reasonBox}>
+                <View style={[styles.reasonBox, presentation.reasonConfidence === "weak" ? styles.reasonBoxWeak : null]}>
                   <View style={styles.reasonLabelRow}>
                     <Ionicons color={colors.primary} name="sparkles-outline" size={12} />
-                    <Text style={styles.reasonLabel}>추천 이유</Text>
+                    <Text style={styles.reasonLabel}>{presentation.reasonLabel ?? "추천 이유"}</Text>
                   </View>
                   <Text numberOfLines={2} style={styles.reasonText}>{presentation.personalizedReason}</Text>
                 </View>
@@ -77,6 +83,17 @@ export const PersonalizedRecommendationGalleryCard = memo(
           </Pressable>
 
           <View style={styles.footer}>
+            <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={styles.iconButton}>
+              <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
+            </Pressable>
+            <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={styles.iconButton}>
+              <Ionicons color={colors.textMuted} name="git-compare-outline" size={18} />
+            </Pressable>
+            {onReduceTheme ? (
+              <Pressable accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`} accessibilityRole="button" onPress={onReduceTheme} style={styles.iconButton}>
+                <Ionicons color={colors.textMuted} name="options-outline" size={18} />
+              </Pressable>
+            ) : null}
             <Pressable
               accessibilityLabel={`${result.title_primary} 빠른 보기`}
               accessibilityRole="button"
@@ -152,6 +169,7 @@ const styles = StyleSheet.create({
     minHeight: 59,
     padding: spacing.sm
   },
+  reasonBoxWeak: { backgroundColor: colors.surfaceMuted },
   reasonLabelRow: { alignItems: "center", flexDirection: "row", gap: spacing.xs },
   reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   reasonText: { color: colors.text, fontSize: 11, fontWeight: "700", lineHeight: 15 },
@@ -165,6 +183,7 @@ const styles = StyleSheet.create({
     padding: spacing.sm
   },
   quickButton: { alignItems: "center", flexDirection: "row", gap: 4, paddingVertical: spacing.xs },
+  iconButton: { alignItems: "center", height: 32, justifyContent: "center", width: 28 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
   addButton: { backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   disabled: { opacity: 0.55 },

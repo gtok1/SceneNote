@@ -40,6 +40,7 @@ export interface ContentMeta {
   has_seasons: boolean;
   episode_count: number | null;
   genres: string[];
+  source_tags?: { name: string; source: string; rank?: number | null }[];
   seasons: SeasonMeta[];
   cast: CastMemberMeta[];
 }

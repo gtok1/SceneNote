@@ -3,6 +3,7 @@ import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ContentMeta, ExternalSource, SeasonMeta, WatchStatus } from "../_shared/types.ts";
+import { normalizeContentThemes } from "../_shared/recommendationThemes.ts";
 
 interface AddToLibraryRequest {
   api_source?: ExternalSource;
@@ -147,6 +148,27 @@ Deno.serve(async (req: Request) => {
     await upsertGenres(adminClient, contentId, contentMeta.genres);
   } catch (error) {
     console.error("Genre upsert skipped:", error);
+  }
+
+  const themes = normalizeContentThemes({
+    external_source: source,
+    source_tags: contentMeta.source_tags
+  });
+  if (themes.length > 0) {
+    const { error: themeError } = await adminClient.from("content_themes").upsert(
+      themes.map((theme) => ({
+        content_id: contentId,
+        family: theme.family,
+        key: theme.key,
+        label: theme.label,
+        centrality: theme.centrality,
+        source: theme.source,
+        source_key: theme.source_key,
+        updated_at: new Date().toISOString()
+      })),
+      { onConflict: "content_id,family,key" }
+    );
+    if (themeError) console.error("Theme upsert skipped:", themeError);
   }
 
   const { error: externalIdError } = await adminClient.from("content_external_ids").upsert(

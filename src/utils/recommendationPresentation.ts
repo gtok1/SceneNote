@@ -6,6 +6,8 @@ import type { RecommendationSignal } from "../../supabase/functions/_shared/reco
 export interface RecommendationPresentation {
   hook: string | null;
   personalizedReason: string | null;
+  reasonLabel: "추천 이유" | "비슷한 점" | "취향 탐색" | null;
+  reasonConfidence: "strong" | "medium" | "weak" | null;
   recommendationSignals: RecommendationSignal[];
   ratingLabel: string | null;
   popularityLabel: string | null;
@@ -44,6 +46,8 @@ export function mapRecommendationToCardViewModel(
   return {
     hook: buildRecommendationHook(item),
     personalizedReason: buildPersonalizedReason(item, recommendationSignals),
+    reasonLabel: item.recommendation_reason_detail?.label ?? (recommendationSignals.length > 0 ? "추천 이유" : null),
+    reasonConfidence: item.recommendation_reason_detail?.confidence ?? null,
     recommendationSignals,
     ratingLabel: buildRatingPresentation(item),
     popularityLabel: buildPopularityPresentation(item),
@@ -112,6 +116,7 @@ export function buildPersonalizedReason(
   item: PersonalizedRecommendation,
   signals: readonly RecommendationSignal[] = item.recommendation_signals ?? []
 ): string | null {
+  if (item.recommendation_reason_detail?.message) return item.recommendation_reason_detail.message;
   const signal = signals[0];
   if (!signal) return buildNonPersonalizedReason(item);
 

@@ -122,6 +122,23 @@ describe("personalized reason presentation", () => {
       "코미디 · 일상 · TV 시리즈 작품"
     );
   });
+
+  it("uses the structured exploration label and weak visual confidence from the API", () => {
+    const presentation = mapRecommendationToCardViewModel(recommendation({
+      is_exploration: true,
+      recommendation_reason_detail: {
+        type: "exploration",
+        message: "기존 선택과 다른 방향의 최신 인기작이에요.",
+        source_content_ids: [],
+        signals: [],
+        confidence: "weak",
+        label: "취향 탐색"
+      }
+    }));
+    assert.equal(presentation.reasonLabel, "취향 탐색");
+    assert.equal(presentation.reasonConfidence, "weak");
+    assert.equal(presentation.personalizedReason?.includes("선호하는"), false);
+  });
 });
 
 describe("rating and release metadata presentation", () => {

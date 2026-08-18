@@ -1,10 +1,13 @@
 import {
   buildPreferenceProfile,
+  applyBatchDiversityConstraints,
+  RECOMMENDATION_DIVERSITY_CONFIG,
   createRecommendationIdentityAliases,
   rankCandidates,
   type RankedRecommendation,
   type RecommendationCandidate,
   type RecommendationLibraryItem,
+  type RecommendationFeedback,
   type RecommendationMediaType,
   type RecommendationProfileMode
 } from "./recommendationEngine.ts";
@@ -36,6 +39,7 @@ export interface RecommendationCatalogScanOptions<T extends RecommendationCandid
   maxMonthsPerRequest?: number;
   maxProviderRoundsPerRequest?: number;
   libraryItems?: readonly RecommendationLibraryItem[];
+  feedback?: readonly RecommendationFeedback[];
   excludeIds?: readonly string[];
   candidateFilter?: (candidate: T) => boolean;
   resolveSeenIds?: (candidates: readonly RankedRecommendation<T>[]) => Promise<readonly string[]>;
@@ -105,8 +109,16 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     1,
     40
   );
-  const profile = buildPreferenceProfile(options.libraryItems ?? []);
+  const profile = buildPreferenceProfile(options.libraryItems ?? [], options.feedback ?? []);
   const excluded = createNormalizedSet(options.excludeIds ?? []);
+  for (const feedback of options.feedback ?? []) {
+    if (
+      feedback.target_type === "content" &&
+      (feedback.action === "not_interested" || feedback.action === "exclude")
+    ) {
+      addAll(excluded, [feedback.target_key, feedback.source_content_id ?? ""]);
+    }
+  }
   for (const item of options.libraryItems ?? []) {
     addAll(excluded, createRecommendationIdentityAliases(item));
   }
@@ -210,6 +222,17 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       consumedOffset = index + 1;
       const identities = createNormalizedSet(createRecommendationIdentityAliases(candidate));
       if (intersects(identities, excluded) || selectedIdentitySets.some((set) => intersects(identities, set))) {
+        continue;
+      }
+
+      const diversified = applyBatchDiversityConstraints(
+        [...selected, candidate],
+        limit,
+        profile,
+        RECOMMENDATION_DIVERSITY_CONFIG,
+        false
+      );
+      if (!diversified.some((item) => item.canonical_id === candidate.canonical_id)) {
         continue;
       }
 

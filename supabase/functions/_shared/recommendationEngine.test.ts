@@ -239,7 +239,7 @@ describe("ranking and media filters", () => {
 
   it("uses similarity when release dates are identical", () => {
     const ranked = rankCandidates(profile, [
-      candidate("weak", { genres: ["Mystery", "Comedy"], air_date: "2026-05-01" }),
+      candidate("weak", { genres: ["Comedy"], air_date: "2026-05-01" }),
       candidate("strong", { genres: ["Mystery"], air_date: "2026-05-01" })
     ]);
 

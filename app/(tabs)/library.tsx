@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View
+} from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useNetworkState } from "expo-network";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
@@ -12,6 +23,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { YearSelect } from "@/components/common/YearSelect";
 import { ContentCard } from "@/components/content/ContentCard";
 import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
+import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import {
   LibraryFilterBottomSheet,
   type LibrarySheetFilterState
@@ -19,7 +31,7 @@ import {
 import { LibraryStatusFilter as LibraryStatusFilterBar } from "@/components/library/LibraryStatusFilter";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
-import { useLibrary } from "@/hooks/useLibrary";
+import { useLibrary, useUpdateLibraryManualProgress } from "@/hooks/useLibrary";
 import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
@@ -67,6 +79,7 @@ export default function LibraryScreen() {
   const [visibleItemCount, setVisibleItemCount] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null);
+  const [editingProgressItemId, setEditingProgressItemId] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<LibraryListItem>>(null);
   const filterButtonRef = useRef<View>(null);
   const loadMoreQueuedRef = useRef(false);
@@ -75,6 +88,8 @@ export default function LibraryScreen() {
   const { width } = useWindowDimensions();
   const { galleryColumns, isDesktop, isMobile } = getLibraryResponsiveLayout(width);
   const library = useLibrary(statusFilter);
+  const updateManualProgress = useUpdateLibraryManualProgress();
+  const networkState = useNetworkState();
   const router = useRouter();
   const filters = useMemo(
     () => ({
@@ -120,6 +135,30 @@ export default function LibraryScreen() {
     Boolean(searchQuery.trim()) ||
     Boolean(year) ||
     sortOrder !== "latest";
+  const editingProgressItem = library.data?.find(
+    (item) => item.library_item_id === editingProgressItemId
+  );
+
+  const openProgressEditor = (item: LibraryListItem) => {
+    setEditingProgressItemId(item.library_item_id);
+  };
+
+  const closeProgressEditor = () => {
+    if (!updateManualProgress.isPending) setEditingProgressItemId(null);
+  };
+
+  const saveProgress = (
+    progress: { seasonNumber: number | null; episodeNumber: number } | null
+  ) => {
+    if (!editingProgressItem) return;
+    updateManualProgress.mutate(
+      { libraryItemId: editingProgressItem.library_item_id, progress },
+      {
+        onSuccess: () => setEditingProgressItemId(null),
+        onError: (error) => Alert.alert("시청 진행 저장 실패", error.message)
+      }
+    );
+  };
 
   useEffect(() => {
     setStatusFilter(routeState.statusFilter);
@@ -146,6 +185,12 @@ export default function LibraryScreen() {
     setVisibleItemCount(pageSize);
     listRef.current?.scrollToOffset({ animated: false, offset: 0 });
   }, [contentTypeFilter, genreFilter, pageSize, ratingFilter, searchQuery, sortOrder, statusFilter, viewMode, year]);
+
+  useEffect(() => {
+    if (editingProgressItemId && library.data && !editingProgressItem) {
+      setEditingProgressItemId(null);
+    }
+  }, [editingProgressItem, editingProgressItemId, library.data]);
 
   const loadMoreItems = useCallback(() => {
     if (loadMoreQueuedRef.current) return;
@@ -591,9 +636,8 @@ export default function LibraryScreen() {
           isGallery ? (
             <ContentGalleryCard
               item={item}
-              onOpenEpisodes={() =>
-                router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id } })
-              }
+              onOpenEpisodes={() => openProgressEditor(item)}
+              onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({
                   pathname: "/content/[id]",
@@ -604,9 +648,8 @@ export default function LibraryScreen() {
           ) : (
             <ContentCard
               item={item}
-              onOpenEpisodes={() =>
-                router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id } })
-              }
+              onOpenEpisodes={() => openProgressEditor(item)}
+              onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({
                   pathname: "/content/[id]",
@@ -627,6 +670,53 @@ export default function LibraryScreen() {
           visible={showFilters}
         />
       ) : null}
+      <Modal
+        animationType="fade"
+        onRequestClose={closeProgressEditor}
+        transparent
+        visible={Boolean(editingProgressItem)}
+      >
+        <View style={styles.progressModalBackdrop}>
+          <View accessibilityViewIsModal style={styles.progressModalPanel}>
+            <View style={styles.progressModalHeader}>
+              <View style={styles.progressModalTitleBox}>
+                <Text numberOfLines={1} style={styles.progressModalTitle}>
+                  {editingProgressItem?.title_primary ?? "시청 진행"}
+                </Text>
+                <Text style={styles.progressModalSubtitle}>시청 위치 바로 수정</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="시청 진행 편집 닫기"
+                accessibilityRole="button"
+                disabled={updateManualProgress.isPending}
+                onPress={closeProgressEditor}
+                style={styles.progressModalClose}
+              >
+                <Ionicons color={colors.text} name="close" size={22} />
+              </Pressable>
+            </View>
+            {editingProgressItem ? (
+              <ScrollView contentContainerStyle={styles.progressModalContent}>
+                <EpisodeProgressCard
+                  isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
+                  isSaving={updateManualProgress.isPending}
+                  isUnavailable={!editingProgressItem.manual_progress_available}
+                  item={editingProgressItem}
+                  onOpenEpisodes={() => {
+                    setEditingProgressItemId(null);
+                    router.push({
+                      pathname: "/content/[id]/episodes",
+                      params: { id: editingProgressItem.content_id }
+                    });
+                  }}
+                  onSave={saveProgress}
+                  totalEpisodes={editingProgressItem.episode_count}
+                />
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -858,5 +948,39 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: "700"
-  }
+  },
+  progressModalBackdrop: {
+    alignItems: "center",
+    backgroundColor: colors.overlay,
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg
+  },
+  progressModalPanel: {
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    maxHeight: "92%",
+    maxWidth: 720,
+    overflow: "hidden",
+    width: "100%"
+  },
+  progressModalHeader: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.lg
+  },
+  progressModalTitleBox: { flex: 1, gap: spacing.xs },
+  progressModalTitle: { color: colors.text, fontSize: 18, fontWeight: "900" },
+  progressModalSubtitle: { color: colors.textMuted, fontSize: 12 },
+  progressModalClose: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
+  progressModalContent: { padding: spacing.lg }
 });

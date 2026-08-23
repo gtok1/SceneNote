@@ -17,6 +17,7 @@ interface ContentGalleryCardProps {
   item: LibraryListItem;
   onPress: () => void;
   onOpenEpisodes?: () => void;
+  onOpenProgressSetting?: () => void;
   onAddPin?: () => void;
 }
 
@@ -24,6 +25,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
   item,
   onPress,
   onOpenEpisodes,
+  onOpenProgressSetting,
   onAddPin
 }: ContentGalleryCardProps) {
   const cast = useLibraryItemCast(item, 2);
@@ -32,6 +34,9 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
   const continueLabel = createContinueWatchingLabel(item);
+  const onOpenContinue = continueLabel?.action === "open_progress_setting"
+    ? onOpenProgressSetting ?? onOpenEpisodes
+    : onOpenEpisodes;
 
   return (
     <View style={styles.cell}>
@@ -61,18 +66,21 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
               {reviewLabel}
             </Text>
           ) : null}
-          {continueLabel && onOpenEpisodes ? (
+          {continueLabel && onOpenContinue ? (
             <Pressable
-              accessibilityLabel={`${item.title_primary} 이어보기`}
+              accessibilityLabel={`${item.title_primary} ${continueLabel.accessibilityLabel}`}
               accessibilityRole="button"
               onPress={(event) => {
                 event.stopPropagation();
-                onOpenEpisodes();
+                onOpenContinue();
               }}
-              style={styles.continueButton}
+              style={[
+                styles.continueButton,
+                continueLabel.action === "open_progress_setting" ? styles.continueButtonCta : null
+              ]}
             >
               <Text numberOfLines={1} style={styles.continueText}>
-                {continueLabel}
+                {continueLabel.text}
               </Text>
             </Pressable>
           ) : null}
@@ -167,7 +175,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     maxWidth: "100%",
     paddingHorizontal: spacing.xs,
+    justifyContent: "center",
+    minHeight: 44,
     paddingVertical: 4
+  },
+  continueButtonCta: {
+    backgroundColor: colors.surface,
+    borderColor: colors.primary,
+    borderWidth: 1
   },
   continueText: {
     color: colors.primary,

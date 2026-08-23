@@ -5,9 +5,16 @@ import type {
   EpisodeProgress,
   LibraryListItem,
   LibraryStatusFilter,
+  SeasonEpisodeCount,
   WatchStatus
 } from "@/types/library";
 import { extractGenreNames, type ContentGenreJoin } from "@/utils/genre";
+import {
+  MAX_MANUAL_EPISODE_NUMBER,
+  createSeasonOffsetsByNumber,
+  resolveEpisodeProgress,
+  toAbsoluteEpisodeNumber
+} from "@/utils/episodeProgress";
 
 interface RawLibraryRow {
   id: string;
@@ -18,6 +25,9 @@ interface RawLibraryRow {
   watch_count?: number | null;
   first_watched_at?: string | null;
   last_watched_at?: string | null;
+  manual_watched_season_number?: number | null;
+  manual_watched_episode_number?: number | null;
+  manual_progress_updated_at?: string | null;
   added_at: string;
   updated_at: string;
   contents: RawContentWithGenres | null;
@@ -71,7 +81,9 @@ interface EpisodeProgressSummary {
 }
 
 const LIBRARY_ITEM_SELECT =
-  "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at,added_at,updated_at,contents(*,content_genres(genres(name)))";
+  "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at," +
+  "manual_watched_season_number,manual_watched_episode_number,manual_progress_updated_at," +
+  "added_at,updated_at,contents(*,content_genres(genres(name)))";
 
 const LIBRARY_ITEM_FALLBACK_SELECT =
   "id,user_id,content_id,status,watch_count,added_at,updated_at,contents(*,content_genres(genres(name)))";
@@ -129,7 +141,15 @@ export async function getLibraryItems(status: LibraryStatusFilter): Promise<Libr
       one_line_review: null,
       episode_count: null,
       watched_episode_count: 0,
+      derived_watched_through: null,
       next_episode_number: null,
+      manual_watched_season_number: row.manual_watched_season_number ?? null,
+      manual_watched_episode_number: row.manual_watched_episode_number ?? null,
+      manual_watched_absolute_number: null,
+      progress_source: "none" as const,
+      effective_watched_through: 0,
+      season_episode_counts: [],
+      manual_progress_available: hasManualProgressColumns(row),
       genres: extractGenreNames(row.contents?.content_genres),
       watch_count: row.watch_count ?? 0
     }))
@@ -263,6 +283,40 @@ export async function updateLibraryWatchCount(
   if (error) throw new Error(error.message);
 }
 
+export async function updateLibraryManualProgress(
+  libraryItemId: string,
+  progress: { seasonNumber: number | null; episodeNumber: number } | null
+): Promise<void> {
+  const patch = progress === null
+    ? {
+        manual_watched_season_number: null,
+        manual_watched_episode_number: null,
+        manual_progress_updated_at: null
+      }
+    : {
+        manual_watched_season_number: progress.seasonNumber,
+        manual_watched_episode_number: Math.max(0, Math.floor(progress.episodeNumber)),
+        manual_progress_updated_at: new Date().toISOString()
+      };
+
+  if (
+    patch.manual_watched_episode_number !== null
+    && patch.manual_watched_episode_number > MAX_MANUAL_EPISODE_NUMBER
+  ) {
+    throw new Error("회차는 9999 이하로 입력해 주세요");
+  }
+
+  const { error } = await supabase
+    .from("user_library_items")
+    .update(patch)
+    .eq("id", libraryItemId);
+
+  if (error && isMissingOptionalLibraryColumnError(error.message)) {
+    throw new Error("시청 진행 위치 기능은 서버 업데이트 후 사용할 수 있습니다.");
+  }
+  if (error) throw new Error(error.message);
+}
+
 export async function updateLibraryWatchDates(
   libraryItemId: string,
   dates: { firstWatchedAt: string | null; lastWatchedAt: string | null }
@@ -344,7 +398,15 @@ export async function getLibraryStatusByExternalId(
     one_line_review: null,
     episode_count: null,
     watched_episode_count: 0,
+    derived_watched_through: null,
     next_episode_number: null,
+    manual_watched_season_number: row.manual_watched_season_number ?? null,
+    manual_watched_episode_number: row.manual_watched_episode_number ?? null,
+    manual_watched_absolute_number: null,
+    progress_source: "none",
+    effective_watched_through: 0,
+    season_episode_counts: [],
+    manual_progress_available: hasManualProgressColumns(row),
     genres: extractGenreNames(row.contents?.content_genres),
     watch_count: row.watch_count ?? 0
   };
@@ -354,7 +416,18 @@ export async function getLibraryStatusByExternalId(
 }
 
 function isMissingOptionalLibraryColumnError(message: string): boolean {
-  return ["status_flags", "first_watched_at", "last_watched_at"].some((column) => message.includes(column));
+  return [
+    "status_flags",
+    "first_watched_at",
+    "last_watched_at",
+    "manual_watched_season_number",
+    "manual_watched_episode_number",
+    "manual_progress_updated_at"
+  ].some((column) => message.includes(column));
+}
+
+function hasManualProgressColumns(row: RawLibraryRow): boolean {
+  return Object.prototype.hasOwnProperty.call(row, "manual_watched_episode_number");
 }
 
 async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryListItem[]> {
@@ -397,8 +470,16 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
     (episodeAirDatesResult.data ?? []) as EpisodeAirDateRow[]
   );
   const seasonOffsetsBySeasonId = createSeasonOffsets((seasonsResult.data ?? []) as LibrarySeasonRow[]);
+  const seasonCountsByContentId = new Map<string, SeasonEpisodeCount[]>();
 
   for (const season of (seasonsResult.data ?? []) as LibrarySeasonRow[]) {
+    const seasonCounts = seasonCountsByContentId.get(season.content_id) ?? [];
+    seasonCounts.push({
+      season_number: season.season_number,
+      episode_count: season.episode_count
+    });
+    seasonCountsByContentId.set(season.content_id, seasonCounts);
+
     if (!season.episode_count) continue;
     episodeCountsByContentId.set(
       season.content_id,
@@ -410,12 +491,28 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
     (progressResult.data ?? []) as unknown as LibraryProgressRow[],
     seasonOffsetsBySeasonId
   );
+  for (const seasonCounts of seasonCountsByContentId.values()) {
+    seasonCounts.sort((a, b) => a.season_number - b.season_number);
+  }
 
   return items.map((item) => {
     const review = reviewsByContentId.get(item.content_id);
     const episodeCount = episodeCountsByContentId.get(item.content_id) ?? null;
     const progress = progressByContentId.get(item.content_id);
     const watchedEpisodeCount = progress?.watchedEpisodeIds.size ?? 0;
+    const seasonCounts = seasonCountsByContentId.get(item.content_id) ?? [];
+    const manualAbsolute = toAbsoluteEpisodeNumber(
+      item.manual_watched_season_number,
+      item.manual_watched_episode_number,
+      createSeasonOffsetsByNumber(seasonCounts)
+    );
+    const resolved = resolveEpisodeProgress({
+      contentType: item.content_type,
+      episodeCount,
+      watchedEpisodeCount,
+      derivedWatchedThrough: progress?.maxWatchedEpisodeNumber ?? null,
+      manualWatchedThrough: manualAbsolute
+    });
 
     return {
       ...item,
@@ -428,11 +525,12 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       one_line_review: review?.one_line_review ?? null,
       episode_count: episodeCount,
       watched_episode_count: watchedEpisodeCount,
-      next_episode_number: getNextEpisodeNumber({
-        episodeCount,
-        maxWatchedEpisodeNumber: progress?.maxWatchedEpisodeNumber ?? null,
-        watchedEpisodeCount
-      })
+      derived_watched_through: progress?.maxWatchedEpisodeNumber ?? null,
+      next_episode_number: resolved.nextEpisodeNumber,
+      manual_watched_absolute_number: manualAbsolute,
+      progress_source: resolved.source,
+      effective_watched_through: resolved.watchedThrough,
+      season_episode_counts: seasonCounts
     };
   });
 }
@@ -548,23 +646,6 @@ function createProgressSummaries(
 function normalizeJoinedEpisode(episode: LibraryProgressRow["episodes"]) {
   if (Array.isArray(episode)) return episode[0] ?? null;
   return episode ?? null;
-}
-
-function getNextEpisodeNumber({
-  episodeCount,
-  maxWatchedEpisodeNumber,
-  watchedEpisodeCount
-}: {
-  episodeCount: number | null;
-  maxWatchedEpisodeNumber: number | null;
-  watchedEpisodeCount: number;
-}): number | null {
-  if (watchedEpisodeCount === 0) return 1;
-  if (!maxWatchedEpisodeNumber) return null;
-
-  const nextEpisodeNumber = maxWatchedEpisodeNumber + 1;
-  if (episodeCount !== null && nextEpisodeNumber > episodeCount) return null;
-  return nextEpisodeNumber;
 }
 
 export async function getSeasons(contentId: string): Promise<Season[]> {

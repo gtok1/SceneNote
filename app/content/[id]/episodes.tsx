@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 
@@ -9,7 +9,14 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { EpisodeSelector } from "@/components/content/EpisodeSelector";
 import { SeasonSelector } from "@/components/content/SeasonSelector";
 import { colors, spacing } from "@/constants/theme";
-import { useEpisodeProgress, useEpisodes, useSeasons, useToggleEpisodeProgress } from "@/hooks/useLibrary";
+import {
+  useEpisodeProgress,
+  useEpisodes,
+  useLibrary,
+  useSeasons,
+  useToggleEpisodeProgress,
+  useUpdateLibraryManualProgress
+} from "@/hooks/useLibrary";
 import { useEpisodeSelectionStore } from "@/stores/episodeSelectionStore";
 
 export default function EpisodesScreen() {
@@ -20,7 +27,11 @@ export default function EpisodesScreen() {
   const seasons = useSeasons(id);
   const episodes = useEpisodes(id, selectedSeasonId);
   const progress = useEpisodeProgress(id);
+  const library = useLibrary("all");
+  const libraryItem = library.data?.find((item) => item.content_id === id);
   const toggleProgress = useToggleEpisodeProgress(id);
+  const updateManualProgress = useUpdateLibraryManualProgress();
+  const selectedSeason = seasons.data?.find((season) => season.id === selectedSeasonId);
 
   useEffect(() => {
     if (!selectedSeasonId && seasons.data?.[0]) {
@@ -47,6 +58,7 @@ export default function EpisodesScreen() {
       {episodes.isError ? <ErrorState message={episodes.error.message} onRetry={() => episodes.refetch()} /> : null}
       <EpisodeSelector
         episodes={episodes.data ?? []}
+        {...(libraryItem ? { libraryItem } : {})}
         onAddPin={(episode) =>
           router.push({
             pathname: "/pins/new",
@@ -63,7 +75,35 @@ export default function EpisodesScreen() {
             params: { id, episodeId: episode.id }
           })
         }
-        onToggleProgress={(episode, watched) => toggleProgress.mutate({ episode, watched })}
+        onOpenProgressSetting={() =>
+          router.push({ pathname: "/content/[id]", params: { id, focus: "progress" } })
+        }
+        onSetManualProgress={(episode) => {
+          if (!libraryItem) return;
+          Alert.alert(
+            "시청 진행 설정",
+            `${episode.episode_number}화까지 봤음으로 표시할까요?`,
+            [
+              { text: "취소", style: "cancel" },
+              {
+                text: "설정",
+                onPress: () => updateManualProgress.mutate(
+                  {
+                    libraryItemId: libraryItem.library_item_id,
+                    progress: {
+                      seasonNumber: selectedSeason?.season_number ?? null,
+                      episodeNumber: episode.episode_number
+                    }
+                  },
+                  { onError: (error) => Alert.alert("시청 진행 저장 실패", error.message) }
+                )
+              }
+            ]
+          );
+        }}
+        onToggleProgress={(episode, watched) =>
+          toggleProgress.mutate({ episode, watched, ...(libraryItem ? { libraryItem } : {}) })
+        }
         progress={progress.data ?? []}
       />
     </View>

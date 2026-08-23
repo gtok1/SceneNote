@@ -14,14 +14,22 @@ import {
   getLibraryStats,
   getSeasons,
   toggleEpisodeProgress,
+  updateLibraryManualProgress,
   updateLibraryStatus,
   updateLibraryStatuses,
   updateLibraryWatchCount,
   updateLibraryWatchDates
 } from "@/services/library";
 import { useAuthStore } from "@/stores/authStore";
-import type { Episode, SearchResult } from "@/types/content";
+import type { Episode, SearchResult, Season } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
+import {
+  createSeasonOffsetsByNumber,
+  resolveEpisodeProgress,
+  syncManualProgressAfterToggle,
+  toAbsoluteEpisodeNumber,
+  toSeasonRelativeEpisodeNumber
+} from "@/utils/episodeProgress";
 import { filterUpcomingAiringItems } from "@/utils/upcomingAiring";
 
 export function useLibrary(status: LibraryStatusFilter = "all") {
@@ -178,8 +186,49 @@ export function useToggleEpisodeProgress(contentId: string | undefined) {
   const user = useAuthStore((state) => state.user);
 
   return useMutation({
-    mutationFn: ({ episode, watched }: { episode: Episode; watched: boolean }) =>
-      toggleEpisodeProgress(episode, watched),
+    mutationFn: async ({
+      episode,
+      watched,
+      libraryItem
+    }: {
+      episode: Episode;
+      watched: boolean;
+      libraryItem?: LibraryListItem;
+    }) => {
+      await toggleEpisodeProgress(episode, watched);
+
+      if (!libraryItem || libraryItem.manual_watched_episode_number === null) return;
+
+      const seasons = queryClient.getQueryData<Season[]>(
+        queryKeys.content.seasons(contentId ?? episode.content_id)
+      ) ?? [];
+      const seasonNumber = seasons.find((season) => season.id === episode.season_id)?.season_number ?? null;
+      const absolute = toAbsoluteEpisodeNumber(
+        seasonNumber,
+        episode.episode_number,
+        createSeasonOffsetsByNumber(libraryItem.season_episode_counts)
+      );
+      if (absolute === null) return;
+
+      const nextManual = syncManualProgressAfterToggle({
+        manualWatchedThrough: libraryItem.manual_watched_absolute_number,
+        toggledAbsoluteNumber: absolute,
+        watched: !watched
+      });
+      if (nextManual === libraryItem.manual_watched_absolute_number || nextManual === null) return;
+
+      try {
+        await updateLibraryManualProgress(
+          libraryItem.library_item_id,
+          toSeasonRelativeEpisodeNumber(nextManual, libraryItem.season_episode_counts)
+        );
+      } catch (error) {
+        console.warn("에피소드 체크 후 수동 진행 위치 동기화에 실패했습니다.", error);
+        if (user) {
+          await queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id) });
+        }
+      }
+    },
     onSuccess: () => {
       if (user && contentId) {
         queryClient.invalidateQueries({
@@ -187,6 +236,39 @@ export function useToggleEpisodeProgress(contentId: string | undefined) {
         });
         queryClient.invalidateQueries({
           queryKey: queryKeys.library.all(user.id)
+        });
+      }
+    }
+  });
+}
+
+export function useUpdateLibraryManualProgress() {
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+
+  return useMutation({
+    mutationFn: ({
+      libraryItemId,
+      progress
+    }: {
+      libraryItemId: string;
+      progress: { seasonNumber: number | null; episodeNumber: number } | null;
+    }) => updateLibraryManualProgress(libraryItemId, progress),
+    onMutate: async ({ libraryItemId, progress }) => {
+      if (!user) return;
+      await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
+      const snapshots = snapshotLibraryQueries(queryClient, user.id);
+      updateLibraryItemManualProgressInCache(queryClient, user.id, libraryItemId, progress);
+      return { snapshots };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+    },
+    onSuccess: () => {
+      if (user) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.library.all(user.id),
+          refetchType: "inactive"
         });
       }
     }
@@ -359,5 +441,46 @@ function updateLibraryItemWatchDatesInCache(
             }
           : item
       )
+  );
+}
+
+function updateLibraryItemManualProgressInCache(
+  queryClient: QueryClient,
+  userId: string,
+  libraryItemId: string,
+  progress: { seasonNumber: number | null; episodeNumber: number } | null
+) {
+  queryClient.setQueriesData<LibraryListItem[]>(
+    { queryKey: queryKeys.library.all(userId) },
+    (items) =>
+      items?.map((item) => {
+        if (item.library_item_id !== libraryItemId) return item;
+
+        const manualAbsolute = progress === null
+          ? null
+          : toAbsoluteEpisodeNumber(
+              progress.seasonNumber,
+              progress.episodeNumber,
+              createSeasonOffsetsByNumber(item.season_episode_counts)
+            );
+        const resolved = resolveEpisodeProgress({
+          contentType: item.content_type,
+          episodeCount: item.episode_count,
+          watchedEpisodeCount: item.watched_episode_count,
+          derivedWatchedThrough: progress === null ? item.derived_watched_through : null,
+          manualWatchedThrough: manualAbsolute
+        });
+
+        return {
+          ...item,
+          manual_watched_season_number: progress?.seasonNumber ?? null,
+          manual_watched_episode_number: progress?.episodeNumber ?? null,
+          manual_watched_absolute_number: manualAbsolute,
+          progress_source: resolved.source,
+          effective_watched_through: resolved.watchedThrough,
+          next_episode_number: resolved.nextEpisodeNumber,
+          manual_progress_available: true
+        };
+      })
   );
 }

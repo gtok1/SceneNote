@@ -69,7 +69,15 @@ function item(contentId: string, contentType: LibraryListItem["content_type"], g
     one_line_review: null,
     episode_count: null,
     watched_episode_count: 0,
+    derived_watched_through: null,
     next_episode_number: null,
+    manual_watched_season_number: null,
+    manual_watched_episode_number: null,
+    manual_watched_absolute_number: null,
+    progress_source: "none",
+    effective_watched_through: 0,
+    season_episode_counts: [],
+    manual_progress_available: true,
     genres,
     watch_count: 0
   };

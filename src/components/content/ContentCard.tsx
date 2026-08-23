@@ -15,6 +15,7 @@ interface ContentCardProps {
   item: LibraryListItem;
   onPress: () => void;
   onOpenEpisodes?: () => void;
+  onOpenProgressSetting?: () => void;
   compact?: boolean;
 }
 
@@ -22,6 +23,7 @@ export const ContentCard = memo(function ContentCard({
   item,
   onPress,
   onOpenEpisodes,
+  onOpenProgressSetting,
   compact = false
 }: ContentCardProps) {
   const cast = useLibraryItemCast(item, 2);
@@ -30,6 +32,9 @@ export const ContentCard = memo(function ContentCard({
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
   const continueLabel = createContinueWatchingLabel(item);
+  const onOpenContinue = continueLabel?.action === "open_progress_setting"
+    ? onOpenProgressSetting ?? onOpenEpisodes
+    : onOpenEpisodes;
 
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={[styles.card, compact ? styles.cardCompact : null]}>
@@ -57,18 +62,22 @@ export const ContentCard = memo(function ContentCard({
             {reviewLabel}
           </Text>
         ) : null}
-        {continueLabel && onOpenEpisodes ? (
+        {continueLabel && onOpenContinue ? (
           <Pressable
-            accessibilityLabel={`${item.title_primary} 이어보기`}
+            accessibilityLabel={`${item.title_primary} ${continueLabel.accessibilityLabel}`}
             accessibilityRole="button"
             onPress={(event) => {
               event.stopPropagation();
-              onOpenEpisodes();
+              onOpenContinue();
             }}
-            style={[styles.continueButton, compact ? styles.continueButtonCompact : null]}
+            style={[
+              styles.continueButton,
+              continueLabel.action === "open_progress_setting" ? styles.continueButtonCta : null,
+              compact ? styles.continueButtonCompact : null
+            ]}
           >
             <Text numberOfLines={1} style={[styles.continueText, compact ? styles.continueTextCompact : null]}>
-              {continueLabel}
+              {continueLabel.text}
             </Text>
           </Pressable>
         ) : null}
@@ -160,7 +169,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
+    justifyContent: "center",
+    minHeight: 44,
     paddingVertical: 5
+  },
+  continueButtonCta: {
+    backgroundColor: colors.surface,
+    borderColor: colors.primary,
+    borderWidth: 1
   },
   continueButtonCompact: {
     paddingHorizontal: spacing.xs,

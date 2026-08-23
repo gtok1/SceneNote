@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useNetworkState } from "expo-network";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
@@ -9,6 +10,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentReviewEditor } from "@/components/content/ContentReviewEditor";
+import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import { WatchProviderList } from "@/components/content/WatchProviderList";
 import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
 import { normalizeWatchStatuses, WATCH_STATUS_LABEL, WATCH_STATUS_OPTIONS } from "@/constants/status";
@@ -19,6 +21,8 @@ import {
   useContent,
   useDeleteLibraryItem,
   useLibrary,
+  useSeasons,
+  useUpdateLibraryManualProgress,
   useUpdateLibraryWatchCount,
   useUpdateLibraryStatuses
 } from "@/hooks/useLibrary";
@@ -28,6 +32,7 @@ import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
+import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 
 const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
@@ -55,8 +60,14 @@ export default function ContentDetailScreen() {
     year?: string;
     sort?: string;
     view?: string;
+    focus?: string;
   }>();
   const router = useRouter();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const didFocusProgress = useRef(false);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [progressHighlighted, setProgressHighlighted] = useState(false);
+  const networkState = useNetworkState();
   const libraryRouteState = parseLibraryRouteParams(params);
   const libraryReturnParams = createLibraryRouteParams(libraryRouteState, libraryRouteState.viewMode);
   const isExternal = Boolean(params.source && params.externalId);
@@ -91,11 +102,17 @@ export default function ContentDetailScreen() {
   });
   const resolvedContentId = externalDetail.data?.content.content_id ?? params.id;
   const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId);
+  const seasons = useSeasons(libraryItem?.content_id);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
   const updateWatchCount = useUpdateLibraryWatchCount();
+  const updateManualProgress = useUpdateLibraryManualProgress();
   const openLibraryList = () => {
     router.replace({ pathname: "/library", params: libraryReturnParams });
   };
+
+  useEffect(() => () => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
 
   const externalResult: SearchResult | null =
     isExternal && params.source && params.externalId
@@ -248,6 +265,13 @@ export default function ContentDetailScreen() {
     favoritePeople.data?.map((person) => `${person.source}:${person.external_id}`) ?? []
   );
   const resolvedEpisodeCount = view.episodeCount ?? libraryItem?.episode_count ?? null;
+  const seasonEpisodeCounts = seasons.data?.map((season) => ({
+    season_number: season.season_number,
+    episode_count: season.episode_count,
+  })) ?? libraryItem?.season_episode_counts ?? [];
+  const progressLibraryItem = libraryItem
+    ? { ...libraryItem, season_episode_counts: seasonEpisodeCounts }
+    : null;
   const airDateLabel = createAirDateLabel(view.airDate, view.airYear);
   const episodeLabel = createEpisodeCountLabel(resolvedEpisodeCount);
   const watchCountLabel = createWatchCountLabel(libraryItem?.watch_count, {
@@ -264,8 +288,61 @@ export default function ContentDetailScreen() {
     );
   };
 
+  const openEpisodes = () => {
+    if (!libraryItem) return;
+    router.push({ pathname: "/content/[id]/episodes", params: { id: libraryItem.content_id } });
+  };
+
+  const saveManualProgress = (
+    progress: { seasonNumber: number | null; episodeNumber: number } | null,
+  ) => {
+    if (!libraryItem) return;
+    updateManualProgress.mutate(
+      { libraryItemId: libraryItem.library_item_id, progress },
+      {
+        onSuccess: () => {
+          if (!progress) return;
+          const absolute = toAbsoluteEpisodeNumber(
+            progress.seasonNumber,
+            progress.episodeNumber,
+            createSeasonOffsetsByNumber(seasonEpisodeCounts),
+          ) ?? progress.episodeNumber;
+          if (
+            resolvedEpisodeCount !== null
+            && absolute >= resolvedEpisodeCount
+            && !libraryItem.statuses.includes("completed")
+          ) {
+            Alert.alert("모든 화를 시청했습니다", "완료로 표시할까요?", [
+              { text: "나중에", style: "cancel" },
+              { text: "완료로 표시", onPress: () => toggleStatus("completed") },
+            ]);
+          } else if (
+            libraryItem.statuses.includes("wishlist")
+            && !libraryItem.statuses.includes("watching")
+          ) {
+            Alert.alert("시청을 시작했습니다", "보는 중으로 바꿀까요?", [
+              { text: "유지", style: "cancel" },
+              { text: "보는 중으로 변경", onPress: () => toggleStatus("watching") },
+            ]);
+          }
+        },
+        onError: (error) => Alert.alert("시청 진행 저장 실패", error.message),
+      },
+    );
+  };
+
+  const focusProgressCard = (y: number) => {
+    if (params.focus !== "progress" || didFocusProgress.current) return;
+    didFocusProgress.current = true;
+    setProgressHighlighted(true);
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - spacing.xl), animated: true });
+    });
+    highlightTimer.current = setTimeout(() => setProgressHighlighted(false), 1500);
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} ref={scrollViewRef}>
       <Image source={view.posterUrl ? { uri: view.posterUrl } : null} style={styles.poster} contentFit="cover" />
       <View style={styles.body}>
         <Text style={styles.title}>{view.title}</Text>
@@ -293,6 +370,21 @@ export default function ContentDetailScreen() {
             onSave={saveWatchCount}
             watchCount={libraryItem.watch_count}
           />
+        ) : null}
+
+        {libraryItem && view.contentType !== "movie" ? (
+          <View onLayout={(event) => focusProgressCard(event.nativeEvent.layout.y)}>
+            <EpisodeProgressCard
+              highlighted={progressHighlighted}
+              isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
+              isSaving={updateManualProgress.isPending}
+              isUnavailable={!libraryItem.manual_progress_available}
+              item={progressLibraryItem ?? libraryItem}
+              onOpenEpisodes={openEpisodes}
+              onSave={saveManualProgress}
+              totalEpisodes={resolvedEpisodeCount}
+            />
+          </View>
         ) : null}
 
         <Text style={styles.overview}>{view.overview || "줄거리 정보가 없습니다."}</Text>

@@ -12,7 +12,8 @@ export const colors = {
   success: "#047857",
   successSoft: "#D1FAE5",
   warning: "#B45309",
-  warningSoft: "#FEF3C7"
+  warningSoft: "#FEF3C7",
+  overlay: "rgba(23, 23, 23, 0.48)"
 } as const;
 
 export const spacing = {

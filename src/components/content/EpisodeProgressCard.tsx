@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Pressable,
@@ -7,6 +7,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -162,7 +164,14 @@ export function EpisodeProgressCard({
       {hasSeasonSelector ? (
         <View style={styles.section}>
           <Text style={styles.label}>시즌</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasons}>
+          <HorizontalChoiceRail
+            contentContainerStyle={styles.seasons}
+            disabled={disabled}
+            itemStride={84}
+            nextLabel="다음 시즌 보기"
+            previousLabel="이전 시즌 보기"
+            selectedIndex={Math.max(0, seasons.findIndex((season) => season.season_number === selectedSeasonNumber))}
+          >
             {seasons.map((season) => {
               const selected = season.season_number === selectedSeasonNumber;
               return (
@@ -180,7 +189,7 @@ export function EpisodeProgressCard({
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </HorizontalChoiceRail>
         </View>
       ) : null}
 
@@ -189,10 +198,13 @@ export function EpisodeProgressCard({
         {totalEpisodes !== null && upperBound <= 200 ? (
           <View accessibilityRole="radiogroup" style={styles.episodeChoicesSection}>
             <Text style={styles.choiceHint}>회차 빠른 선택</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
+            <HorizontalChoiceRail
               contentContainerStyle={styles.episodeChoices}
+              disabled={disabled}
+              itemStride={60}
+              nextLabel="다음 회차 보기"
+              previousLabel="이전 회차 보기"
+              selectedIndex={Math.max(0, draftEpisodeNumber - 1)}
             >
               {Array.from({ length: upperBound }, (_, index) => index + 1).map((episodeNumber) => {
                 const selected = episodeNumber === draftEpisodeNumber;
@@ -212,7 +224,7 @@ export function EpisodeProgressCard({
                   </Pressable>
                 );
               })}
-            </ScrollView>
+            </HorizontalChoiceRail>
           </View>
         ) : null}
         <View style={styles.stepper}>
@@ -319,6 +331,82 @@ export function EpisodeProgressCard({
   );
 }
 
+function HorizontalChoiceRail({
+  children,
+  contentContainerStyle,
+  disabled,
+  itemStride,
+  nextLabel,
+  previousLabel,
+  selectedIndex,
+}: {
+  children: ReactNode;
+  contentContainerStyle: StyleProp<ViewStyle>;
+  disabled: boolean;
+  itemStride: number;
+  nextLabel: string;
+  previousLabel: string;
+  selectedIndex: number;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const offsetRef = useRef(0);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const nextOffset = Math.max(0, selectedIndex * itemStride - itemStride);
+      offsetRef.current = nextOffset;
+      scrollRef.current?.scrollTo({ x: nextOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [itemStride, selectedIndex]);
+
+  const scrollBy = (direction: -1 | 1) => {
+    const nextOffset = Math.max(0, offsetRef.current + direction * itemStride * 4);
+    offsetRef.current = nextOffset;
+    scrollRef.current?.scrollTo({ x: nextOffset, animated: true });
+  };
+
+  return (
+    <View style={styles.choiceRail}>
+      <Pressable
+        accessibilityLabel={previousLabel}
+        accessibilityRole="button"
+        disabled={disabled}
+        onPress={() => scrollBy(-1)}
+        style={styles.choiceRailButton}
+      >
+        <Ionicons color={colors.textMuted} name="chevron-back" size={20} />
+      </Pressable>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={contentContainerStyle}
+        directionalLockEnabled
+        horizontal
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        onScroll={(event) => {
+          offsetRef.current = event.nativeEvent.contentOffset.x;
+        }}
+        scrollEnabled={!disabled}
+        scrollEventThrottle={16}
+        showsHorizontalScrollIndicator
+        style={styles.choiceRailScroll}
+      >
+        {children}
+      </ScrollView>
+      <Pressable
+        accessibilityLabel={nextLabel}
+        accessibilityRole="button"
+        disabled={disabled}
+        onPress={() => scrollBy(1)}
+        style={styles.choiceRailButton}
+      >
+        <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+      </Pressable>
+    </View>
+  );
+}
+
 function getInitialDraft(item: LibraryListItem, hasSeasonSelector: boolean) {
   if (item.manual_watched_episode_number !== null) {
     return {
@@ -376,6 +464,30 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
   episodeChoicesSection: { gap: spacing.xs },
   choiceHint: { color: colors.textMuted, fontSize: 12 },
+  choiceRail: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    width: "100%",
+  },
+  choiceRailButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexShrink: 0,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  choiceRailScroll: {
+    flex: 1,
+    maxWidth: "100%",
+    minWidth: 0,
+  },
   episodeChoices: { gap: spacing.sm },
   episodeChoice: {
     alignItems: "center",

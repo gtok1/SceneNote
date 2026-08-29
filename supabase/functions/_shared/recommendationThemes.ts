@@ -22,6 +22,15 @@ export interface ContentTheme {
   source_key: string;
 }
 
+// Niche gating stays stricter than user-facing actions: genre-derived themes are
+// useful explicit feedback targets, but should not become diversity keys by default.
+export const NICHE_THEME_CENTRALITY_THRESHOLD = 0.4;
+export const USER_ACTIONABLE_THEME_CENTRALITY_THRESHOLD = 0.3;
+
+export function isUserActionableTheme(theme: Pick<ContentTheme, "centrality">): boolean {
+  return theme.centrality >= USER_ACTIONABLE_THEME_CENTRALITY_THRESHOLD;
+}
+
 interface ThemeDefinition {
   family: ContentThemeFamily;
   key: string;

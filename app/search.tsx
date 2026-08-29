@@ -24,7 +24,10 @@ import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommend
 import { useSimilarContent } from "@/hooks/useSimilarContent";
 import { resolveSimilarityAnchors, shouldAutoSelectAnchor, type SimilarContentResult } from "@/services/similarContent";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
-import type { ContentTheme } from "../supabase/functions/_shared/recommendationThemes";
+import {
+  isUserActionableTheme,
+  type ContentTheme
+} from "../supabase/functions/_shared/recommendationThemes";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useSearchUiStore } from "@/stores/searchUiStore";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
@@ -38,6 +41,7 @@ import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresenta
 import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus, type SimilaritySort } from "@/utils/similarSearchIntent";
 
 const PERSONALIZED_RECOMMENDATION_LIMIT = 12;
+const MVP_PERSONALIZED_RECOMMENDATIONS_ENABLED = false;
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -63,7 +67,7 @@ export default function SearchScreen() {
   const personalizedRecommendations = usePersonalizedRecommendations(
     mediaType,
     library.data ?? [],
-    { enabled: !library.isLoading && !library.isError }
+    { enabled: MVP_PERSONALIZED_RECOMMENDATIONS_ENABLED && !library.isLoading && !library.isError }
   );
   const addToLibrary = useAddToLibrary();
   const addFavoritePerson = useAddFavoritePerson();
@@ -142,7 +146,7 @@ export default function SearchScreen() {
   const error = isSimilarityMode ? similarSearch.error : search.error ?? personSearch.error;
   const isGallery = viewMode === "gallery";
   const galleryColumns = getResponsiveRecommendationColumns(width);
-  const showRecommendationFeed = !isSimilarityMode && shouldShowRecommendationFeed(query);
+  const showRecommendationFeed = MVP_PERSONALIZED_RECOMMENDATIONS_ENABLED && !isSimilarityMode && shouldShowRecommendationFeed(query);
   const hasSearchInput = !showRecommendationFeed;
   const hasSearchQuery = query.trim().length >= 2;
   const activeRecommendations = useMemo(
@@ -379,7 +383,7 @@ export default function SearchScreen() {
   };
 
   const chooseThemeToReduce = (item: PersonalizedRecommendation) => {
-    const themes = (item.themes ?? []).filter((theme) => theme.centrality >= 0.4).slice(0, 3);
+    const themes = (item.themes ?? []).filter(isUserActionableTheme).slice(0, 3);
     if (themes.length === 0) {
       addToast("줄일 수 있는 구체적 테마 정보가 없는 작품입니다.", "error");
       return;
@@ -640,8 +644,11 @@ export default function SearchScreen() {
           </Pressable>
         </View>
       ) : null}
-      {hasSearchInput && !hasSearchQuery ? (
+      {hasSearchInput && query.trim().length > 0 && !hasSearchQuery ? (
         <EmptyState description="검색어를 한 글자 더 입력해 주세요." title="두 글자 이상 입력해 주세요" />
+      ) : null}
+      {!MVP_PERSONALIZED_RECOMMENDATIONS_ENABLED && !isSimilarityMode && query.trim() === "" ? (
+        <EmptyState description="작품 제목을 두 글자 이상 입력해 감상 기록을 시작해 보세요." title="작품을 검색해 보세요" />
       ) : null}
       {!isSimilarityMode && !isLoading && hasSearchQuery && activeResults.length === 0 ? (
         <EmptyState description="작품명, 배우, 성우 이름을 다른 키워드로 검색해 보세요." title="검색 결과가 없습니다" />
@@ -689,6 +696,15 @@ export default function SearchScreen() {
           numColumns={displayedAsGallery ? galleryColumns : 1}
           onEndReached={() => {
             if (
+              hasSearchInput &&
+              hasSearchQuery &&
+              search.hasNextPage &&
+              !search.isFetchingNextPage
+            ) {
+              void search.fetchNextPage();
+              return;
+            }
+            if (
               showRecommendationFeed &&
               !personalizedRecommendations.isExhausted &&
               !personalizedRecommendations.isInitialLoading &&
@@ -701,7 +717,23 @@ export default function SearchScreen() {
             }
           }}
           onEndReachedThreshold={0.35}
-          ListFooterComponent={showRecommendationFeed ? (
+          ListFooterComponent={hasSearchInput && hasSearchQuery ? (
+            search.isFetchingNextPage ? (
+              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
+                <ActivityIndicator color={colors.primary} size="small" />
+                <Text style={styles.loadMoreText}>다음 검색 결과를 불러오는 중이에요.</Text>
+              </View>
+            ) : search.isFetchNextPageError ? (
+              <View style={styles.loadMoreFooter}>
+                <Text style={styles.loadMoreErrorText}>다음 페이지를 불러오지 못했습니다.</Text>
+                <Pressable accessibilityRole="button" onPress={() => void search.fetchNextPage()} style={styles.inlineRetryButton}>
+                  <Text style={styles.inlineRetryText}>다시 시도</Text>
+                </Pressable>
+              </View>
+            ) : !search.hasNextPage && activeResults.length > 0 ? (
+              <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>모든 결과를 확인했습니다.</Text>
+            ) : null
+          ) : showRecommendationFeed ? (
             personalizedRecommendations.isLoadingMore ? (
               <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
                 <ActivityIndicator color={colors.primary} size="small" />
@@ -740,6 +772,7 @@ export default function SearchScreen() {
             if (recommendation) {
               const presentation = recommendationPresentations.get(recommendation.canonical_id) ??
                 mapRecommendationToCardViewModel(recommendation);
+              const canReduceTheme = (recommendation.themes ?? []).some(isUserActionableTheme);
               return displayedAsGallery ? (
                 <PersonalizedRecommendationGalleryCard
                   addLabel={addState.label}
@@ -748,7 +781,7 @@ export default function SearchScreen() {
                   onOpenQuickView={() => setSelectedRecommendation(recommendation)}
                   onNotInterested={() => void markRecommendationNotInterested(recommendation)}
                   onMoreLikeThis={() => void findMoreLikeRecommendation(recommendation)}
-                  {...((recommendation.themes?.length ?? 0) > 0 ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
+                  {...(canReduceTheme ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
                   presentation={presentation}
                   result={recommendation}
                 />
@@ -760,7 +793,7 @@ export default function SearchScreen() {
                   onOpenQuickView={() => setSelectedRecommendation(recommendation)}
                   onNotInterested={() => void markRecommendationNotInterested(recommendation)}
                   onMoreLikeThis={() => void findMoreLikeRecommendation(recommendation)}
-                  {...((recommendation.themes?.length ?? 0) > 0 ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
+                  {...(canReduceTheme ? { onReduceTheme: () => chooseThemeToReduce(recommendation) } : {})}
                   presentation={presentation}
                   result={recommendation}
                 />
@@ -806,7 +839,7 @@ export default function SearchScreen() {
           setSelectedRecommendation(null);
           openResult(item);
         }}
-        {...(selectedRecommendation?.themes?.length ? { onReduceTheme: chooseThemeToReduce } : {})}
+        {...(selectedRecommendation?.themes?.some(isUserActionableTheme) ? { onReduceTheme: chooseThemeToReduce } : {})}
         presentation={selectedRecommendation
           ? recommendationPresentations.get(selectedRecommendation.canonical_id) ?? mapRecommendationToCardViewModel(selectedRecommendation)
           : null}

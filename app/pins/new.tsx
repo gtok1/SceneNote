@@ -10,7 +10,6 @@ export default function NewPinScreen() {
   const params = useLocalSearchParams<{
     contentId?: string;
     episodeId?: string;
-    duration?: string;
   }>();
   const router = useRouter();
 
@@ -20,7 +19,6 @@ export default function NewPinScreen() {
     <View style={styles.container}>
       <PinComposer
         contentId={params.contentId}
-        episodeDurationSeconds={params.duration ? Number(params.duration) : null}
         episodeId={params.episodeId || null}
         mode="create"
         onCancel={() => router.back()}

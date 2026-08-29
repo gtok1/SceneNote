@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## 작업 지시 문서 — 항상 먼저 읽기
+
+작업을 시작하기 전에 아래 문서를 **반드시** 확인한다. 이 문서들이 화면·기능 구현의 source of truth이며, 이 파일의 규칙과 충돌하면 개별 명세서가 우선한다.
+
+| 문서 | 내용 | 언제 읽나 |
+|------|------|-----------|
+| `docs/11_screen_implementation_spec.md` | MVP 전체 화면 구현·QA 기준안. 화면 명세 포맷의 원본 | 화면을 만들거나 고칠 때 항상 |
+| `docs/12_episode_progress_spec.md` | 시청 진행 위치(몇 화까지 봤는지) 설정 기능 전체 명세 | 라이브러리·진행률·이어보기 관련 작업 |
+| `docs/13_codex_prompt_episode_progress.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
+| `docs/14_codex_prompt_episode_progress_fixes.md` | 위 구현의 검증 결과와 결함 5건(F-1~F-5) 수정 지시문 | 진행 위치 기능을 손볼 때 |
+
+**규칙**
+
+- `docs/NN_*_spec.md`는 사람이 읽는 명세서, `docs/NN_codex_prompt_*.md`는 에이전트가 그대로 실행하는 지시문이다. 두 파일은 항상 짝으로 존재한다.
+- 명세서의 **설계 결정(D-N) 항목은 임의로 바꾸지 않는다.** 바꿔야 한다고 판단되면 구현하지 말고 이유를 보고한다.
+- 명세서에 테스트 표가 있으면 표의 모든 행을 테스트로 옮긴다. 임의로 줄이지 않는다.
+
 ## 프로젝트 개요
 
 SceneNote는 애니메이션, 한국 드라마, 일본 드라마, 영화 감상 기록을 관리하고 특정 장면에 타임라인 핀을 남기는 모바일 앱이다. 핵심 가치는 검색이 아니라 개인 감상 기록과 `timestamp_seconds` 기반 핀 경험이다. 상세 설계는 `docs/`의 01~10 문서를 우선 참고한다.
@@ -37,9 +54,11 @@ SceneNote는 애니메이션, 한국 드라마, 일본 드라마, 영화 감상 
 
 ## 테스트 명령어
 
+- `npm test` — `tsx --test`로 `src/**/*.test.ts`, `scripts/**/*.test.ts`, `supabase/functions/**/*.test.ts` 실행
 - `npm run typecheck`
 - `npm run lint`
-- 테스트 프레임워크가 추가되면 `npm test`
+
+테스트는 `node:test` + `node:assert/strict`를 쓴다. **테스트 파일에서 React Native나 Supabase 모듈을 import하면 실행이 깨진다** — 순수 함수만 테스트한다. 참고: `src/utils/pinCache.test.ts`
 
 ## 코드 스타일
 

@@ -47,6 +47,19 @@ export function parseTimecodeToSeconds(input: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+export type TimecodeInputState =
+  | { kind: "empty"; seconds: null }
+  | { kind: "valid"; seconds: number }
+  | { kind: "invalid_nonempty"; seconds: null };
+
+export function classifyTimecodeInput(input: string): TimecodeInputState {
+  if (input.trim() === "") return { kind: "empty", seconds: null };
+  const seconds = parseTimecodeToSeconds(input);
+  return seconds === null
+    ? { kind: "invalid_nonempty", seconds: null }
+    : { kind: "valid", seconds };
+}
+
 export function formatSecondsToTimecode(seconds: number): string {
   const normalized = Math.max(0, Math.floor(seconds));
 

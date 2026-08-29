@@ -46,7 +46,8 @@ export const queryKeys = {
     single: (contentId: string) => ["content", contentId] as const,
     seasons: (contentId: string) => ["content", contentId, "seasons"] as const,
     episodes: (contentId: string, seasonId: string | null) =>
-      ["content", contentId, "episodes", seasonId] as const
+      ["content", contentId, "episodes", seasonId] as const,
+    episodeDuration: (episodeId: string) => ["content", "episode", episodeId, "duration"] as const
   },
   progress: {
     byContent: (userId: string, contentId: string) =>

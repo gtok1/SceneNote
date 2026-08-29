@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  classifyTimecodeInput,
   formatSecondsToTimecode,
   isTimeWithinEpisode,
   normalizeTimecodeInput,
@@ -9,6 +10,11 @@ import {
 } from "./timecode";
 
 describe("timecode utilities", () => {
+  it("distinguishes empty input from invalid non-empty input", () => {
+    assert.deepEqual(classifyTimecodeInput("  "), { kind: "empty", seconds: null });
+    assert.deepEqual(classifyTimecodeInput("12:60"), { kind: "invalid_nonempty", seconds: null });
+    assert.deepEqual(classifyTimecodeInput("12:30"), { kind: "valid", seconds: 750 });
+  });
   it("parses colon timecodes", () => {
     assert.equal(parseTimecodeToSeconds("12:30"), 750);
     assert.equal(parseTimecodeToSeconds("1:02:30"), 3750);

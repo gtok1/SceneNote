@@ -145,6 +145,7 @@ export function normalizeManualEpisodeInput(params: {
   rawEpisodeNumber: string;
   seasonNumber: number | null;
   seasons: SeasonEpisodeCount[];
+  totalEpisodes?: number | null;
 }): { ok: true; episodeNumber: number } | { ok: false; reason: ManualProgressError } {
   const raw = params.rawEpisodeNumber.trim();
   if (!raw) return { ok: false, reason: "empty" };
@@ -158,11 +159,10 @@ export function normalizeManualEpisodeInput(params: {
   const selectedSeason = params.seasons.find(
     (season) => season.season_number === params.seasonNumber,
   );
-  if (
-    selectedSeason?.episode_count !== null
-    && selectedSeason?.episode_count !== undefined
-    && episodeNumber > selectedSeason.episode_count
-  ) {
+  const upperBound = selectedSeason?.episode_count
+    ?? params.totalEpisodes
+    ?? MAX_MANUAL_EPISODE_NUMBER;
+  if (episodeNumber > upperBound) {
     return { ok: false, reason: "exceeds_season_total" };
   }
 

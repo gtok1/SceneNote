@@ -51,6 +51,16 @@ export async function getPin(pinId: string): Promise<TimelinePin | null> {
   return pins[0] ?? null;
 }
 
+export async function getEpisodeDurationSeconds(episodeId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("episodes")
+    .select("duration_seconds")
+    .eq("id", episodeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { duration_seconds?: number | null } | null)?.duration_seconds ?? null;
+}
+
 export async function getPinsByContent(contentId: string): Promise<TimelinePin[]> {
   const { data, error } = await supabase
     .from("timeline_pins")

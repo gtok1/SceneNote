@@ -78,11 +78,13 @@ export function EpisodeProgressCard({
     && item.manual_watched_episode_number === draftEpisodeNumber;
   const disabled = isSaving || isUnavailable;
   const saveDisabled = disabled || isOffline || unchanged || rawEpisodeNumber === "";
-  const statusLabel = item.progress_source === "manual"
-    ? "직접 설정함"
-    : item.progress_source === "episode_progress"
-      ? "에피소드 체크 기준"
-      : null;
+  const statusLabel = !unchanged
+    ? "저장 전"
+    : item.progress_source === "manual"
+      ? "직접 설정함"
+      : item.progress_source === "episode_progress"
+        ? "에피소드 체크 기준"
+        : null;
   const derivedDiffers = item.progress_source === "manual"
     && item.derived_watched_through !== null
     && item.derived_watched_through !== item.effective_watched_through;
@@ -107,6 +109,7 @@ export function EpisodeProgressCard({
       rawEpisodeNumber,
       seasonNumber: selectedSeasonNumber,
       seasons,
+      totalEpisodes,
     });
     if (!normalized.ok) {
       setError(getErrorMessage(normalized.reason));
@@ -146,7 +149,7 @@ export function EpisodeProgressCard({
         </View>
       </View>
 
-      {hasSeasonSelector && totalEpisodes !== null ? (
+      {totalEpisodes !== null ? (
         <View
           accessibilityRole="progressbar"
           accessibilityValue={{ min: 0, max: totalEpisodes, now: draftProgress.watchedThrough }}

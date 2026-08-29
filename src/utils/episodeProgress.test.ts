@@ -125,4 +125,24 @@ describe("normalizeManualEpisodeInput", () => {
   it("rejects input above the global maximum", () => {
     assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "10000", seasonNumber: null, seasons: [] }), { ok: false, reason: "exceeds_max" });
   });
+
+  it("uses the total episode count when the selected season total is unknown", () => {
+    assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "25", seasonNumber: 1, seasons: [{ season_number: 1, episode_count: null }], totalEpisodes: 24 }), { ok: false, reason: "exceeds_season_total" });
+  });
+
+  it("accepts the total episode count boundary when the selected season total is unknown", () => {
+    assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "24", seasonNumber: 1, seasons: [{ season_number: 1, episode_count: null }], totalEpisodes: 24 }), { ok: true, episodeNumber: 24 });
+  });
+
+  it("prefers the selected season total over the content total", () => {
+    assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "13", seasonNumber: 1, seasons: [{ season_number: 1, episode_count: 12 }], totalEpisodes: 24 }), { ok: false, reason: "exceeds_season_total" });
+  });
+
+  it("accepts 500 when no total is known", () => {
+    assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "500", seasonNumber: null, seasons: [], totalEpisodes: null }), { ok: true, episodeNumber: 500 });
+  });
+
+  it("still rejects the global maximum when no total is known", () => {
+    assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "10000", seasonNumber: null, seasons: [], totalEpisodes: null }), { ok: false, reason: "exceeds_max" });
+  });
 });

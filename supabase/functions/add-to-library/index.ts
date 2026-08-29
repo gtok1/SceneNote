@@ -152,6 +152,7 @@ Deno.serve(async (req: Request) => {
 
   const themes = normalizeContentThemes({
     external_source: source,
+    genres: contentMeta.genres,
     source_tags: contentMeta.source_tags
   });
   if (themes.length > 0) {

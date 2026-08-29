@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -17,13 +17,11 @@ import {
   useToggleEpisodeProgress,
   useUpdateLibraryManualProgress
 } from "@/hooks/useLibrary";
-import { useEpisodeSelectionStore } from "@/stores/episodeSelectionStore";
 
 export default function EpisodesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const selectedSeasonId = useEpisodeSelectionStore((state) => state.selectedSeasonId);
-  const setSeason = useEpisodeSelectionStore((state) => state.setSeason);
+  const [selectedSeasonId, setSeason] = useState<string | null>(null);
   const seasons = useSeasons(id);
   const episodes = useEpisodes(id, selectedSeasonId);
   const progress = useEpisodeProgress(id);
@@ -34,9 +32,8 @@ export default function EpisodesScreen() {
   const selectedSeason = seasons.data?.find((season) => season.id === selectedSeasonId);
 
   useEffect(() => {
-    if (!selectedSeasonId && seasons.data?.[0]) {
-      setSeason(seasons.data[0].id);
-    }
+    const validSelection = seasons.data?.some((season) => season.id === selectedSeasonId);
+    if (!validSelection) setSeason(seasons.data?.[0]?.id ?? null);
   }, [seasons.data, selectedSeasonId, setSeason]);
 
   if (seasons.isLoading) return <LoadingSkeleton variant="episode-row" />;
@@ -64,8 +61,7 @@ export default function EpisodesScreen() {
             pathname: "/pins/new",
             params: {
               contentId: id,
-              episodeId: episode.id,
-              duration: episode.duration_seconds ? String(episode.duration_seconds) : ""
+              episodeId: episode.id
             }
           })
         }

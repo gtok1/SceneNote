@@ -6,10 +6,10 @@ import { useAtom } from "jotai";
 import { initialPinFormDraft, pinFormDraftAtom } from "@/atoms/pinFormAtom";
 import { EMOTION_LABELS, EMOTION_OPTIONS } from "@/constants/emotions";
 import { colors, radius, spacing } from "@/constants/theme";
-import { useCreatePin, useDeletePin, useUpdatePin } from "@/hooks/useTimelinePins";
+import { useCreatePin, useDeletePin, useEpisodeDuration, useUpdatePin } from "@/hooks/useTimelinePins";
 import type { TimelinePin } from "@/types/pins";
 import { createPinSchema } from "@/utils/validation";
-import { formatSecondsToTimecode, parseTimecodeToSeconds } from "@/utils/timecode";
+import { classifyTimecodeInput, formatSecondsToTimecode } from "@/utils/timecode";
 import { SpoilerToggle } from "./SpoilerToggle";
 import { TagChip } from "./TagChip";
 import { TimecodeInput } from "./TimecodeInput";
@@ -17,7 +17,6 @@ import { TimecodeInput } from "./TimecodeInput";
 interface PinComposerProps {
   contentId: string;
   episodeId?: string | null;
-  episodeDurationSeconds?: number | null;
   defaultValues?: TimelinePin | null;
   mode: "create" | "edit";
   onSuccess: (pin: TimelinePin) => void;
@@ -27,7 +26,6 @@ interface PinComposerProps {
 export function PinComposer({
   contentId,
   episodeId = null,
-  episodeDurationSeconds,
   defaultValues,
   mode,
   onSuccess,
@@ -36,6 +34,8 @@ export function PinComposer({
   const [draft, setDraft] = useAtom(pinFormDraftAtom);
   const [tagInput, setTagInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const episodeDuration = useEpisodeDuration(episodeId);
+  const episodeDurationSeconds = episodeId ? episodeDuration.data ?? null : null;
 
   useEffect(() => {
     setDraft({
@@ -89,9 +89,13 @@ export function PinComposer({
   };
 
   const save = async () => {
-    const parsedTime = parseTimecodeToSeconds(draft.timecodeDisplay);
+    const timecode = classifyTimecodeInput(draft.timecodeDisplay);
+    if (timecode.kind === "invalid_nonempty") {
+      setError("시간은 MM:SS 또는 HH:MM:SS 형식으로 입력해 주세요");
+      return;
+    }
     const result = createPinSchema.safeParse({
-      timestamp_seconds: parsedTime,
+      timestamp_seconds: timecode.seconds,
       memo: draft.memo.trim() ? draft.memo.trim() : null,
       tagNames: draft.tags,
       emotion: draft.emotion,
@@ -159,7 +163,13 @@ export function PinComposer({
           value={draft.timecodeDisplay}
         />
         <Text style={styles.helper}>
-          {draft.timestamp_seconds === null ? "시간 없이 메모만 저장할 수 있습니다." : "저장값은 정수 초로 변환됩니다."}
+          {episodeId && episodeDuration.isLoading
+            ? "에피소드 길이를 확인하는 중입니다."
+            : episodeId && episodeDurationSeconds === null
+              ? "에피소드 길이를 확인할 수 없어 형식만 검증합니다."
+              : draft.timestamp_seconds === null
+                ? "시간 없이 메모만 저장할 수 있습니다."
+                : "저장값은 정수 초로 변환됩니다."}
         </Text>
       </View>
 
@@ -236,7 +246,7 @@ export function PinComposer({
 
       <Pressable
         accessibilityRole="button"
-        disabled={isSaving}
+        disabled={isSaving || episodeDuration.isLoading}
         onPress={save}
         style={[styles.saveButton, isSaving && styles.disabled]}
       >

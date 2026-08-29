@@ -16,6 +16,7 @@ import type {
   SearchResult
 } from "./adapters/types.ts";
 import type { SearchQueryVariant as QueryVariant } from "./adapters/normalize.ts";
+import { normalizeSearchCachePayload } from "../_shared/searchCacheMetadata.ts";
 
 interface SearchRequest {
   query?: string;
@@ -105,6 +106,8 @@ Deno.serve(async (req: Request) => {
   const queryVariants = createSearchQueryVariants(normalizedQuery);
   const targetSources = getTargetSources(mediaType);
   const cachedResults: SearchResult[] = [];
+  const cachedTotals: number[] = [];
+  const cachedHasNextPages: boolean[] = [];
   const sourcesFromCache: ExternalSource[] = [];
   const missedSearches: SearchJob[] = [];
 
@@ -120,8 +123,14 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (cacheRow?.response_json) {
-        const cached = cacheRow.response_json as { results?: SearchResult[] };
-        cachedResults.push(...(cached.results ?? []));
+        const cached = normalizeSearchCachePayload(cacheRow.response_json as {
+          results?: SearchResult[];
+          total?: number;
+          hasNextPage?: boolean;
+        });
+        cachedResults.push(...cached.results);
+        cachedTotals.push(cached.total);
+        cachedHasNextPages.push(cached.hasNextPage);
         sourcesFromCache.push(source);
       } else {
         missedSearches.push({ source, variant: queryVariant });
@@ -156,7 +165,11 @@ Deno.serve(async (req: Request) => {
           query_hash: queryHash,
           query_text: searchJob.variant.query,
           source: response.source,
-          response_json: { results: response.results },
+          response_json: {
+            results: response.results,
+            total: response.total,
+            hasNextPage: response.hasNextPage
+          },
           expires_at: expiresAt
         },
         { onConflict: "query_hash,source" }
@@ -183,9 +196,9 @@ Deno.serve(async (req: Request) => {
     cached: missedSearches.length === 0,
     query,
     normalizedQuery,
-    total: results.length,
+    total: Math.max(results.length, ...cachedTotals, ...freshResponses.map((item) => item.total)),
     page,
-    hasNextPage: freshResponses.some((item) => item.hasNextPage),
+    hasNextPage: cachedHasNextPages.some(Boolean) || freshResponses.some((item) => item.hasNextPage),
     partial: failedSources.length > 0
   };
 

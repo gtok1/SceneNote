@@ -4,6 +4,7 @@ import { queryKeys } from "@/lib/query";
 import {
   createPin,
   deletePin,
+  getEpisodeDurationSeconds,
   getAllPins,
   getPin,
   getPinsByContent,
@@ -13,6 +14,7 @@ import {
 } from "@/services/pins";
 import { useAuthStore } from "@/stores/authStore";
 import type { PinInput } from "@/types/pins";
+import { removePinFromCachedValue } from "@/utils/pinCache";
 
 export function useAllPins() {
   const user = useAuthStore((state) => state.user);
@@ -67,6 +69,15 @@ export function usePin(pinId: string | undefined) {
   });
 }
 
+export function useEpisodeDuration(episodeId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.content.episodeDuration(episodeId ?? ""),
+    queryFn: () => getEpisodeDurationSeconds(episodeId ?? ""),
+    enabled: Boolean(episodeId),
+    staleTime: 0
+  });
+}
+
 export function useCreatePin() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
@@ -111,11 +122,23 @@ export function useDeletePin() {
 
   return useMutation({
     mutationFn: deletePin,
-    onSuccess: () => {
-      if (user) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.pins.all(user.id) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.tags.all(user.id) });
+    onMutate: async (pinId) => {
+      await queryClient.cancelQueries({ queryKey: ["pins"] });
+      const snapshots = queryClient.getQueriesData({ queryKey: ["pins"] });
+      for (const [key, value] of snapshots) {
+        queryClient.setQueryData(key, removePinFromCachedValue(value, pinId));
       }
+      return { snapshots };
+    },
+    onError: (_error, _pinId, context) => {
+      for (const [key, value] of context?.snapshots ?? []) queryClient.setQueryData(key, value);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pins"] });
+      if (!user) return;
+      queryClient.invalidateQueries({ queryKey: queryKeys.tags.all(user.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id) });
     }
   });
 }

@@ -15,7 +15,13 @@ import {
   type RecommendationFeedback,
   type RecommendationLibraryItem
 } from "./recommendationEngine.ts";
-import { normalizeContentThemes, type SourceContentTag } from "./recommendationThemes.ts";
+import {
+  isUserActionableTheme,
+  NICHE_THEME_CENTRALITY_THRESHOLD,
+  normalizeContentThemes,
+  USER_ACTIONABLE_THEME_CENTRALITY_THRESHOLD,
+  type SourceContentTag
+} from "./recommendationThemes.ts";
 
 const BL_TAG = { name: "Boys' Love", source: "anilist", rank: 90 } as const;
 const REVENGE_TAG = { name: "Revenge", source: "anilist", rank: 88 } as const;
@@ -44,6 +50,50 @@ describe("content theme normalization", () => {
   it("uses specific genres as lower-centrality themes and ignores broad genres", () => {
     const themes = normalizeContentThemes({ external_source: "tmdb", genres: ["Medical", "Drama"] });
     assert.deepEqual(themes.map((theme) => [theme.key, theme.centrality]), [["medical", 0.3]]);
+  });
+
+  it("keeps derived genre themes when only part of the theme set was stored", () => {
+    const storedRevenge = normalizeContentThemes({
+      external_source: "tmdb",
+      source_tags: [{ name: "Revenge", source: "tmdb" }]
+    });
+    const ranked = rankCandidates(buildPreferenceProfile([]), [candidate("partial-themes", {
+      genres: ["Drama", "Medical"],
+      themes: storedRevenge
+    })]);
+
+    assert.deepEqual(
+      ranked[0]?.themes.map((theme) => `${theme.family}:${theme.key}`).sort(),
+      ["narrative:revenge", "occupation:medical"]
+    );
+  });
+
+  it("prefers the higher-centrality provider theme over a stored genre fallback", () => {
+    const ranked = rankCandidates(buildPreferenceProfile([]), [candidate("theme-precedence", {
+      genres: ["Revenge"],
+      source_tags: [{ name: "Revenge", source: "tmdb" }],
+      themes: [{
+        family: "narrative",
+        key: "revenge",
+        label: "복수극",
+        centrality: 0.3,
+        source: "genre_backfill",
+        source_key: "Revenge"
+      }]
+    })]);
+
+    assert.equal(ranked[0]?.themes.length, 1);
+    assert.equal(ranked[0]?.themes[0]?.centrality, 0.45);
+    assert.equal(ranked[0]?.themes[0]?.source, "tmdb");
+  });
+
+  it("allows genre-derived themes for user actions without lowering niche diversity gating", () => {
+    const genreTheme = normalizeContentThemes({ external_source: "tmdb", genres: ["Medical"] })[0];
+
+    assert.equal(USER_ACTIONABLE_THEME_CENTRALITY_THRESHOLD, 0.3);
+    assert.equal(NICHE_THEME_CENTRALITY_THRESHOLD, 0.4);
+    assert.equal(genreTheme ? isUserActionableTheme(genreTheme) : false, true);
+    assert((genreTheme?.centrality ?? 0) < NICHE_THEME_CENTRALITY_THRESHOLD);
   });
 });
 

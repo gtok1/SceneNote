@@ -33,6 +33,7 @@ import type { WatchStatus } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
+import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 
 const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
@@ -307,19 +308,17 @@ export default function ContentDetailScreen() {
             progress.episodeNumber,
             createSeasonOffsetsByNumber(seasonEpisodeCounts),
           ) ?? progress.episodeNumber;
-          if (
-            resolvedEpisodeCount !== null
-            && absolute >= resolvedEpisodeCount
-            && !libraryItem.statuses.includes("completed")
-          ) {
+          const suggestion = getProgressStatusSuggestion({
+            statuses: libraryItem.statuses,
+            absoluteWatchedThrough: absolute,
+            totalEpisodes: resolvedEpisodeCount,
+          });
+          if (suggestion === "mark_completed") {
             Alert.alert("모든 화를 시청했습니다", "완료로 표시할까요?", [
               { text: "나중에", style: "cancel" },
               { text: "완료로 표시", onPress: () => toggleStatus("completed") },
             ]);
-          } else if (
-            libraryItem.statuses.includes("wishlist")
-            && !libraryItem.statuses.includes("watching")
-          ) {
+          } else if (suggestion === "mark_watching") {
             Alert.alert("시청을 시작했습니다", "보는 중으로 바꿀까요?", [
               { text: "유지", style: "cancel" },
               { text: "보는 중으로 변경", onPress: () => toggleStatus("watching") },

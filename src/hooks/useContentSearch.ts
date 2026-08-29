@@ -1,18 +1,33 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/query";
 import { getExternalContentDetail, searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
+import { mergeSearchPages } from "@/utils/searchPagination";
 
-export function useContentSearch(query: string, mediaType: MediaTypeFilter = "all", page = 1) {
+export function useContentSearch(query: string, mediaType: MediaTypeFilter = "all") {
   const normalizedQuery = query.trim();
-
-  return useQuery({
-    queryKey: queryKeys.search.results(normalizedQuery, mediaType, page),
-    queryFn: () => searchContent({ query: normalizedQuery, mediaType, page }),
+  const searchQuery = useInfiniteQuery({
+    queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1),
+    queryFn: ({ pageParam }) => searchContent({ query: normalizedQuery, mediaType, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.hasNextPage ? lastPage.page + 1 : undefined,
     enabled: normalizedQuery.length >= 2,
     staleTime: 5 * 60_000
   });
+
+  const pages = searchQuery.data?.pages ?? [];
+  const latestPage = pages.at(-1);
+  const results = mergeSearchPages(pages);
+
+  return {
+    ...searchQuery,
+    data: latestPage ? {
+      ...latestPage,
+      results,
+      total: Math.max(latestPage.total, results.length)
+    } : undefined
+  };
 }
 
 export function useExternalContentDetail(

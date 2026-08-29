@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -22,6 +22,8 @@ export default function PinDetailScreen() {
   const pin = usePin(id);
   const plainShareRef = useRef<View | null>(null);
   const maskedShareRef = useRef<View | null>(null);
+  const [isSpoilerRevealed, setSpoilerRevealed] = useState(false);
+  const [isEditing, setEditing] = useState(false);
 
   if (pin.isLoading) return <LoadingSkeleton variant="pin-item" />;
   if (pin.isError) return <ErrorState message={pin.error.message} onRetry={() => pin.refetch()} />;
@@ -62,14 +64,36 @@ export default function PinDetailScreen() {
           </Pressable>
         </View>
       ) : null}
-      <PinComposer
-        contentId={currentPin.content_id}
-        defaultValues={currentPin}
-        episodeId={currentPin.episode_id}
-        mode="edit"
-        onCancel={() => router.back()}
-        onSuccess={(updated) => router.replace({ pathname: "/pins/[id]", params: { id: updated.id } })}
-      />
+      {isEditing ? (
+        <PinComposer
+          contentId={currentPin.content_id}
+          defaultValues={currentPin}
+          episodeId={currentPin.episode_id}
+          mode="edit"
+          onCancel={() => setEditing(false)}
+          onSuccess={(updated) => {
+            setEditing(false);
+            router.replace({ pathname: "/pins/[id]", params: { id: updated.id } });
+          }}
+        />
+      ) : (
+        <View style={styles.detailBody}>
+          <Text style={styles.detailLabel}>메모</Text>
+          {currentPin.is_spoiler && !isSpoilerRevealed ? (
+            <Pressable accessibilityRole="button" onPress={() => setSpoilerRevealed(true)} style={styles.spoilerGate}>
+              <Text style={styles.spoilerGateText}>스포일러 포함 · 보기</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.memo}>{currentPin.memo?.trim() || "메모 없음"}</Text>
+          )}
+          <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.editButton}>
+            <Text style={styles.editButtonText}>핀 편집</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backButton}>
+            <Text style={styles.backButtonText}>목록으로</Text>
+          </Pressable>
+        </View>
+      )}
       <View pointerEvents="none" style={styles.captureLayer}>
         <PinShareCard pin={currentPin} ref={plainShareRef} />
         <PinShareCard maskMemo pin={currentPin} ref={maskedShareRef} />
@@ -109,5 +133,14 @@ const styles = StyleSheet.create({
     opacity: 0,
     position: "absolute",
     top: 0
-  }
+  },
+  detailBody: { gap: spacing.md, padding: spacing.lg },
+  detailLabel: { color: colors.textMuted, fontSize: 13, fontWeight: "800" },
+  memo: { color: colors.text, fontSize: 16, lineHeight: 25 },
+  spoilerGate: { alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, justifyContent: "center", minHeight: 56 },
+  spoilerGateText: { color: colors.primary, fontWeight: "800" },
+  editButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, justifyContent: "center", minHeight: 48 },
+  editButtonText: { color: colors.surface, fontWeight: "900" },
+  backButton: { alignItems: "center", justifyContent: "center", minHeight: 44 },
+  backButtonText: { color: colors.textMuted, fontWeight: "800" }
 });

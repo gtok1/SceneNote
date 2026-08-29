@@ -34,6 +34,7 @@ import {
   createRecommendationIdentityAliases,
   type RecommendationFeedback
 } from "../../supabase/functions/_shared/recommendationEngine";
+import { isUserActionableTheme } from "../../supabase/functions/_shared/recommendationThemes";
 
 type RecommendationQueryKey = ReturnType<typeof queryKeys.recommendations.personalized>;
 
@@ -535,7 +536,7 @@ export function usePersonalizedRecommendations(
       }];
       if (input.action === "more" && input.targetType === "content") {
         feedback.push(...(item.themes ?? [])
-          .filter((theme) => theme.centrality >= 0.4)
+          .filter(isUserActionableTheme)
           .slice(0, 3)
           .map((theme) => ({
             target_type: "theme" as const,

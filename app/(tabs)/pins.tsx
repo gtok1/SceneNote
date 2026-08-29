@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
@@ -18,6 +18,7 @@ import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER, createGenreFilterOptions, matchesGenreFilter } from "@/utils/genre";
 import { sharePinCardImage } from "@/utils/pinShare";
+import { shouldShowPinDetailPanel } from "@/utils/pinResponsive";
 import { formatSecondsToTimecode } from "@/utils/timecode";
 
 const DETAIL_PANEL_WIDTH = 360;
@@ -31,6 +32,8 @@ const emotionFilterOptions = EMOTION_OPTIONS.map((value) => ({
 type ViewMode = "list" | "timeline";
 
 export default function PinsScreen() {
+  const { width } = useWindowDimensions();
+  const showDetailPanel = shouldShowPinDetailPanel(width);
   const [sortMode, setSortMode] = useState<PinSortMode>("latest");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -248,7 +251,13 @@ export default function PinsScreen() {
               keyExtractor={(pin) => pin.id}
               renderItem={({ item: pin }) =>
                 viewMode === "timeline" ? (
-                  <PinTimelineItem pin={pin} selectedPinId={selectedPin?.id ?? null} onSelectPin={setSelectedPinId} />
+                  <PinTimelineItem
+                    isSpoilerRevealed={revealedSpoilers.has(pin.id)}
+                    onRevealSpoiler={() => revealSpoiler(pin)}
+                    pin={pin}
+                    selectedPinId={selectedPin?.id ?? null}
+                    onSelectPin={setSelectedPinId}
+                  />
                 ) : (
                   <PinCard
                     isSelected={selectedPin?.id === pin.id}
@@ -264,13 +273,13 @@ export default function PinsScreen() {
             />
           </View>
 
-          <PinDetailPanel
+          {showDetailPanel ? <PinDetailPanel
             isSpoilerRevealed={selectedPin ? revealedSpoilers.has(selectedPin.id) : false}
             onOpenDetail={() => selectedPin && router.push({ pathname: "/pins/[id]", params: { id: selectedPin.id } })}
             onRevealSpoiler={() => selectedPin && revealSpoiler(selectedPin)}
             onShare={() => selectedPin && sharePin(selectedPin)}
             pin={selectedPin}
-          />
+          /> : null}
         </View>
       </View>
       {selectedPin ? (
@@ -475,12 +484,17 @@ function getEmotionSummaryTone(emotion: EmotionType) {
 function PinTimelineItem({
   pin,
   selectedPinId,
-  onSelectPin
+  onSelectPin,
+  isSpoilerRevealed,
+  onRevealSpoiler
 }: {
   pin: TimelinePin;
   selectedPinId: string | null;
   onSelectPin: (id: string) => void;
+  isSpoilerRevealed: boolean;
+  onRevealSpoiler: () => void;
 }) {
+  const shouldHideMemo = pin.is_spoiler && !isSpoilerRevealed;
   return (
     <Pressable
       accessibilityRole="button"
@@ -498,7 +512,13 @@ function PinTimelineItem({
             <Text style={styles.emotionBadge}>{EMOTION_LABELS[pin.emotion]}</Text>
           ) : null}
         </View>
-        <Text numberOfLines={2} style={styles.pinMemo}>{pin.memo?.trim() || "메모 없음"}</Text>
+        {shouldHideMemo ? (
+          <Pressable accessibilityRole="button" onPress={onRevealSpoiler} style={styles.spoilerInline}>
+            <Text style={styles.spoilerInlineText}>스포일러 포함 · 보기</Text>
+          </Pressable>
+        ) : (
+          <Text numberOfLines={2} style={styles.pinMemo}>{pin.memo?.trim() || "메모 없음"}</Text>
+        )}
       </View>
     </Pressable>
   );

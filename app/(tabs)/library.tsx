@@ -29,13 +29,14 @@ import {
   type LibrarySheetFilterState
 } from "@/components/library/LibraryFilterBottomSheet";
 import { LibraryStatusFilter as LibraryStatusFilterBar } from "@/components/library/LibraryStatusFilter";
-import { WATCH_STATUS_LABEL } from "@/constants/status";
+import { normalizeWatchStatuses, WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
-import { useLibrary, useUpdateLibraryManualProgress } from "@/hooks/useLibrary";
+import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } from "@/hooks/useLibrary";
 import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
-import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
+import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
+import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 import {
   CONTENT_TYPE_FILTERS,
@@ -50,6 +51,9 @@ import {
 } from "@/utils/libraryFilters";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
+import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
+
+const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(["wishlist", "watching", "dropped", "completed"]);
 
 type ShareFeedback =
   | { status: "loading"; message: string; url?: undefined }
@@ -89,6 +93,7 @@ export default function LibraryScreen() {
   const { galleryColumns, isDesktop, isMobile } = getLibraryResponsiveLayout(width);
   const library = useLibrary(statusFilter);
   const updateManualProgress = useUpdateLibraryManualProgress();
+  const updateStatuses = useUpdateLibraryStatuses();
   const networkState = useNetworkState();
   const router = useRouter();
   const filters = useMemo(
@@ -151,10 +156,46 @@ export default function LibraryScreen() {
     progress: { seasonNumber: number | null; episodeNumber: number } | null
   ) => {
     if (!editingProgressItem) return;
+    const item = editingProgressItem;
     updateManualProgress.mutate(
-      { libraryItemId: editingProgressItem.library_item_id, progress },
+      { libraryItemId: item.library_item_id, progress },
       {
-        onSuccess: () => setEditingProgressItemId(null),
+        onSuccess: () => {
+          setEditingProgressItemId(null);
+          if (!progress) return;
+          const absolute = toAbsoluteEpisodeNumber(
+            progress.seasonNumber,
+            progress.episodeNumber,
+            createSeasonOffsetsByNumber(item.season_episode_counts)
+          ) ?? progress.episodeNumber;
+          const suggestion = getProgressStatusSuggestion({
+            statuses: item.statuses,
+            absoluteWatchedThrough: absolute,
+            totalEpisodes: item.episode_count
+          });
+          const updateSuggestedStatus = (status: WatchStatus) => {
+            const statuses = normalizeWatchStatuses([
+              status,
+              ...item.statuses.filter((current) => !PRIMARY_WATCH_STATUS_SET.has(current))
+            ]);
+            updateStatuses.mutate(
+              { libraryItemId: item.library_item_id, statuses },
+              { onError: (error) => Alert.alert("상태 변경 실패", error.message) }
+            );
+          };
+
+          if (suggestion === "mark_completed") {
+            Alert.alert("모든 화를 시청했습니다", "완료로 표시할까요?", [
+              { text: "나중에", style: "cancel" },
+              { text: "완료로 표시", onPress: () => updateSuggestedStatus("completed") }
+            ]);
+          } else if (suggestion === "mark_watching") {
+            Alert.alert("시청을 시작했습니다", "보는 중으로 바꿀까요?", [
+              { text: "유지", style: "cancel" },
+              { text: "보는 중으로 변경", onPress: () => updateSuggestedStatus("watching") }
+            ]);
+          }
+        },
         onError: (error) => Alert.alert("시청 진행 저장 실패", error.message)
       }
     );
@@ -636,7 +677,12 @@ export default function LibraryScreen() {
           isGallery ? (
             <ContentGalleryCard
               item={item}
-              onOpenEpisodes={() => openProgressEditor(item)}
+              onOpenEpisodes={() =>
+                router.push({
+                  pathname: "/content/[id]/episodes",
+                  params: { id: item.content_id }
+                })
+              }
               onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({
@@ -648,7 +694,12 @@ export default function LibraryScreen() {
           ) : (
             <ContentCard
               item={item}
-              onOpenEpisodes={() => openProgressEditor(item)}
+              onOpenEpisodes={() =>
+                router.push({
+                  pathname: "/content/[id]/episodes",
+                  params: { id: item.content_id }
+                })
+              }
               onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({

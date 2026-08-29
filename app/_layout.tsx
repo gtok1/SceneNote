@@ -160,7 +160,7 @@ function GlobalBottomNav() {
   const [focusedHref, setFocusedHref] = useState<NavHref | null>(null);
   const activeHref = getActiveNavHref(pathname, searchParams);
 
-  if (!session || segments[0] === "(auth)" || segments[0] === "share") return null;
+  if (!session || segments[0] !== "(tabs)") return null;
 
   return (
     <View style={styles.bottomNav}>

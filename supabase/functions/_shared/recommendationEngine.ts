@@ -1,5 +1,6 @@
 import {
   isBroadGenre,
+  NICHE_THEME_CENTRALITY_THRESHOLD,
   normalizeContentThemes,
   themeIdentity,
   type ContentTheme,
@@ -262,7 +263,7 @@ export function buildPreferenceProfile(
       if (positiveWeight <= 0) continue;
       const sourceId = createRecommendationIdentity(item);
       const sourceIds = Array.from(new Set([...(existing?.source_content_ids ?? []), sourceId]));
-      const evidenceCount = (existing?.evidence_count ?? 0) + (theme.centrality >= 0.4 ? 1 : 0);
+      const evidenceCount = (existing?.evidence_count ?? 0) + (theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD ? 1 : 0);
       themeEvidence.set(key, {
         key,
         family: theme.family,
@@ -403,7 +404,7 @@ export function classifyExplorationCandidate(
   profile: RecommendationPreferenceProfile,
   candidate: RecommendationCandidate
 ): boolean {
-  const themes = resolveThemes(candidate).filter((theme) => theme.centrality >= 0.4);
+  const themes = resolveThemes(candidate).filter((theme) => theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD);
   if (themes.some((theme) => profile.theme_evidence.get(themeIdentity(theme))?.state === "positive")) return false;
   const specificKeywordMatch = scoreValues(profile.keyword_scores, candidate.keywords) ?? 0;
   const peopleMatch = scoreValues(profile.people_scores, candidate.people) ?? 0;
@@ -838,14 +839,19 @@ function normalizeQuality(candidate: RecommendationCandidate): number {
 }
 
 function resolveThemes(item: RecommendationCandidate | RecommendationLibraryItem): ContentTheme[] {
-  return item.themes?.length
-    ? [...item.themes]
-    : normalizeContentThemes({
-      external_source: item.external_source ?? ("source_api" in item ? item.source_api : null),
-      genres: item.genres,
-      keywords: item.keywords,
-      source_tags: item.source_tags
-    });
+  const derivedThemes = normalizeContentThemes({
+    external_source: item.external_source ?? ("source_api" in item ? item.source_api : null),
+    genres: item.genres,
+    keywords: item.keywords,
+    source_tags: item.source_tags
+  });
+  const mergedThemes = new Map<string, ContentTheme>();
+  for (const theme of [...(item.themes ?? []), ...derivedThemes]) {
+    const key = themeIdentity(theme);
+    const previous = mergedThemes.get(key);
+    if (!previous || previous.centrality < theme.centrality) mergedThemes.set(key, theme);
+  }
+  return [...mergedThemes.values()].sort((left, right) => right.centrality - left.centrality);
 }
 
 function summarizePreferenceState(evidence: readonly PreferenceEvidence[]): PreferenceState {
@@ -992,7 +998,7 @@ export function applyBatchDiversityConstraints<T extends RecommendationCandidate
     if (franchises.has(franchise)) continue;
     const primaryGenre = enforcePrimaryGenreDiversity ? normalizeValues(candidate.genres)[0] ?? "" : "";
     if (primaryGenre && (primaryGenreCounts.get(primaryGenre) ?? 0) >= maxPerPrimaryGenre) continue;
-    const nicheThemes = candidate.themes.filter((theme) => theme.centrality >= 0.4);
+    const nicheThemes = candidate.themes.filter((theme) => theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD);
     let blocked = false;
     const unknownThemeKeys: string[] = [];
     for (const theme of nicheThemes) {

@@ -282,6 +282,11 @@ export default function LibraryScreen() {
     });
   }, [commitFilters]);
 
+  const openLibraryImport = useCallback(() => {
+    setShowFilters(false);
+    router.push("/library/import");
+  }, [router]);
+
   const restoreFilterButtonFocus = useCallback(() => {
     (filterButtonRef.current as unknown as { focus?: () => void } | null)?.focus?.();
   }, []);
@@ -365,14 +370,6 @@ export default function LibraryScreen() {
             <View style={styles.mobileToolRow}>
               <View style={styles.mobileToolGroup}>
                 <Pressable
-                  accessibilityLabel="엑셀 업로드"
-                  accessibilityRole="button"
-                  onPress={() => router.push("/library/import")}
-                  style={styles.mobileIconButton}
-                >
-                  <Ionicons color={colors.textMuted} name="cloud-upload-outline" size={19} />
-                </Pressable>
-                <Pressable
                   accessibilityLabel={isSharing ? "공유 중" : "라이브러리 공유"}
                   accessibilityRole="button"
                   disabled={isSharing || library.isLoading}
@@ -380,6 +377,15 @@ export default function LibraryScreen() {
                   style={[styles.mobileIconButton, isSharing || library.isLoading ? styles.toolButtonDisabled : null]}
                 >
                   <Ionicons color={colors.textMuted} name="share-social-outline" size={19} />
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="필터 초기화"
+                  accessibilityRole="button"
+                  disabled={!hasActiveFilter}
+                  onPress={resetFilters}
+                  style={[styles.mobileIconButton, !hasActiveFilter ? styles.toolButtonDisabled : null]}
+                >
+                  <Ionicons color={colors.textMuted} name="refresh-outline" size={20} />
                 </Pressable>
               </View>
               <View style={styles.mobileToolGroup}>
@@ -451,51 +457,9 @@ export default function LibraryScreen() {
                 </Pressable>
               );
             })}
-            <View style={styles.filterDivider} />
-            <View
-              accessibilityLabel="작품 유형"
-              style={styles.filterGroupIcon}
-            >
-              <Ionicons color={colors.textMuted} name="albums-outline" size={15} />
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: contentTypeFilter === "all" }}
-              onPress={() => commitFilters({ contentTypeFilter: "all" })}
-              style={[styles.filter, contentTypeFilter === "all" && styles.filterSelected]}
-            >
-              <Text style={[styles.filterText, contentTypeFilter === "all" && styles.filterTextSelected]}>
-                전체
-              </Text>
-            </Pressable>
-            {CONTENT_TYPE_FILTERS.filter((item) => item !== "all").map((item) => {
-              const selected = item === contentTypeFilter;
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  key={item}
-                  onPress={() => commitFilters({ contentTypeFilter: item })}
-                  style={[styles.filter, selected && styles.filterSelected]}
-                >
-                  <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
-                    {CONTENT_TYPE_LABELS[item]}
-                  </Text>
-                </Pressable>
-              );
-            })}
           </ScrollView>
 
           <View style={styles.toolGroup}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push("/library/import")}
-              style={styles.toolButton}
-            >
-              <Ionicons color={colors.textMuted} name="cloud-upload-outline" size={16} />
-              <Text style={styles.filterText}>엑셀 업로드</Text>
-            </Pressable>
-
             <Pressable
               accessibilityRole="button"
               disabled={isSharing || library.isLoading}
@@ -552,12 +516,62 @@ export default function LibraryScreen() {
                 {advancedFilterCount > 0 ? `필터 ${advancedFilterCount}` : "필터"}
               </Text>
             </Pressable>
+
+            <Pressable
+              accessibilityLabel="필터 초기화"
+              accessibilityRole="button"
+              disabled={!hasActiveFilter}
+              onPress={resetFilters}
+              style={[styles.toolButton, !hasActiveFilter ? styles.toolButtonDisabled : null]}
+            >
+              <Ionicons color={colors.textMuted} name="refresh-outline" size={17} />
+              <Text style={styles.filterText}>초기화</Text>
+            </Pressable>
           </View>
         </View>
         )}
 
+        {!isMobile ? (
+          <View style={styles.contentTypeBand}>
+            <View style={styles.contentTypeLabel}>
+              <Ionicons color={colors.text} name="albums-outline" size={17} />
+              <Text style={styles.contentTypeLabelText}>작품 유형</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.contentTypeFilters}
+              style={styles.contentTypeScroll}
+            >
+              {CONTENT_TYPE_FILTERS.map((item) => {
+                const selected = item === contentTypeFilter;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    key={item}
+                    onPress={() => commitFilters({ contentTypeFilter: item })}
+                    style={[styles.contentTypeFilter, selected && styles.filterSelected]}
+                  >
+                    <Text style={[styles.contentTypeFilterText, selected && styles.filterTextSelected]}>
+                      {CONTENT_TYPE_LABELS[item]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
+
         {showFilters && !isMobile ? (
           <View style={styles.advancedFilters}>
+            <View style={styles.advancedFilterHeader}>
+              <Text style={styles.advancedFilterTitle}>상세 필터</Text>
+              <Pressable accessibilityRole="button" onPress={openLibraryImport} style={styles.toolButton}>
+                <Ionicons color={colors.textMuted} name="cloud-upload-outline" size={17} />
+                <Text style={styles.filterText}>엑셀 업로드</Text>
+              </Pressable>
+            </View>
             <View style={styles.dateRow}>
               <YearSelect onChange={(value) => commitFilters({ year: value })} value={year} />
               {[
@@ -718,6 +732,11 @@ export default function LibraryScreen() {
           onApply={applySheetFilters}
           onClose={closeMobileFilters}
           onClosed={restoreFilterButtonFocus}
+          onOpenImport={openLibraryImport}
+          onReset={() => {
+            resetFilters();
+            closeMobileFilters();
+          }}
           visible={showFilters}
         />
       ) : null}
@@ -880,12 +899,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingRight: spacing.md
   },
-  filterDivider: {
-    backgroundColor: colors.border,
-    height: 30,
-    marginHorizontal: spacing.xs,
-    width: StyleSheet.hairlineWidth
-  },
   filterGroupIcon: {
     alignItems: "center",
     backgroundColor: colors.surfaceMuted,
@@ -922,6 +935,60 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     zIndex: 1000
+  },
+  advancedFilterHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  advancedFilterTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  contentTypeBand: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  contentTypeLabel: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    minWidth: 82
+  },
+  contentTypeLabelText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  contentTypeScroll: {
+    flex: 1,
+    minWidth: 0
+  },
+  contentTypeFilters: {
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingRight: spacing.md
+  },
+  contentTypeFilter: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 40,
+    paddingHorizontal: spacing.lg
+  },
+  contentTypeFilterText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: "800"
   },
   shareFeedback: {
     backgroundColor: colors.surfaceMuted,

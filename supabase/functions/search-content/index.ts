@@ -48,7 +48,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-const SEARCH_CACHE_VERSION = "ko-v6-anilist-korean-title";
+const SEARCH_CACHE_VERSION = "ko-v10-season-result-dedupe";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

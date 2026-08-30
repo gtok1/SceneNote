@@ -20,6 +20,11 @@ export interface SearchResult {
   episode_count: number | null;
   genres?: string[];
   duplicate_hint?: boolean;
+  match_titles?: string[];
+  matched_via?: "direct" | "season_relation";
+  season_number?: number;
+  title_is_synthesized?: boolean;
+  resolved_from_id?: string;
 }
 
 export interface AdapterSearchParams {

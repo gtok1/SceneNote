@@ -8,6 +8,11 @@ export interface SearchQueryVariant {
   compactQuery: string;
 }
 
+export interface SeasonQuery {
+  baseQuery: string;
+  seasonNumber: number;
+}
+
 export function compactResults(results: SearchResult[]): SearchResult[] {
   const byExactKey = new Map<string, SearchResult>();
 
@@ -43,6 +48,17 @@ export function cleanText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const stripped = value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
   return stripped.length > 0 ? stripped : null;
+}
+
+export function parseSeasonQuery(query: string): SeasonQuery | null {
+  const match = /(?:시즌\s*(\d+)|(\d+)\s*[기期])\s*$/.exec(query.trim());
+  if (!match) return null;
+
+  const seasonNumber = Number.parseInt(match[1] ?? match[2] ?? "", 10);
+  if (seasonNumber < 2 || seasonNumber > 9) return null;
+
+  const baseQuery = query.slice(0, match.index).trim();
+  return baseQuery.length >= 2 ? { baseQuery, seasonNumber } : null;
 }
 
 export function createSearchQueryVariants(query: string): SearchQueryVariant[] {
@@ -90,13 +106,15 @@ export function compactSearchText(value: string): string {
 export function filterResultsByCompactQuery(results: SearchResult[], compactQuery: string): SearchResult[] {
   if (compactQuery.length < 4) return results;
 
-  return results.filter((result) =>
-    [result.title_primary, result.title_original].some((title) => {
+  return results.filter((result) => {
+    if (result.matched_via === "season_relation") return true;
+
+    return [result.title_primary, result.title_original, ...(result.match_titles ?? [])].some((title) => {
       if (!title) return false;
       const compactTitle = compactSearchText(title);
       return compactTitle.includes(compactQuery) || compactQuery.includes(compactTitle);
-    })
-  );
+    });
+  });
 }
 
 export function yearFromDate(value: unknown): number | null {

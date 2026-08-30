@@ -10,6 +10,8 @@
 | `docs/12_episode_progress_spec.md` | 시청 진행 위치(몇 화까지 봤는지) 설정 기능 전체 명세 | 라이브러리·진행률·이어보기 관련 작업 |
 | `docs/13_codex_prompt_episode_progress.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
 | `docs/14_codex_prompt_episode_progress_fixes.md` | 위 구현의 검증 결과와 결함 5건(F-1~F-5) 수정 지시문 | 진행 위치 기능을 손볼 때 |
+| `docs/15_season_search_spec.md` | 한국어 시즌 표기(`N기`/`시즌 N`) 검색 명세. AniList·TMDB 시즌 모델 차이와 SEQUEL 체인 해석 | 검색·외부 API 어댑터 관련 작업 |
+| `docs/16_codex_prompt_season_search.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
 
 **규칙**
 

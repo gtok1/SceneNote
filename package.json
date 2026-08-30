@@ -16,7 +16,7 @@
     "backend:deploy": "supabase functions deploy search-content search-person-content similar-content add-to-library get-content-detail get-person-detail get-watch-providers fetch-episodes bulk-register-netflix popular-recommendations personalized-recommendations create-library-share get-library-share delete-account",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts supabase/functions/**/*.test.ts",
+    "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts supabase/functions/**/*.test.ts supabase/functions/search-content/adapters/*.test.ts",
     "import:netflix": "tsx scripts/import-netflix-tmdb-bulk.ts",
     "smoke:edge": "tsx scripts/smoke-edge-functions.ts"
   },

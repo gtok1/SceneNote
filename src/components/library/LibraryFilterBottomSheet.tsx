@@ -38,16 +38,9 @@ interface LibraryFilterBottomSheetProps {
   onApply: (filters: LibrarySheetFilterState) => void;
   onClose: () => void;
   onClosed?: () => void;
+  onOpenImport: () => void;
+  onReset: () => void;
 }
-
-const DEFAULT_FILTERS: LibrarySheetFilterState = {
-  statusFilter: "all",
-  contentTypeFilter: "all",
-  genreFilter: ALL_GENRE_FILTER,
-  ratingFilter: "all",
-  year: "",
-  sortOrder: "latest"
-};
 
 export function LibraryFilterBottomSheet({
   visible,
@@ -55,7 +48,9 @@ export function LibraryFilterBottomSheet({
   genreOptions,
   onApply,
   onClose,
-  onClosed
+  onClosed,
+  onOpenImport,
+  onReset
 }: LibraryFilterBottomSheetProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -198,10 +193,22 @@ export function LibraryFilterBottomSheet({
                 ))}
               </View>
             </FilterSection>
+
+            <FilterSection title="데이터 관리">
+              <Pressable accessibilityRole="button" onPress={onOpenImport} style={styles.importButton}>
+                <Ionicons color={colors.text} name="cloud-upload-outline" size={19} />
+                <View style={styles.importTextBox}>
+                  <Text style={styles.importTitle}>엑셀 업로드</Text>
+                  <Text style={styles.importDescription}>엑셀 파일에서 작품을 라이브러리로 가져옵니다.</Text>
+                </View>
+                <Ionicons color={colors.textMuted} name="chevron-forward" size={18} />
+              </Pressable>
+            </FilterSection>
           </ScrollView>
 
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-            <Pressable accessibilityRole="button" onPress={() => setDraft(DEFAULT_FILTERS)} style={styles.resetButton}>
+            <Pressable accessibilityRole="button" onPress={onReset} style={styles.resetButton}>
+              <Ionicons color={colors.text} name="refresh-outline" size={18} />
               <Text style={styles.resetText}>초기화</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => onApply(draft)} style={styles.applyButton}>
@@ -354,6 +361,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
     justifyContent: "center",
     minHeight: 48,
     paddingHorizontal: spacing.lg
@@ -362,6 +371,30 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: "800"
+  },
+  importButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 64,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  importTextBox: {
+    flex: 1,
+    gap: 2
+  },
+  importTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  importDescription: {
+    color: colors.textMuted,
+    fontSize: 12
   },
   applyButton: {
     alignItems: "center",

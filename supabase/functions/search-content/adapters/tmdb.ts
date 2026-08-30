@@ -1,4 +1,4 @@
-import { cleanText, yearFromDate } from "./normalize.ts";
+import { cleanText, parseSeasonQuery, yearFromDate } from "./normalize.ts";
 import { hasTmdbAnimationGenreIds } from "../../_shared/tmdbClassification.ts";
 import type { AdapterSearchParams, AdapterSearchResponse, ContentType, SearchResult } from "./types.ts";
 
@@ -56,6 +56,17 @@ interface TmdbSearchResponse {
   results?: TmdbSearchItem[];
 }
 
+export interface TmdbSeason {
+  season_number?: number | null;
+  name?: string | null;
+  air_date?: string | null;
+  episode_count?: number | null;
+}
+
+interface TmdbTvDetailsResponse {
+  seasons?: TmdbSeason[];
+}
+
 export async function searchTmdb({
   query,
   mediaType,
@@ -67,13 +78,15 @@ export async function searchTmdb({
     throw new Error("TMDB_API_KEY is not configured");
   }
 
+  const seasonQuery = mediaType === "movie" ? null : parseSeasonQuery(query);
+
   const endpoint =
     mediaType === "movie"
       ? "https://api.themoviedb.org/3/search/movie"
       : "https://api.themoviedb.org/3/search/multi";
 
   const url = new URL(endpoint);
-  url.searchParams.set("query", query);
+  url.searchParams.set("query", seasonQuery?.baseQuery ?? query);
   url.searchParams.set("page", String(page));
   url.searchParams.set("language", TMDB_LANGUAGE);
   url.searchParams.set("region", TMDB_REGION);
@@ -90,10 +103,15 @@ export async function searchTmdb({
   }
 
   const payload = (await response.json()) as TmdbSearchResponse;
-  const results = (payload.results ?? [])
+  const normalizedItems = (payload.results ?? [])
     .filter((item) => item.media_type !== "person")
-    .map((item) => normalizeTmdbItem(item, mediaType))
-    .filter((item): item is SearchResult => item !== null);
+    .map((item) => ({ item, result: normalizeTmdbItem(item, mediaType) }))
+    .filter((entry): entry is { item: TmdbSearchItem; result: SearchResult } => entry.result !== null);
+  const results = await Promise.all(normalizedItems.map(async ({ item, result }, index) => {
+    if (!seasonQuery || index >= 3 || result.content_type === "movie") return result;
+    const seasons = await fetchTmdbSeasons(item.id, apiKey, signal);
+    return seasons ? applyTmdbSeasonMetadata(result, seasons, seasonQuery.seasonNumber) : result;
+  }));
 
   return {
     source: "tmdb",
@@ -101,6 +119,56 @@ export async function searchTmdb({
     total: payload.total_results ?? results.length,
     hasNextPage: (payload.page ?? page) < (payload.total_pages ?? page)
   };
+}
+
+export function applyTmdbSeasonMetadata(
+  result: SearchResult,
+  seasons: TmdbSeason[],
+  seasonNumber: number
+): SearchResult {
+  const season = seasons.find((item) => item.season_number === seasonNumber);
+  if (!season) return result;
+
+  const suppliedTitle = season.name?.trim();
+  const meaningfulKoreanTitle = suppliedTitle
+    && hasHangul(suppliedTitle)
+    && !/^(?:시즌|season)\s*\d+$/i.test(suppliedTitle)
+    ? suppliedTitle
+    : null;
+  const synthesizedTitle = hasHangul(result.title_primary)
+    ? `${result.title_primary} ${seasonNumber}기`
+    : null;
+  const titlePrimary = meaningfulKoreanTitle ?? synthesizedTitle ?? result.title_primary;
+  const airDate = dateOnly(season.air_date);
+
+  return {
+    ...result,
+    title_primary: titlePrimary,
+    ...(synthesizedTitle && !meaningfulKoreanTitle ? { title_is_synthesized: true } : {}),
+    match_titles: Array.from(new Set([...(result.match_titles ?? []), titlePrimary])),
+    season_number: seasonNumber,
+    air_year: yearFromDate(airDate) ?? result.air_year,
+    air_date: airDate ?? result.air_date,
+    episode_count: season.episode_count ?? result.episode_count
+  };
+}
+
+async function fetchTmdbSeasons(
+  tmdbId: number,
+  apiKey: string,
+  signal: AbortSignal
+): Promise<TmdbSeason[] | null> {
+  const url = new URL(`https://api.themoviedb.org/3/tv/${tmdbId}`);
+  url.searchParams.set("language", TMDB_LANGUAGE);
+
+  try {
+    const response = await fetch(url, { headers: applyTmdbAuth(url, apiKey), signal });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as TmdbTvDetailsResponse;
+    return payload.seasons ?? [];
+  } catch {
+    return null;
+  }
 }
 
 function normalizeTmdbItem(
@@ -195,4 +263,8 @@ function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
 
 function looksLikeJwt(value: string): boolean {
   return value.startsWith("eyJ") || value.split(".").length === 3;
+}
+
+function hasHangul(value: string): boolean {
+  return /[가-힣]/.test(value);
 }

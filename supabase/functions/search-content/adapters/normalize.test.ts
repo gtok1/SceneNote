@@ -4,7 +4,8 @@ import { describe, it } from "node:test";
 import {
   compactResults,
   createSearchQueryVariants,
-  filterResultsByCompactQuery
+  filterResultsByCompactQuery,
+  parseSeasonQuery
 } from "./normalize.ts";
 import type { SearchResult } from "./types.ts";
 
@@ -29,6 +30,22 @@ function result(
 }
 
 describe("search query normalization", () => {
+  const seasonQueryCases = [
+    ["촌구석 아저씨, 검성이 되다 2기", { baseQuery: "촌구석 아저씨, 검성이 되다", seasonNumber: 2 }],
+    ["제목 시즌 3", { baseQuery: "제목", seasonNumber: 3 }],
+    ["제목 시즌3", { baseQuery: "제목", seasonNumber: 3 }],
+    ["제목 2期", { baseQuery: "제목", seasonNumber: 2 }],
+    ["제목 1기", null],
+    ["2기", null],
+    ["제목 10기", null]
+  ] as const;
+
+  for (const [query, expected] of seasonQueryCases) {
+    it(`parses the season query: ${query}`, () => {
+      assert.deepEqual(parseSeasonQuery(query), expected);
+    });
+  }
+
   it("adds Korean spacing and compact-title fallback variants", () => {
     const variants = createSearchQueryVariants("신사의품격");
 
@@ -58,6 +75,36 @@ describe("search query normalization", () => {
       filtered.map((item) => item.title_primary),
       ["신사의 품격", "A Gentleman's Dignity"]
     );
+  });
+
+  it("keeps a result resolved through a season relation", () => {
+    const filtered = filterResultsByCompactQuery(
+      [result("Katainaka no Ossan, Kensei ni Naru II", null, { matched_via: "season_relation" })],
+      "촌구석아저씨검성이되다2기"
+    );
+
+    assert.equal(filtered.length, 1);
+  });
+
+  it("matches direct results against match titles", () => {
+    const filtered = filterResultsByCompactQuery(
+      [result("Katainaka no Ossan, Kensei ni Naru II", null, {
+        matched_via: "direct",
+        match_titles: ["촌구석 아저씨, 검성이 되다 2기"]
+      })],
+      "촌구석아저씨검성이되다2기"
+    );
+
+    assert.equal(filtered.length, 1);
+  });
+
+  it("rejects unrelated results without match titles", () => {
+    const filtered = filterResultsByCompactQuery(
+      [result("Unrelated Anime")],
+      "촌구석아저씨검성이되다2기"
+    );
+
+    assert.equal(filtered.length, 0);
   });
 
   it("compacts the same anime returned by TMDB and AniList into one result", () => {

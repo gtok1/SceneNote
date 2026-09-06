@@ -16,6 +16,7 @@ import {
   RECENT_RECOMMENDATION_IMPRESSION_LIMIT
 } from "../_shared/recommendationImpressions.ts";
 import { fetchRecommendationProviderPage } from "../_shared/recommendationProviders.ts";
+import { mergeLibraryRowsByContent } from "./libraryRowMerge.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createUserClient, requireUser } from "../_shared/supabase.ts";
 
@@ -168,7 +169,8 @@ Deno.serve(async (req: Request) => {
       return jsonError(500, "FEEDBACK_QUERY_FAILED", "Failed to load recommendation feedback");
     }
 
-    const libraryItems = ((libraryResult.data ?? []) as unknown as RawLibraryRow[]).map(normalizeLibraryItem);
+    const libraryItems = mergeLibraryRowsByContent((libraryResult.data ?? []) as unknown as RawLibraryRow[])
+      .map(normalizeLibraryItem);
     const recentSeenIds = await loadRecentSeenIdentityKeys(userClient, user.id);
     const feedback = (feedbackResult.data ?? []) as RecommendationFeedback[];
     const result = await scanRecommendationCatalog(fetchRecommendationProviderPage, {

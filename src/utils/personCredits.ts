@@ -53,3 +53,16 @@ export function parsePersonCreditFilter(value: string | string[] | undefined): P
   const candidate = Array.isArray(value) ? value[0] : value;
   return candidate === "watched" || candidate === "library" ? candidate : "all";
 }
+
+function normalizeForCreditSearch(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+export function matchesPersonCreditQuery(credit: PersonCredit, query: string): boolean {
+  const normalizedQuery = normalizeForCreditSearch(query);
+  if (!normalizedQuery) return true;
+
+  return [credit.title, credit.original_title, credit.role]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => normalizeForCreditSearch(value).includes(normalizedQuery));
+}

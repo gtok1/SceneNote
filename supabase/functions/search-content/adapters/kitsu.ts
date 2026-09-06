@@ -67,6 +67,9 @@ export async function searchKitsu({
   };
 }
 
+// Kitsu's API exposes no country/origin field (verified against /api/edge/anime),
+// so results here have no origin_country and are excluded whenever a country filter
+// is active. Phase 2 / disabled by default (see ENABLE_PHASE2_SEARCH_SOURCES).
 function normalizeKitsuItem(item: KitsuAnime): SearchResult {
   const attributes = item.attributes;
 

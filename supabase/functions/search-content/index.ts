@@ -7,7 +7,7 @@ import {
   createSearchQueryVariants,
   filterResultsByCompactQuery
 } from "./adapters/normalize.ts";
-import { searchTmdb } from "./adapters/tmdb.ts";
+import { discoverTmdb, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
 import type {
   AdapterSearchResponse,
@@ -23,6 +23,8 @@ interface SearchRequest {
   media_type?: MediaTypeFilter;
   category?: MediaTypeFilter;
   page?: number;
+  /** ISO 3166-1 alpha-2. With no query this switches the request into browse mode. */
+  country?: string;
 }
 
 interface SearchResponse {
@@ -48,7 +50,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-const SEARCH_CACHE_VERSION = "ko-v10-season-result-dedupe";
+const SEARCH_CACHE_VERSION = "ko-v13-season-expansion";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -94,12 +96,24 @@ Deno.serve(async (req: Request) => {
   const mediaType = body.value.media_type ?? body.value.category ?? "all";
   const page = Math.max(1, Math.floor(body.value.page ?? 1));
 
-  if (query.length < 1 || query.length > 100) {
+  const country = normalizeCountry(body.value.country);
+  if (body.value.country !== undefined && country === null) {
+    return jsonError(400, "INVALID_REQUEST", "country must be an ISO 3166-1 alpha-2 code");
+  }
+
+  // Browse mode: a country stands in for the query, so an empty query is allowed.
+  const isBrowse = query.length === 0 && country !== null;
+
+  if (!isBrowse && (query.length < 1 || query.length > 100)) {
     return jsonError(400, "INVALID_REQUEST", "query must be between 1 and 100 characters");
   }
 
   if (!["all", "anime", "drama", "movie"].includes(mediaType)) {
     return jsonError(400, "INVALID_REQUEST", "invalid media_type");
+  }
+
+  if (isBrowse && country) {
+    return await respondWithCountryBrowse(adminClient, country, mediaType, page);
   }
 
   const normalizedQuery = query.replace(/\s+/g, " ").trim();
@@ -249,6 +263,110 @@ function getTargetSources(mediaType: MediaTypeFilter): ExternalSource[] {
     default:
       return includePhase2Sources ? ["tmdb", "anilist", "kitsu", "tvmaze"] : ["tmdb", "anilist"];
   }
+}
+
+function normalizeCountry(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(trimmed) ? trimmed : null;
+}
+
+async function createCountryBrowseHash(
+  country: string,
+  mediaType: MediaTypeFilter,
+  page: number
+): Promise<string> {
+  const encoded = new TextEncoder().encode(
+    `${SEARCH_CACHE_VERSION}:browse:tmdb:${mediaType}:${page}:${country}`
+  );
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function respondWithCountryBrowse(
+  adminClient: ReturnType<typeof createClient>,
+  country: string,
+  mediaType: MediaTypeFilter,
+  page: number
+): Promise<Response> {
+  const queryHash = await createCountryBrowseHash(country, mediaType, page);
+  const { data: cacheRow } = await adminClient
+    .from("external_search_cache")
+    .select("response_json")
+    .eq("query_hash", queryHash)
+    .eq("source", "tmdb")
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+
+  const cached = cacheRow ? normalizeSearchCachePayload(cacheRow.response_json) : null;
+  if (cached) {
+    return browseResponse(compactResults(cached.results), country, page, cached.total, cached.hasNextPage, true, []);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const response = await discoverTmdb({ country, mediaType, page, signal: controller.signal });
+    await adminClient.from("external_search_cache").upsert(
+      {
+        query_hash: queryHash,
+        query_text: `browse:${country}`,
+        source: "tmdb",
+        response_json: {
+          results: response.results,
+          total: response.total,
+          hasNextPage: response.hasNextPage
+        },
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      },
+      { onConflict: "query_hash,source" }
+    );
+
+    return browseResponse(
+      compactResults(response.results),
+      country,
+      page,
+      response.total ?? response.results.length,
+      Boolean(response.hasNextPage),
+      false,
+      []
+    );
+  } catch (error) {
+    console.error("country browse failed:", error);
+    return browseResponse([], country, page, 0, false, false, ["tmdb"]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function browseResponse(
+  results: SearchResult[],
+  country: string,
+  page: number,
+  total: number,
+  hasNextPage: boolean,
+  cached: boolean,
+  failedSources: ExternalSource[]
+): Response {
+  const payload: SearchResponse = {
+    results,
+    sources: failedSources.length > 0 ? [] : ["tmdb"],
+    failedSources,
+    cached,
+    query: "",
+    normalizedQuery: `browse:${country}`,
+    total,
+    page,
+    hasNextPage,
+    partial: failedSources.length > 0
+  };
+
+  return new Response(JSON.stringify(payload), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" }
+  });
 }
 
 async function createQueryHash(

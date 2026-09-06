@@ -22,8 +22,8 @@ export const queryKeys = {
     session: ["auth", "session"] as const
   },
   search: {
-    results: (query: string, mediaType: MediaTypeFilter, page: number) =>
-      ["search", query, mediaType, page] as const,
+    results: (query: string, mediaType: MediaTypeFilter, page: number, country = "all") =>
+      ["search", query, mediaType, page, country] as const,
     similar: (anchorKey: string, focus: string, mediaType: MediaTypeFilter, sort: string, filters: string) =>
       ["search", "similar", "hybrid-v1-no-embeddings", anchorKey, focus, mediaType, sort, filters] as const
   },

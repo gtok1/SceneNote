@@ -4,15 +4,23 @@ import { queryKeys } from "@/lib/query";
 import { getExternalContentDetail, searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { mergeSearchPages } from "@/utils/searchPagination";
+import { ALL_COUNTRY_FILTER, isBrowseMode } from "@/utils/countryFilter";
 
-export function useContentSearch(query: string, mediaType: MediaTypeFilter = "all") {
+export function useContentSearch(
+  query: string,
+  mediaType: MediaTypeFilter = "all",
+  country: string = ALL_COUNTRY_FILTER
+) {
   const normalizedQuery = query.trim();
+  const browsing = isBrowseMode(normalizedQuery, country);
   const searchQuery = useInfiniteQuery({
-    queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1),
-    queryFn: ({ pageParam }) => searchContent({ query: normalizedQuery, mediaType, page: pageParam }),
+    queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1, country),
+    queryFn: ({ pageParam }) =>
+      searchContent({ query: normalizedQuery, mediaType, page: pageParam, country }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasNextPage ? lastPage.page + 1 : undefined,
-    enabled: normalizedQuery.length >= 2,
+    // Browse mode has no query to be long enough, the country stands in for it.
+    enabled: browsing || normalizedQuery.length >= 2,
     staleTime: 5 * 60_000
   });
 

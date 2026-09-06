@@ -9,6 +9,7 @@ import { colors, radius, spacing } from "@/constants/theme";
 import type { MediaTypeFilter } from "@/types/content";
 import type { LibraryStatusFilter } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
+import { ALL_COUNTRY_FILTER, COUNTRY_FILTER_OPTIONS } from "@/utils/countryFilter";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 
 const FILTERS: { label: string; value: MediaTypeFilter }[] = [
@@ -33,6 +34,8 @@ interface ContentSearchBarProps {
   genreFilter?: string;
   genreOptions?: string[];
   onGenreFilterChange?: (value: string) => void;
+  countryFilter?: string;
+  onCountryFilterChange?: (value: string) => void;
   statusFilter?: LibraryStatusFilter;
   onStatusFilterChange?: (value: LibraryStatusFilter) => void;
   autoFocus?: boolean;
@@ -53,6 +56,8 @@ export function ContentSearchBar({
   genreFilter = ALL_GENRE_FILTER,
   genreOptions,
   onGenreFilterChange,
+  countryFilter = ALL_COUNTRY_FILTER,
+  onCountryFilterChange,
   statusFilter = "all",
   onStatusFilterChange,
   autoFocus = false,
@@ -64,6 +69,7 @@ export function ContentSearchBar({
     mediaTypeFilter !== "all",
     statusFilter !== "all",
     genreFilter !== ALL_GENRE_FILTER,
+    countryFilter !== ALL_COUNTRY_FILTER,
     Boolean(year),
     sortOrder !== "latest"
   ].filter(Boolean).length;
@@ -88,6 +94,10 @@ export function ContentSearchBar({
   };
   const changeGenreFilter = (nextGenreFilter: string) => {
     onGenreFilterChange?.(nextGenreFilter);
+  };
+  const changeCountryFilter = (nextCountryFilter: string) => {
+    onCountryFilterChange?.(nextCountryFilter);
+    submitAfterSelection();
   };
 
   return (
@@ -160,6 +170,28 @@ export function ContentSearchBar({
               );
             })}
           </View>
+          {onCountryFilterChange ? (
+            <View>
+              <Text style={styles.groupLabel}>나라</Text>
+              <View style={styles.filters}>
+                {[{ code: ALL_COUNTRY_FILTER, label: "전체" }, ...COUNTRY_FILTER_OPTIONS].map((option) => {
+                  const selected = option.code === countryFilter;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      key={option.code}
+                      onPress={() => changeCountryFilter(option.code)}
+                      style={[styles.filter, selected && styles.filterSelected]}
+                    >
+                      <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
           {onStatusFilterChange ? (
             <View style={styles.filters}>
               {STATUS_FILTERS.map((filter) => {
@@ -284,6 +316,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     zIndex: 1000
+  },
+  groupLabel: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "900",
+    marginBottom: spacing.xs
   },
   filters: {
     flexDirection: "row",

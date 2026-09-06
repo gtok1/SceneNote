@@ -28,12 +28,17 @@ import {
 } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, useFavoritePeople } from "@/hooks/usePeople";
 import { useWatchProviders } from "@/hooks/useWatchProviders";
+import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
+import {
+  describeWatchCountSaveState,
+  resolveWatchCountSaveState
+} from "@/utils/watchCountInput";
 
 const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
@@ -105,6 +110,7 @@ export default function ContentDetailScreen() {
   const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId);
   const seasons = useSeasons(libraryItem?.content_id);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
+  const addToast = useAppUIStore((state) => state.addToast);
   const updateWatchCount = useUpdateLibraryWatchCount();
   const updateManualProgress = useUpdateLibraryManualProgress();
   const openLibraryList = () => {
@@ -284,7 +290,10 @@ export default function ContentDetailScreen() {
     updateWatchCount.mutate(
       { libraryItemId: libraryItem.library_item_id, watchCount },
       {
-        onError: (error) => Alert.alert("본 횟수 저장 실패", error.message)
+        // Alert.alert is an empty function on react-native-web, so failures here used to
+        // be completely invisible on the web build. Toasts render on every platform.
+        onError: (error) => addToast(error.message || "본 횟수를 저장하지 못했습니다.", "error"),
+        onSuccess: () => addToast(`본 횟수를 ${watchCount}회로 저장했어요.`, "success")
       }
     );
   };
@@ -365,6 +374,7 @@ export default function ContentDetailScreen() {
 
         {libraryItem ? (
           <WatchCountInput
+            isCompleted={selectedStatuses.includes("completed")}
             isSaving={updateWatchCount.isPending}
             onSave={saveWatchCount}
             watchCount={libraryItem.watch_count}
@@ -599,23 +609,28 @@ function areSameWatchStatuses(left: WatchStatus[], right: WatchStatus[]): boolea
 
 function WatchCountInput({
   watchCount,
+  isCompleted,
   isSaving,
   onSave
 }: {
   watchCount: number;
+  isCompleted: boolean;
   isSaving: boolean;
   onSave: (watchCount: number) => void;
 }) {
   const [value, setValue] = useState(String(watchCount));
-  const parsedCount = Number(value || "0");
-  const normalizedCount = Number.isFinite(parsedCount)
-    ? Math.max(0, Math.floor(parsedCount))
-    : 0;
-  const unchanged = normalizedCount === watchCount;
+  const saveState = resolveWatchCountSaveState(value, watchCount, isCompleted);
+  const blockedReason = describeWatchCountSaveState(saveState);
+  const canSave = saveState.kind === "savable";
 
   useEffect(() => {
     setValue(String(watchCount));
   }, [watchCount]);
+
+  const submit = () => {
+    if (saveState.kind !== "savable") return;
+    onSave(saveState.value);
+  };
 
   return (
     <View style={styles.progressPanel}>
@@ -632,7 +647,7 @@ function WatchCountInput({
           inputMode="numeric"
           keyboardType="number-pad"
           onChangeText={(text) => setValue(text.replace(/\D/g, ""))}
-          onSubmitEditing={() => onSave(normalizedCount)}
+          onSubmitEditing={submit}
           selectTextOnFocus
           style={styles.progressInput}
           value={value}
@@ -640,16 +655,19 @@ function WatchCountInput({
         <Text style={styles.progressDivider}>회</Text>
         <Pressable
           accessibilityRole="button"
-          disabled={isSaving || unchanged}
-          onPress={() => onSave(normalizedCount)}
+          disabled={isSaving || !canSave}
+          onPress={submit}
           style={[
             styles.progressSaveButton,
-            isSaving || unchanged ? styles.progressSaveButtonDisabled : null
+            isSaving || !canSave ? styles.progressSaveButtonDisabled : null
           ]}
         >
           <Text style={styles.progressSaveText}>{isSaving ? "저장 중" : "저장"}</Text>
         </Pressable>
       </View>
+      {blockedReason ? (
+        <Text style={styles.progressHint}>{blockedReason}</Text>
+      ) : null}
     </View>
   );
 }
@@ -750,6 +768,12 @@ const styles = StyleSheet.create({
   },
   progressSaveButtonDisabled: {
     opacity: 0.5
+  },
+  progressHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: spacing.xs
   },
   progressSaveText: {
     color: colors.surface,

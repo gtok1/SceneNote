@@ -6,7 +6,8 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
-import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel, createLibraryWatchStateLabel } from "@/utils/contentMetaDisplay";
+import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 
 interface SearchResultGalleryCardProps {
   result: SearchResult;
@@ -14,7 +15,7 @@ interface SearchResultGalleryCardProps {
   onAddToLibrary?: () => void;
   addLabel?: string;
   isAddDisabled?: boolean;
-  libraryItem?: LibraryListItem | null;
+  libraryItems?: readonly LibraryListItem[];
   recommendationReason?: string | null;
   onFindSimilar?: () => void;
 }
@@ -25,15 +26,15 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   onAddToLibrary,
   addLabel = "추가",
   isAddDisabled = false,
-  libraryItem = null,
+  libraryItems = [],
   recommendationReason,
   onFindSimilar
 }: SearchResultGalleryCardProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
   const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
-  const watchCountLabel = libraryItem
-    ? createWatchCountLabel(libraryItem.watch_count, { includeZero: true })
-    : null;
+  const watchCountLabel = createLibraryWatchStateLabel(
+    matchLibraryItemForSeason(libraryItems, result.season_number)
+  );
 
   return (
     <View style={styles.cell}>

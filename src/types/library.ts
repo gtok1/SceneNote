@@ -62,6 +62,8 @@ export interface LibraryListItem {
   manual_progress_available: boolean;
   genres: string[];
   watch_count: number;
+  /** null이면 작품 전체 등록. 1 이상이면 해당 시즌만 등록 (migration 0021). */
+  season_number: number | null;
   pin_count?: number;
 }
 

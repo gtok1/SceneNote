@@ -7,6 +7,7 @@ import {
   createPersonCreditKey,
   dedupeValidPersonCredits,
   getPersonWorkStatus,
+  matchesPersonCreditQuery,
   parsePersonCreditFilter
 } from "./personCredits";
 
@@ -43,4 +44,26 @@ test("작품활동 필터 query parameter를 안전하게 해석한다", () => {
   assert.equal(parsePersonCreditFilter("watched"), "watched");
   assert.equal(parsePersonCreditFilter(["library", "all"]), "library");
   assert.equal(parsePersonCreditFilter("unknown"), "all");
+});
+
+test("빈 검색어는 모든 작품을 통과시킨다", () => {
+  assert.equal(matchesPersonCreditQuery(credit, ""), true);
+  assert.equal(matchesPersonCreditQuery(credit, "   "), true);
+});
+
+test("제목·원제·배역명 어느 쪽으로도 대소문자·공백 무관하게 검색된다", () => {
+  assert.equal(matchesPersonCreditQuery(credit, "작품"), true);
+  assert.equal(matchesPersonCreditQuery(credit, "WORK"), true);
+  assert.equal(matchesPersonCreditQuery(credit, "  work  "), true);
+  assert.equal(matchesPersonCreditQuery(credit, "주연"), true);
+});
+
+test("일치하지 않는 검색어는 걸러낸다", () => {
+  assert.equal(matchesPersonCreditQuery(credit, "무관한작품"), false);
+});
+
+test("원제나 배역명이 없어도 오류 없이 처리한다", () => {
+  const noExtras = { ...credit, original_title: null, role: null };
+  assert.equal(matchesPersonCreditQuery(noExtras, "작품"), true);
+  assert.equal(matchesPersonCreditQuery(noExtras, "work"), false);
 });

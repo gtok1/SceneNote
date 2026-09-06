@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View
 } from "react-native";
@@ -34,6 +35,7 @@ import {
   createPersonCreditKey,
   dedupeValidPersonCredits,
   getPersonWorkStatus,
+  matchesPersonCreditQuery,
   parsePersonCreditFilter,
   personCreditToSearchResult,
   type PersonCreditFilter,
@@ -66,6 +68,7 @@ export default function PersonDetailScreen() {
   const user = useAuthStore((state) => state.user);
   const addToast = useAppUIStore((state) => state.addToast);
   const [creditPage, setCreditPage] = useState(1);
+  const [creditSearchQuery, setCreditSearchQuery] = useState("");
   const [selectedCredit, setSelectedCredit] = useState<PersonCredit | null>(null);
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(() => new Set());
   const [optimisticStatuses, setOptimisticStatuses] = useState<
@@ -110,9 +113,9 @@ export default function PersonDetailScreen() {
   const watchedCount = credits.filter((credit) => statusForCredit(credit) === "completed").length;
   const filteredCredits = credits.filter((credit) => {
     const status = statusForCredit(credit);
-    if (activeFilter === "watched") return status === "completed";
-    if (activeFilter === "library") return status !== null;
-    return true;
+    if (activeFilter === "watched" && status !== "completed") return false;
+    if (activeFilter === "library" && status === null) return false;
+    return matchesPersonCreditQuery(credit, creditSearchQuery);
   });
   const totalCreditPages = Math.max(1, Math.ceil(filteredCredits.length / CREDIT_PAGE_SIZE));
   const safeCreditPage = Math.min(creditPage, totalCreditPages);
@@ -143,6 +146,11 @@ export default function PersonDetailScreen() {
   const setFilter = (filter: PersonCreditFilter) => {
     setCreditPage(1);
     router.setParams({ filter });
+  };
+
+  const changeCreditSearchQuery = (value: string) => {
+    setCreditPage(1);
+    setCreditSearchQuery(value);
   };
 
   const setOptimisticStatus = (key: string, status: PersonWorkStatus | null | undefined) => {
@@ -288,12 +296,12 @@ export default function PersonDetailScreen() {
   };
 
   if (!parsed.source || !parsed.externalId || !parsed.category) {
-    return <EmptyState title="인물 정보를 찾을 수 없습니다" />;
+    return <EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" />;
   }
   if (detail.isLoading) return <LoadingSkeleton count={4} />;
   if (detail.isError)
     return <ErrorState message={detail.error.message} onRetry={() => detail.refetch()} />;
-  if (!detail.data) return <EmptyState title="인물 정보를 찾을 수 없습니다" />;
+  if (!detail.data) return <EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" />;
 
   const person = detail.data;
   const watchedPercent = credits.length ? Math.round((watchedCount / credits.length) * 100) : 0;
@@ -303,6 +311,15 @@ export default function PersonDetailScreen() {
     <>
       <ScrollView contentContainerStyle={styles.page}>
         <View style={styles.container}>
+          <Pressable
+            accessibilityLabel="뒤로 가기"
+            accessibilityRole="button"
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Ionicons color={colors.text} name="chevron-back" size={22} />
+          </Pressable>
+
           <View style={[styles.hero, isWide ? styles.heroWide : null]}>
             <View style={[styles.identity, isWide ? styles.identityWide : null]}>
               <Image
@@ -401,6 +418,28 @@ export default function PersonDetailScreen() {
               ) : null}
             </View>
 
+            <View style={styles.creditSearchRow}>
+              <Ionicons color={colors.textMuted} name="search" size={16} />
+              <TextInput
+                accessibilityLabel="작품 활동 검색"
+                onChangeText={changeCreditSearchQuery}
+                placeholder="작품명, 원제, 배역명으로 찾기"
+                placeholderTextColor={colors.textMuted}
+                style={styles.creditSearchInput}
+                value={creditSearchQuery}
+              />
+              {creditSearchQuery ? (
+                <Pressable
+                  accessibilityLabel="작품 활동 검색어 지우기"
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => changeCreditSearchQuery("")}
+                >
+                  <Ionicons color={colors.textMuted} name="close-circle" size={18} />
+                </Pressable>
+              ) : null}
+            </View>
+
             <View accessibilityRole="tablist" style={styles.filters}>
               {FILTER_OPTIONS.map((option) => {
                 const selected = activeFilter === option.value;
@@ -441,12 +480,17 @@ export default function PersonDetailScreen() {
             ) : (
               <View style={styles.emptyFilter}>
                 <EmptyState
-                  {...(activeFilter === "all"
+                  {...(activeFilter === "all" && !creditSearchQuery
                     ? {}
-                    : { actionLabel: "전체 작품 보기", onAction: () => setFilter("all") })}
-                  {...(activeFilter === "watched"
-                    ? { description: "봤어요로 표시한 작품이 아직 없습니다." }
-                    : {})}
+                    : {
+                        actionLabel: creditSearchQuery ? "검색어 지우기" : "전체 작품 보기",
+                        onAction: creditSearchQuery ? () => changeCreditSearchQuery("") : () => setFilter("all")
+                      })}
+                  {...(creditSearchQuery
+                    ? { description: `'${creditSearchQuery}'와 일치하는 작품을 찾지 못했어요.` }
+                    : activeFilter === "watched"
+                      ? { description: "봤어요로 표시한 작품이 아직 없습니다." }
+                      : {})}
                   title={credits.length ? "조건에 맞는 작품이 없어요" : "작품 활동 정보가 없습니다"}
                 />
               </View>
@@ -814,6 +858,16 @@ const styles = StyleSheet.create({
     paddingBottom: 112
   },
   container: { alignSelf: "center", gap: spacing.lg, maxWidth: 1120, width: "100%" },
+  backButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
   hero: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -931,6 +985,24 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs
   },
   pageText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
+  creditSearchRow: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  creditSearchInput: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    padding: 0
+  },
   filters: {
     flexDirection: "row",
     gap: spacing.xs,

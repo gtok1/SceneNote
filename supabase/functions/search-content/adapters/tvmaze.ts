@@ -4,7 +4,6 @@
 import { cleanText } from "./normalize.ts";
 import type { AdapterSearchParams, AdapterSearchResponse, ContentType, SearchResult } from "./types.ts";
 
-const TVMAZE_API_URL = Deno.env.get("TVMAZE_API_URL") ?? "https://api.tvmaze.com";
 
 interface TvmazeSearchItem {
   show?: {
@@ -23,6 +22,8 @@ interface TvmazeSearchItem {
       thetvdb?: number | null;
       imdb?: string | null;
     };
+    network?: { country?: { code?: string | null } | null } | null;
+    webChannel?: { country?: { code?: string | null } | null } | null;
   };
 }
 
@@ -36,7 +37,10 @@ export async function searchTvmaze({
   }
 
   // TODO: TVmaze is show-focused and not localized for Korean/Japanese titles.
-  const url = new URL(`${TVMAZE_API_URL}/search/shows`);
+  // Read lazily (not at module scope) so this file can be imported under Node's test
+  // runner, which has no `Deno` global.
+  const tvmazeApiUrl = Deno.env.get("TVMAZE_API_URL") ?? "https://api.tvmaze.com";
+  const url = new URL(`${tvmazeApiUrl}/search/shows`);
   url.searchParams.set("q", query);
 
   const response = await fetch(url, { signal });
@@ -55,7 +59,7 @@ export async function searchTvmaze({
   };
 }
 
-function normalizeTvmazeItem(item: TvmazeSearchItem): SearchResult | null {
+export function normalizeTvmazeItem(item: TvmazeSearchItem): SearchResult | null {
   const show = item.show;
   if (!show?.id || !show.name) return null;
 
@@ -71,8 +75,14 @@ function normalizeTvmazeItem(item: TvmazeSearchItem): SearchResult | null {
     air_date: dateOnly(show.premiered),
     has_seasons: true,
     episode_count: null,
-    genres: Array.from(new Set(show.genres ?? []))
+    genres: Array.from(new Set(show.genres ?? [])),
+    origin_country: originCountryFromTvmazeShow(show)
   };
+}
+
+function originCountryFromTvmazeShow(show: NonNullable<TvmazeSearchItem["show"]>): string[] {
+  const code = show.network?.country?.code ?? show.webChannel?.country?.code;
+  return code ? [code] : [];
 }
 
 function dateOnly(value: unknown): string | null {

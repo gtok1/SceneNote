@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { ALL_COUNTRY_FILTER } from "@/utils/countryFilter";
 import type {
   MediaTypeFilter,
   CastMember,
@@ -11,6 +12,8 @@ interface SearchContentParams {
   query: string;
   mediaType?: MediaTypeFilter;
   page?: number;
+  /** ISO 3166-1 alpha-2. With an empty query this browses that country instead. */
+  country?: string;
 }
 
 interface SearchContentFunctionResponse {
@@ -31,10 +34,12 @@ interface SearchContentFunctionResponse {
 export async function searchContent({
   query,
   mediaType = "all",
-  page = 1
+  page = 1,
+  country
 }: SearchContentParams): Promise<SearchContentResponse> {
   const normalizedQuery = query.trim();
-  if (!normalizedQuery) {
+  const browseCountry = !normalizedQuery && country && country !== ALL_COUNTRY_FILTER ? country : null;
+  if (!normalizedQuery && !browseCountry) {
     return {
       results: [],
       sources: [],
@@ -55,7 +60,8 @@ export async function searchContent({
       body: {
         query: normalizedQuery,
         media_type: mediaType,
-        page
+        page,
+        ...(country && country !== ALL_COUNTRY_FILTER ? { country } : {})
       }
     }
   );

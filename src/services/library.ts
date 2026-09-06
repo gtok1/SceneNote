@@ -9,6 +9,7 @@ import type {
   WatchStatus
 } from "@/types/library";
 import { extractGenreNames, type ContentGenreJoin } from "@/utils/genre";
+import { createSeasonDisplayTitle } from "@/utils/seasonDisplay";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
   createSeasonOffsetsByNumber,
@@ -23,6 +24,7 @@ interface RawLibraryRow {
   status: WatchStatus;
   status_flags?: WatchStatus[] | null;
   watch_count?: number | null;
+  season_number?: number | null;
   first_watched_at?: string | null;
   last_watched_at?: string | null;
   manual_watched_season_number?: number | null;
@@ -56,6 +58,8 @@ interface LibrarySeasonRow {
   content_id: string;
   season_number: number;
   episode_count: number | null;
+  title: string | null;
+  air_year: number | null;
 }
 
 interface LibraryProgressRow {
@@ -81,7 +85,7 @@ interface EpisodeProgressSummary {
 }
 
 const LIBRARY_ITEM_SELECT =
-  "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at," +
+  "id,user_id,content_id,status,status_flags,watch_count,season_number,first_watched_at,last_watched_at," +
   "manual_watched_season_number,manual_watched_episode_number,manual_progress_updated_at," +
   "added_at,updated_at,contents(*,content_genres(genres(name)))";
 
@@ -151,7 +155,8 @@ export async function getLibraryItems(status: LibraryStatusFilter): Promise<Libr
       season_episode_counts: [],
       manual_progress_available: hasManualProgressColumns(row),
       genres: extractGenreNames(row.contents?.content_genres),
-      watch_count: row.watch_count ?? 0
+      watch_count: row.watch_count ?? 0,
+      season_number: row.season_number ?? null
     }))
     .filter((item) => item.statuses.length > 0);
 
@@ -201,7 +206,9 @@ export async function addContentToLibrary(
         external_id: result.external_id,
         media_type: result.content_type === "movie" ? "movie" : "tv",
         watch_status: functionPrimaryStatus,
-        watch_statuses: fallbackFunctionStatuses
+        watch_statuses: fallbackFunctionStatuses,
+        // Season cards register that season only; whole-work cards omit it entirely.
+        ...(typeof result.season_number === "number" ? { season_number: result.season_number } : {})
       }
   });
 
@@ -275,12 +282,19 @@ export async function updateLibraryWatchCount(
   watchCount: number
 ): Promise<void> {
   const normalizedCount = Math.max(0, Math.floor(watchCount));
-  const { error } = await supabase
+  // `.select()` matters: an update that matches no row (revoked session, RLS, deleted
+  // item) resolves with error === null, so without it a write that never happened is
+  // reported as success.
+  const { data, error } = await supabase
     .from("user_library_items")
     .update({ watch_count: normalizedCount })
-    .eq("id", libraryItemId);
+    .eq("id", libraryItemId)
+    .select("id");
 
   if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("본 횟수를 저장하지 못했습니다. 로그인 상태를 확인해 주세요.");
+  }
 }
 
 export async function updateLibraryManualProgress(
@@ -408,7 +422,8 @@ export async function getLibraryStatusByExternalId(
     season_episode_counts: [],
     manual_progress_available: hasManualProgressColumns(row),
     genres: extractGenreNames(row.contents?.content_genres),
-    watch_count: row.watch_count ?? 0
+    watch_count: row.watch_count ?? 0,
+    season_number: row.season_number ?? null
   };
 
   const [enrichedItem] = await enrichLibraryMetadata([item]);
@@ -441,7 +456,7 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       .in("content_id", contentIds),
     supabase
       .from("seasons")
-      .select("id,content_id,season_number,episode_count")
+      .select("id,content_id,season_number,episode_count,title,air_year")
       .in("content_id", contentIds),
     supabase
       .from("user_episode_progress")
@@ -471,6 +486,12 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
   );
   const seasonOffsetsBySeasonId = createSeasonOffsets((seasonsResult.data ?? []) as LibrarySeasonRow[]);
   const seasonCountsByContentId = new Map<string, SeasonEpisodeCount[]>();
+  const seasonByContentAndNumber = new Map<string, LibrarySeasonRow>(
+    ((seasonsResult.data ?? []) as LibrarySeasonRow[]).map((season) => [
+      `${season.content_id}:${season.season_number}`,
+      season
+    ])
+  );
 
   for (const season of (seasonsResult.data ?? []) as LibrarySeasonRow[]) {
     const seasonCounts = seasonCountsByContentId.get(season.content_id) ?? [];
@@ -514,16 +535,28 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       manualWatchedThrough: manualAbsolute
     });
 
+    // A season-scoped row shares its content_id (and so its title/air_date) with the
+    // whole-work row and any other season of the same show. Without this, two rows for
+    // the same VIVANT show render as identical "VIVANT · 2023.07" cards. The `seasons`
+    // table already carries per-season title/episode_count/air_year (no air_date there).
+    // See docs/17_season_library_tracking_spec.md D-5.
+    const matchedSeason = typeof item.season_number === "number"
+      ? seasonByContentAndNumber.get(`${item.content_id}:${item.season_number}`)
+      : undefined;
+    const seasonEpisodeCount = matchedSeason?.episode_count ?? null;
+
     return {
       ...item,
-      air_date: item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null,
+      title_primary: createSeasonDisplayTitle(item.title_primary, item.season_number, matchedSeason?.title ?? null),
+      air_date: matchedSeason ? null : item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null,
+      air_year: matchedSeason?.air_year ?? item.air_year,
       end_date:
         item.end_date ??
         lastAirDateByContentId.get(item.content_id) ??
         (item.content_type === "movie" ? (item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null) : null),
       rating: review?.rating ?? null,
       one_line_review: review?.one_line_review ?? null,
-      episode_count: episodeCount,
+      episode_count: matchedSeason ? seasonEpisodeCount : episodeCount,
       watched_episode_count: watchedEpisodeCount,
       derived_watched_through: progress?.maxWatchedEpisodeNumber ?? null,
       next_episode_number: resolved.nextEpisodeNumber,

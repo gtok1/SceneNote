@@ -6,6 +6,7 @@ import {
   applySeasonDisplayTitle,
   dedupeAniListSearchMediaItems,
   expandDirectSeasonRelations,
+  normalizeAniListItem,
   resolveSeasonFromRelations,
   selectTmdbAnimeSearchTranslation,
   type AniListMedia
@@ -203,5 +204,21 @@ describe("applySeasonDisplayTitle", () => {
       applySeasonDisplayTitle(result, media(194829, "TV", 2026), media(179955, "TV", 2025), 2),
       result
     );
+  });
+});
+
+describe("origin_country from countryOfOrigin", () => {
+  it("carries AniList's countryOfOrigin through as an ISO alpha-2 array", () => {
+    const item: AniListMedia = {
+      ...media(179955, "TV", 2025),
+      countryOfOrigin: "JP"
+    };
+    const result = normalizeAniListItem(item);
+    assert.deepEqual(result.origin_country, ["JP"]);
+  });
+
+  it("returns an empty array when AniList has no countryOfOrigin", () => {
+    const result = normalizeAniListItem(media(179955, "TV", 2025));
+    assert.deepEqual(result.origin_country, []);
   });
 });

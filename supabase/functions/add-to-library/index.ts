@@ -12,6 +12,8 @@ interface AddToLibraryRequest {
   watch_status?: WatchStatus;
   watch_statuses?: WatchStatus[];
   media_type?: string;
+  /** 1 이상이면 해당 시즌만 등록. 생략하면 작품 전체 등록 (migration 0021). */
+  season_number?: number;
 }
 
 const WATCH_STATUS_OPTIONS: WatchStatus[] = [
@@ -66,6 +68,16 @@ Deno.serve(async (req: Request) => {
     return jsonError(400, "INVALID_REQUEST", "external_id is required");
   }
 
+  const rawSeasonNumber = body.value.season_number;
+  if (
+    rawSeasonNumber !== undefined &&
+    (!Number.isInteger(rawSeasonNumber) || rawSeasonNumber < 1 || rawSeasonNumber > 999)
+  ) {
+    return jsonError(400, "INVALID_REQUEST", "season_number must be an integer between 1 and 999");
+  }
+  // null means "the whole work", matching the season_number column's meaning.
+  const seasonNumber: number | null = rawSeasonNumber ?? null;
+
   if (!WATCH_STATUS_OPTIONS.includes(watchStatus)) {
     return jsonError(400, "INVALID_REQUEST", "watch_status is invalid");
   }
@@ -93,6 +105,7 @@ Deno.serve(async (req: Request) => {
       .select("id, status, status_flags")
       .eq("user_id", userId)
       .eq("content_id", existingExternalId.content_id)
+      .filter("season_number", seasonNumber === null ? "is" : "eq", seasonNumber === null ? "null" : seasonNumber)
       .maybeSingle();
 
     if (libraryLookupError) {
@@ -227,7 +240,8 @@ Deno.serve(async (req: Request) => {
       content_id: contentId,
       status: watchStatus,
       status_flags: watchStatuses,
-      watch_count: initialWatchCount
+      watch_count: initialWatchCount,
+      season_number: seasonNumber
     })
     .select("id, status, status_flags, watch_count")
     .single();

@@ -38,4 +38,23 @@ describe("search pagination", () => {
       ["1", "2", "3"]
     );
   });
+
+  it("keeps the earlier page's copy when the same work reappears on a later page", () => {
+    // The server only enriches a candidate's season/air-date within the top 3 of each
+    // page it's returned on. A generic query can legitimately return the same work again
+    // deep in a later page, where it lands outside that page's top 3 and comes back
+    // un-enriched. The earlier (enriched) copy must win, not whichever page loaded last.
+    const enriched = { ...result("218038"), air_year: 2026, air_date: "2026-07-19" };
+    const staleDuplicate = { ...result("218038"), air_year: 2023, air_date: "2023-07-16" };
+
+    const merged = mergeSearchPages([
+      page(1, [enriched], true),
+      page(5, [staleDuplicate], false)
+    ]);
+
+    assert.deepEqual(
+      merged.find((item) => item.external_id === "218038"),
+      enriched
+    );
+  });
 });

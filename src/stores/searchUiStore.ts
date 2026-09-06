@@ -6,6 +6,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { MediaTypeFilter } from "@/types/content";
 import type { LibraryStatusFilter } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
+import { ALL_COUNTRY_FILTER } from "@/utils/countryFilter";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 
 export type SearchViewMode = "detail" | "gallery";
@@ -15,6 +16,7 @@ interface SearchUiState {
   mediaType: MediaTypeFilter;
   statusFilter: LibraryStatusFilter;
   genreFilter: string;
+  countryFilter: string;
   year: string;
   sortOrder: DateSortOrder;
   viewMode: SearchViewMode;
@@ -22,6 +24,7 @@ interface SearchUiState {
   setMediaType: (mediaType: MediaTypeFilter) => void;
   setStatusFilter: (statusFilter: LibraryStatusFilter) => void;
   setGenreFilter: (genreFilter: string) => void;
+  setCountryFilter: (countryFilter: string) => void;
   setYear: (year: string) => void;
   setSortOrder: (sortOrder: DateSortOrder) => void;
   setViewMode: (viewMode: SearchViewMode) => void;
@@ -42,6 +45,7 @@ export const useSearchUiStore = create<SearchUiState>()(
       mediaType: "all",
       statusFilter: "all",
       genreFilter: ALL_GENRE_FILTER,
+      countryFilter: ALL_COUNTRY_FILTER,
       year: "",
       sortOrder: "latest",
       viewMode: "detail",
@@ -49,6 +53,7 @@ export const useSearchUiStore = create<SearchUiState>()(
       setMediaType: (mediaType) => set({ mediaType }),
       setStatusFilter: (statusFilter) => set({ statusFilter }),
       setGenreFilter: (genreFilter) => set({ genreFilter }),
+      setCountryFilter: (countryFilter) => set({ countryFilter }),
       setYear: (year) => set({ year: year.replace(/\D/g, "").slice(0, 4) }),
       setSortOrder: (sortOrder) => set({ sortOrder }),
       setViewMode: (viewMode) => set({ viewMode }),
@@ -58,6 +63,7 @@ export const useSearchUiStore = create<SearchUiState>()(
           mediaType: "all",
           statusFilter: "all",
           genreFilter: ALL_GENRE_FILTER,
+          countryFilter: ALL_COUNTRY_FILTER,
           year: "",
           sortOrder: "latest"
         })

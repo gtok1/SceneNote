@@ -17,6 +17,7 @@ function createAniListMediaFields(relationDepth: number): string {
     episodes
     format
     genres
+    countryOfOrigin
     ${relationDepth > 0 ? `
       relations {
         edges {
@@ -63,6 +64,7 @@ export interface AniListMedia {
   episodes?: number | null;
   format?: string | null;
   genres?: string[] | null;
+  countryOfOrigin?: string | null;
   relations?: {
     edges?: {
       relationType?: string | null;
@@ -369,7 +371,7 @@ export function addKoreanSearchAlias(
   ];
 }
 
-function normalizeAniListItem(
+export function normalizeAniListItem(
   item: AniListMedia,
   seasonContext?: { base: AniListMedia; seasonNumber: number }
 ): SearchResult {
@@ -389,6 +391,7 @@ function normalizeAniListItem(
     has_seasons: item.format !== "MOVIE",
     episode_count: item.episodes ?? null,
     genres: Array.from(new Set(item.genres ?? [])),
+    origin_country: item.countryOfOrigin ? [item.countryOfOrigin] : [],
     match_titles: Array.from(new Set([...(item.synonyms ?? []), synthesizedMatchTitle].filter((title): title is string => Boolean(title)))),
     matched_via: seasonContext ? "season_relation" : "direct",
     season_number: seasonContext?.seasonNumber,

@@ -19,6 +19,10 @@ export interface SearchResult {
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
+  /** ISO 3166-1 alpha-2 codes, from TMDB `origin_country`. */
+  origin_country?: string[];
+  /** 시즌별로 펼쳐진 카드일 때만 존재. 작품 전체 카드면 undefined. */
+  season_number?: number;
   duplicate_hint?: boolean;
   matched_people?: string[];
 }

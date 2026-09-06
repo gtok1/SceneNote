@@ -30,10 +30,13 @@ import {
 } from "../supabase/functions/_shared/recommendationThemes";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useSearchUiStore } from "@/stores/searchUiStore";
+import { useSearchHistoryStore } from "@/stores/searchHistoryStore";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import type { PersonSearchResult } from "@/types/people";
 import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
+import { isBrowseMode, matchesCountryFilter } from "@/utils/countryFilter";
+import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 import { matchesGenreFilter } from "@/utils/genre";
 import { shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
@@ -54,6 +57,8 @@ export default function SearchScreen() {
   const statusFilter = useSearchUiStore((state) => state.statusFilter);
   const setStatusFilter = useSearchUiStore((state) => state.setStatusFilter);
   const genreFilter = useSearchUiStore((state) => state.genreFilter);
+  const countryFilter = useSearchUiStore((state) => state.countryFilter);
+  const setCountryFilter = useSearchUiStore((state) => state.setCountryFilter);
   const setGenreFilter = useSearchUiStore((state) => state.setGenreFilter);
   const year = useSearchUiStore((state) => state.year);
   const setYear = useSearchUiStore((state) => state.setYear);
@@ -61,7 +66,7 @@ export default function SearchScreen() {
   const setSortOrder = useSearchUiStore((state) => state.setSortOrder);
   const viewMode = useSearchUiStore((state) => state.viewMode);
   const setViewMode = useSearchUiStore((state) => state.setViewMode);
-  const search = useContentSearch(query, mediaType);
+  const search = useContentSearch(query, mediaType, countryFilter);
   const personSearch = usePersonContentSearch(query, "all");
   const library = useLibrary("all");
   const personalizedRecommendations = usePersonalizedRecommendations(
@@ -107,12 +112,16 @@ export default function SearchScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const yearFilter = normalizeYearFilter(year);
+  // A work can now hold several rows (one per registered season plus a legacy whole-work
+  // row), so each key maps to every matching row rather than a single one.
   const libraryItemsByExternalKey = useMemo(() => {
-    return new Map(
-      (library.data ?? [])
-        .filter((item) => item.source_api !== "manual")
-        .map((item) => [`${item.source_api}:${item.source_id}`, item])
-    );
+    const byKey = new Map<string, LibraryListItem[]>();
+    for (const item of library.data ?? []) {
+      if (item.source_api === "manual") continue;
+      const key = `${item.source_api}:${item.source_id}`;
+      byKey.set(key, [...(byKey.get(key) ?? []), item]);
+    }
+    return byKey;
   }, [library.data]);
   const baseResults = useMemo(
     () =>
@@ -137,8 +146,15 @@ export default function SearchScreen() {
     [baseResults]
   );
   const activeResults = useMemo(
-    () => baseResults.filter((result) => matchesGenreFilter(result.genres, genreFilter)),
-    [baseResults, genreFilter]
+    () =>
+      baseResults.filter(
+        (result) =>
+          matchesGenreFilter(result.genres, genreFilter) &&
+          // Browse mode already filtered server-side; person-search rows carry no country.
+          (isBrowseMode(query, countryFilter) ||
+            matchesCountryFilter(result.origin_country, countryFilter))
+      ),
+    [baseResults, countryFilter, genreFilter, query]
   );
   const isSimilarityMode = similarIntent !== null;
   const isLoading = isSimilarityMode ? isResolvingAnchor || similarSearch.isLoading : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
@@ -182,12 +198,22 @@ export default function SearchScreen() {
     [activeRecommendations]
   );
   const displayedAsGallery = isGallery;
-  const refetch = () => {
-    if (!hasSearchQuery) return;
-    const intent = parseSearchIntent(query);
+  const searchHistory = useSearchHistoryStore((state) => state.queries);
+  const addSearchHistoryQuery = useSearchHistoryStore((state) => state.addQuery);
+  const removeSearchHistoryQuery = useSearchHistoryStore((state) => state.removeQuery);
+  const clearSearchHistory = useSearchHistoryStore((state) => state.clear);
+  const runSearch = (value: string) => {
+    if (value.trim().length < 2) return;
+    const intent = parseSearchIntent(value);
     if (intent.mode === "similarity") { void resolveAndStartSimilarity(intent); return; }
+    addSearchHistoryQuery(value);
     setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null);
     void search.refetch(); void personSearch.refetch();
+  };
+  const refetch = () => runSearch(query);
+  const searchFromHistory = (historyQuery: string) => {
+    setQuery(historyQuery);
+    runSearch(historyQuery);
   };
 
   const resolveAndStartSimilarity = async (intent: Extract<ParsedSearchIntent, { mode: "similarity" }>) => {
@@ -446,12 +472,46 @@ export default function SearchScreen() {
         onSubmit={refetch}
         onYearChange={setYear}
         sortOrder={sortOrder}
+        countryFilter={countryFilter}
+        onCountryFilterChange={setCountryFilter}
         genreFilter={genreFilter}
         genreOptions={genreOptions}
         statusFilter={statusFilter}
         value={query}
         year={year}
       />
+
+      {!isSimilarityMode && !hasSearchQuery && searchHistory.length > 0 ? (
+        <View style={styles.historySection}>
+          <View style={styles.historyHeaderRow}>
+            <Text style={styles.sectionTitle}>최근 검색어</Text>
+            <Pressable accessibilityRole="button" onPress={clearSearchHistory}>
+              <Text style={styles.historyClearText}>전체 삭제</Text>
+            </Pressable>
+          </View>
+          <View style={styles.historyChipList}>
+            {searchHistory.map((historyQuery) => (
+              <View key={historyQuery} style={styles.historyChip}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => searchFromHistory(historyQuery)}
+                  style={styles.historyChipLabel}
+                >
+                  <Text numberOfLines={1} style={styles.historyChipText}>{historyQuery}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`${historyQuery} 검색 기록 삭제`}
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => removeSearchHistoryQuery(historyQuery)}
+                >
+                  <Ionicons color={colors.textMuted} name="close" size={14} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       {!isSimilarityMode && hasSearchQuery && personSearch.data?.people.length ? (
         <View style={styles.peopleSection}>
@@ -763,9 +823,9 @@ export default function SearchScreen() {
 
             if (similarResult) {
               return displayedAsGallery ? (
-                <SearchResultGalleryCard addLabel={addState.label} isAddDisabled={addState.disabled} libraryItem={libraryItemsByExternalKey.get(createExternalKey(item))??null} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+                <SearchResultGalleryCard addLabel={addState.label} isAddDisabled={addState.disabled} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               ) : (
-                <SearchResultItem addLabel={addState.label} isAddDisabled={addState.disabled} libraryItem={libraryItemsByExternalKey.get(createExternalKey(item))??null} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+                <SearchResultItem addLabel={addState.label} isAddDisabled={addState.disabled} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToLibrary={()=>addResult(item)} onFindSimilar={()=>findSimilarFromCard(item)} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               );
             }
 
@@ -804,7 +864,7 @@ export default function SearchScreen() {
               <SearchResultGalleryCard
                 addLabel={addState.label}
                 isAddDisabled={addState.disabled}
-                libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
+                libraryItems={libraryItemsByExternalKey.get(createExternalKey(item)) ?? []}
                 onAddToLibrary={() => addResult(item)}
                 onFindSimilar={() => findSimilarFromCard(item)}
                 onPress={() => openResult(item)}
@@ -814,7 +874,7 @@ export default function SearchScreen() {
               <SearchResultItem
                 addLabel={addState.label}
                 isAddDisabled={addState.disabled}
-                libraryItem={libraryItemsByExternalKey.get(createExternalKey(item)) ?? null}
+                libraryItems={libraryItemsByExternalKey.get(createExternalKey(item)) ?? []}
                 onAddToLibrary={() => addResult(item)}
                 onFindSimilar={() => findSimilarFromCard(item)}
                 onPress={() => openResult(item)}
@@ -883,12 +943,22 @@ function focusLabel(focus: SimilarityFocus): string {
 
 function isResultAlreadyAdded(
   result: SearchResult,
-  libraryItemsByExternalKey: Map<string, LibraryListItem>,
+  libraryItemsByExternalKey: Map<string, LibraryListItem[]>,
   addedSearchKeys: Set<string>,
   addedRecommendationKeys: Set<string>
 ): boolean {
   const key = createExternalKey(result);
-  return libraryItemsByExternalKey.has(key) || addedSearchKeys.has(key) || addedRecommendationKeys.has(key);
+  if (addedSearchKeys.has(key) || addedRecommendationKeys.has(key)) return true;
+
+  const match = matchLibraryItemForSeason(
+    libraryItemsByExternalKey.get(key) ?? [],
+    result.season_number
+  );
+
+  // A season card counts as added only when that exact season is registered — a
+  // whole-work row from before migration 0021 must not disable its add button.
+  // A non-season card keeps the old behaviour: any row for the work counts.
+  return typeof result.season_number === "number" ? match.kind === "season" : match.kind !== "none";
 }
 
 function isRegisteredRecommendation(result: SearchResult, libraryItems: LibraryListItem[]): boolean {
@@ -1061,6 +1131,46 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
+  },
+  historySection: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm
+  },
+  historyHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  historyClearText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  historyChipList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  historyChip: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: 220,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  historyChipLabel: {
+    flexShrink: 1
+  },
+  historyChipText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "700"
   },
   viewToolbar: {
     flexDirection: "row",

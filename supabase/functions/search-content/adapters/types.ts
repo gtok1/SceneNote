@@ -19,6 +19,8 @@ export interface SearchResult {
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
+  /** ISO 3166-1 alpha-2 codes, from TMDB `origin_country`. */
+  origin_country?: string[];
   duplicate_hint?: boolean;
   match_titles?: string[];
   matched_via?: "direct" | "season_relation";
@@ -32,6 +34,8 @@ export interface AdapterSearchParams {
   mediaType: MediaTypeFilter;
   page: number;
   signal: AbortSignal;
+  /** Injectable for tests; defaults to the real current time. */
+  now?: Date;
 }
 
 export interface AdapterSearchResponse {

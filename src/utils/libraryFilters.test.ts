@@ -79,6 +79,7 @@ function item(contentId: string, contentType: LibraryListItem["content_type"], g
     season_episode_counts: [],
     manual_progress_available: true,
     genres,
-    watch_count: 0
+    watch_count: 0,
+  season_number: null
   };
 }

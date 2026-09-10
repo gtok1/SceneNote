@@ -1,3 +1,4 @@
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -221,7 +222,7 @@ export default function ProfileScreen() {
                 </Pressable>
               )}
             </View>
-            <Pressable
+            {EXTENDED_FEATURES_ENABLED ? (<Pressable
               accessibilityRole="button"
               disabled={shareDisabled}
               onPress={openTasteReportPreview}
@@ -229,9 +230,9 @@ export default function ProfileScreen() {
             >
               <Ionicons color={colors.primary} name="image-outline" size={18} />
               <Text style={styles.shareButtonText}>취향 카드 공유</Text>
-            </Pressable>
+            </Pressable>) : null}
           </View>
-          {!hasLibraryItems ? (
+          {EXTENDED_FEATURES_ENABLED && !hasLibraryItems ? (
             <Text style={styles.shareHint}>작품을 추가하면 내 취향 카드를 만들 수 있어요.</Text>
           ) : null}
         </View>
@@ -247,7 +248,7 @@ export default function ProfileScreen() {
         <YearStatsSection />
         <GenreStatsSection />
 
-        <Pressable
+        {EXTENDED_FEATURES_ENABLED ? (<Pressable
           accessibilityRole="button"
           onPress={() => router.push("/settings/excluded-recommendations")}
           style={styles.settingsRow}
@@ -257,7 +258,7 @@ export default function ProfileScreen() {
             <Text style={styles.settingsRowMeta}>{recommendationExclusionCount}개</Text>
           </View>
           <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
-        </Pressable>
+        </Pressable>) : null}
 
         <Pressable
           accessibilityRole="button"
@@ -370,7 +371,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     gap: spacing.lg,
     padding: spacing.lg,
-    paddingBottom: 104
+    paddingBottom: 24
   },
   profile: {
     backgroundColor: colors.surface,

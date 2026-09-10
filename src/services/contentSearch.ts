@@ -10,6 +10,7 @@ import type {
 
 interface SearchContentParams {
   query: string;
+  signal?: AbortSignal;
   mediaType?: MediaTypeFilter;
   page?: number;
   /** ISO 3166-1 alpha-2. With an empty query this browses that country instead. */
@@ -35,7 +36,8 @@ export async function searchContent({
   query,
   mediaType = "all",
   page = 1,
-  country
+  country,
+  signal
 }: SearchContentParams): Promise<SearchContentResponse> {
   const normalizedQuery = query.trim();
   const browseCountry = !normalizedQuery && country && country !== ALL_COUNTRY_FILTER ? country : null;
@@ -57,6 +59,8 @@ export async function searchContent({
   const { data, error } = await supabase.functions.invoke<SearchContentFunctionResponse>(
     "search-content",
     {
+      ...(signal ? { signal } : {}),
+      timeout: 10_000,
       body: {
         query: normalizedQuery,
         media_type: mediaType,

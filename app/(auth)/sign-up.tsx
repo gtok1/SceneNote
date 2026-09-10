@@ -1,3 +1,4 @@
+import { KeyboardScreen } from "@/components/common/KeyboardScreen";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -16,7 +17,7 @@ export default function SignUpScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
   const [verificationEmailSent, setVerificationEmailSent] = useState(false);
-  const { control, handleSubmit, formState } = useForm<AuthFormValues>({
+  const { control, handleSubmit, formState, setFocus } = useForm<AuthFormValues>({
     resolver: zodResolver(authSchema),
     defaultValues: { email: "", password: "" }
   });
@@ -36,7 +37,7 @@ export default function SignUpScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
         <Text style={styles.subtitle}>기억하고 싶은 장면을 쌓아보세요</Text>
@@ -48,8 +49,15 @@ export default function SignUpScreen() {
           name="email"
           render={({ field, fieldState }) => (
             <View style={styles.field}>
+              <Text style={{ color: colors.text, fontWeight: "700" }}>이메일</Text>
               <TextInput
-                autoCapitalize="none"
+                ref={field.ref}
+                accessibilityLabel="이메일"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="email"
+                returnKeyType="next"
+                onSubmitEditing={() => setFocus("password")}
+                                autoCapitalize="none"
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
@@ -57,7 +65,7 @@ export default function SignUpScreen() {
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
             </View>
           )}
         />
@@ -66,19 +74,26 @@ export default function SignUpScreen() {
           name="password"
           render={({ field, fieldState }) => (
             <View style={styles.field}>
+              <Text style={{ color: colors.text, fontWeight: "700" }}>비밀번호</Text>
               <TextInput
-                onBlur={field.onBlur}
+                ref={field.ref}
+                accessibilityLabel="비밀번호"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="new-password"
+                returnKeyType="done"
+                onSubmitEditing={submit}
+                                onBlur={field.onBlur}
                 onChangeText={field.onChange}
                 placeholder="비밀번호"
                 secureTextEntry
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
             </View>
           )}
         />
-        {signUp.error ? <Text style={styles.error}>{signUp.error.message}</Text> : null}
+        {signUp.error ? <Text accessibilityRole="alert" style={styles.error}>{signUp.error.message}</Text> : null}
         {verificationEmailSent ? (
           <Text style={styles.success}>
             인증 메일을 보냈습니다. 메일 확인 후 로그인해 주세요.
@@ -95,18 +110,16 @@ export default function SignUpScreen() {
         >
           <Text style={styles.primaryText}>{signUp.isPending ? "가입 중" : "회원가입"}</Text>
         </Pressable>
-        <Link href="/sign-in" style={styles.link}>
-          이미 계정이 있어요
-        </Link>
+        <Link href="/sign-in" asChild><Pressable accessibilityRole="link" style={styles.link}><Text style={{ color: colors.primary, textAlign: "center" }}>이미 계정이 있어요</Text></Pressable></Link>
       </View>
-    </View>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xl
   },
@@ -153,6 +166,9 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   link: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.primary,
     fontWeight: "700",
     padding: spacing.md,

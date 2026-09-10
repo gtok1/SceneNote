@@ -17,7 +17,11 @@ export function parseTimecodeToSeconds(input: string): number | null {
     if (trimmed.length <= 2) {
       return Number.parseInt(trimmed, 10);
     }
-    return parseTimecodeToSeconds(normalizeTimecodeInput(trimmed));
+    const seconds = Number(trimmed.slice(-2));
+    const minutes = Number(trimmed.slice(-4, -2));
+    const hours = trimmed.length > 4 ? Number(trimmed.slice(0, -4)) : 0;
+    const total = hours * 3600 + minutes * 60 + seconds;
+    return seconds < 60 && (trimmed.length <= 4 || minutes < 60) && Number.isSafeInteger(total) ? total : null;
   }
 
   const parts = trimmed.split(":");
@@ -76,27 +80,8 @@ export function formatSecondsToTimecode(seconds: number): string {
 }
 
 export function normalizeTimecodeInput(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  if (trimmed.includes(":")) return trimmed;
-
-  const digits = trimmed.replace(/\D/g, "");
-  if (!digits) return "";
-
-  if (digits.length <= 2) {
-    return formatSecondsToTimecode(Number.parseInt(digits, 10));
-  }
-
-  if (digits.length <= 4) {
-    const minutes = digits.slice(0, -2).padStart(2, "0");
-    const seconds = digits.slice(-2);
-    return `${minutes}:${seconds}`;
-  }
-
-  const hours = digits.slice(0, -4);
-  const minutes = digits.slice(-4, -2).padStart(2, "0");
-  const seconds = digits.slice(-2);
-  return `${hours}:${minutes}:${seconds}`;
+  const seconds = parseTimecodeToSeconds(input);
+  return seconds === null ? input : formatSecondsToTimecode(seconds);
 }
 
 export function isTimeWithinEpisode(
@@ -110,4 +95,13 @@ export function isTimeWithinEpisode(
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
+}
+
+/** Preserve editing text; normalize only after the original has passed validation. */
+export function resolveTimecodeInput(raw: string, phase: "change" | "blur" | "save") {
+  const state = classifyTimecodeInput(raw);
+  return {
+    ...state,
+    text: phase !== "change" && state.kind === "valid" ? formatSecondsToTimecode(state.seconds) : raw
+  };
 }

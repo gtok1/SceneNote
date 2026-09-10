@@ -1,13 +1,14 @@
+import { Redirect , useRouter } from "expo-router";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 
-export default function ExcludedRecommendationsScreen() {
+function ExcludedRecommendationsScreen() {
   const router = useRouter();
   const excludedRecommendations = useRecommendationUiStore((state) => state.excludedRecommendations);
   const removeExclusion = useRecommendationUiStore((state) => state.removeExclusion);
@@ -206,3 +207,5 @@ const styles = StyleSheet.create({
     padding: spacing.lg
   }
 });
+
+export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <ExcludedRecommendationsScreen /> : <Redirect href="/library" />; }

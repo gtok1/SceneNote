@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAtom } from "jotai";
 
 import { revealedSpoilerPinIdsAtom } from "@/atoms/spoilerAtom";
@@ -9,8 +9,7 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
-import { ContentGalleryCard } from "@/components/content/ContentGalleryCard";
-import { PopularRecommendationSection } from "@/components/content/PopularRecommendationSection";
+import { ContentCard } from "@/components/content/ContentCard";
 import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
 import { RecentPinCard } from "@/components/pins/RecentPinCard";
 import { colors, radius, spacing } from "@/constants/theme";
@@ -25,31 +24,23 @@ export default function HomeScreen() {
   const pins = useAllPins();
   const [revealedSpoilers, setRevealedSpoilers] = useAtom(revealedSpoilerPinIdsAtom);
   const { width } = useWindowDimensions();
-  const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 3;
+  const galleryColumns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 768 ? 3 : 1;
   const galleryCardWidth = `${100 / galleryColumns}%` as const;
   const recentPinColumns = width >= 700 ? 3 : 1;
   const recentPinCardWidth = `${100 / recentPinColumns}%` as const;
   const upcomingAiringItems = useUpcomingAiring(library.data);
   const watchingItems = useMemo(
-    () => (library.data ?? []).filter((item) => item.statuses.includes("watching")).slice(0, galleryColumns),
+    () => (library.data ?? []).filter((item) => item.statuses.includes("watching")).slice(0, Math.max(3, galleryColumns)),
     [galleryColumns, library.data]
   );
+  useFocusEffect(useCallback(() => () => setRevealedSpoilers(new Set()), [setRevealedSpoilers]));
   const recentPins = pins.data?.slice(0, 3) ?? [];
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-      <View style={styles.hero}>
-        <Text style={styles.title}>SceneNote</Text>
-        <Text style={styles.subtitle}>내가 본 작품과 장면을 기록하고, 취향을 나누는 공간</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push("/search")}
-          style={styles.searchButton}
-        >
-          <Text style={styles.searchText}>작품 검색</Text>
-        </Pressable>
-      </View>
 
+
+      {pins.isError ? <ErrorState message="최근 핀을 새로 불러오지 못했습니다." onRetry={() => pins.refetch()} /> : null}
       {recentPins.length ? (
         <>
           <SectionHeader
@@ -88,24 +79,15 @@ export default function HomeScreen() {
       />
       {library.isLoading ? <LoadingSkeleton count={2} /> : null}
       {library.isError ? <ErrorState onRetry={() => library.refetch()} /> : null}
-      {!library.isError && watchingItems.length ? (
+      {watchingItems.length ? (
         <View style={styles.galleryGrid}>
           {watchingItems.map((item) => (
             <View key={item.library_item_id} style={[styles.galleryCell, { width: galleryCardWidth }]}>
-              <ContentGalleryCard
+              <ContentCard
                 item={item}
-                onAddPin={() =>
-                  router.push({
-                    pathname: "/pins/new",
-                    params: { contentId: item.content_id }
-                  })
-                }
-                onOpenEpisodes={() =>
-                  router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id } })
-                }
-                onPress={() =>
-                  router.push({ pathname: "/content/[id]", params: { id: item.content_id } })
-                }
+                onOpenEpisodes={() => router.push({ pathname: "/content/[id]/episodes", params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}) } })}
+                onOpenProgressSetting={() => router.push({ pathname: "/content/[id]", params: { id: item.content_id, libraryItemId: item.library_item_id, focus: "progress" } })}
+                onPress={() => router.push({ pathname: "/content/[id]", params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}) } })}
               />
             </View>
           ))}
@@ -124,7 +106,17 @@ export default function HomeScreen() {
         onPressItem={(item) => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
       />
 
-      <PopularRecommendationSection />
+      <View style={styles.hero}>
+        <Text style={styles.title}>SceneNote</Text>
+        <Text style={styles.subtitle}>기억하고 싶은 작품과 장면을 기록하세요</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push("/search")}
+          style={styles.searchButton}
+        >
+          <Text style={styles.searchText}>작품 검색</Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -201,7 +193,7 @@ function SectionHeader({
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       {action && onAction ? (
-        <Pressable accessibilityRole="button" onPress={onAction}>
+        <Pressable accessibilityRole="button" onPress={onAction} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text style={styles.sectionAction}>{action}</Text>
         </Pressable>
       ) : null}
@@ -216,7 +208,7 @@ const styles = StyleSheet.create({
   },
   container: {
     gap: 6,
-    paddingBottom: 92
+    paddingBottom: 24
   },
   hero: {
     backgroundColor: colors.surface,
@@ -236,6 +228,8 @@ const styles = StyleSheet.create({
     fontSize: 14
   },
   searchButton: {
+    minHeight: 48,
+    justifyContent: "center",
     alignSelf: "flex-start",
     backgroundColor: colors.primary,
     borderRadius: radius.md,

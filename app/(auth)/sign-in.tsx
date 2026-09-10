@@ -1,3 +1,4 @@
+import { KeyboardScreen } from "@/components/common/KeyboardScreen";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,7 +16,7 @@ const forgotPasswordHref = "/forgot-password" as Href;
 export default function SignInScreen() {
   const router = useRouter();
   const { signIn } = useAuth();
-  const { control, handleSubmit, formState } = useForm<AuthFormValues>({
+  const { control, handleSubmit, formState, setFocus } = useForm<AuthFormValues>({
     resolver: zodResolver(authSchema),
     defaultValues: { email: "", password: "" }
   });
@@ -27,7 +28,7 @@ export default function SignInScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
         <Text style={styles.subtitle}>내 장면 기록으로 바로 돌아가기</Text>
@@ -39,8 +40,15 @@ export default function SignInScreen() {
           name="email"
           render={({ field, fieldState }) => (
             <View style={styles.field}>
+              <Text style={{ color: colors.text, fontWeight: "700" }}>이메일</Text>
               <TextInput
-                autoCapitalize="none"
+                ref={field.ref}
+                accessibilityLabel="이메일"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="email"
+                returnKeyType="next"
+                onSubmitEditing={() => setFocus("password")}
+                                autoCapitalize="none"
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
@@ -48,7 +56,7 @@ export default function SignInScreen() {
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
             </View>
           )}
         />
@@ -57,19 +65,26 @@ export default function SignInScreen() {
           name="password"
           render={({ field, fieldState }) => (
             <View style={styles.field}>
+              <Text style={{ color: colors.text, fontWeight: "700" }}>비밀번호</Text>
               <TextInput
-                onBlur={field.onBlur}
+                ref={field.ref}
+                accessibilityLabel="비밀번호"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="current-password"
+                returnKeyType="done"
+                onSubmitEditing={submit}
+                                onBlur={field.onBlur}
                 onChangeText={field.onChange}
                 placeholder="비밀번호"
                 secureTextEntry
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
             </View>
           )}
         />
-        {signIn.error ? <Text style={styles.error}>{signIn.error.message}</Text> : null}
+        {signIn.error ? <Text accessibilityRole="alert" style={styles.error}>{signIn.error.message}</Text> : null}
         <Pressable
           accessibilityRole="button"
           disabled={formState.isSubmitting || signIn.isPending}
@@ -78,24 +93,18 @@ export default function SignInScreen() {
         >
           <Text style={styles.primaryText}>{signIn.isPending ? "로그인 중" : "로그인"}</Text>
         </Pressable>
-        <Link href="/sign-up" style={styles.link}>
-          계정 만들기
-        </Link>
-        <Link href={forgotPasswordHref} style={styles.passwordSetupLink}>
-          비밀번호 설정/재설정
-        </Link>
-        <Link href="/onboarding" style={styles.secondaryLink}>
-          처음 사용하는 분들을 위한 안내
-        </Link>
+        <Link href="/sign-up" asChild><Pressable accessibilityRole="link" style={styles.link}><Text style={{ color: colors.primary, textAlign: "center" }}>계정 만들기</Text></Pressable></Link>
+        <Link href={forgotPasswordHref} asChild><Pressable accessibilityRole="link" style={styles.passwordSetupLink}><Text style={{ color: colors.primary, textAlign: "center" }}>비밀번호 설정/재설정</Text></Pressable></Link>
+        <Link href="/onboarding" asChild><Pressable accessibilityRole="link" style={styles.secondaryLink}><Text style={{ color: colors.primary, textAlign: "center" }}>처음 사용하는 분들을 위한 안내</Text></Pressable></Link>
       </View>
-    </View>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xl
   },
@@ -139,18 +148,27 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   link: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.primary,
     fontWeight: "700",
     padding: spacing.md,
     textAlign: "center"
   },
   secondaryLink: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: "700",
     textAlign: "center"
   },
   passwordSetupLink: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.primary,
     fontSize: 14,
     fontWeight: "800",

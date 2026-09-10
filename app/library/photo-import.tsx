@@ -1,10 +1,11 @@
+import { Redirect , useRouter } from "expo-router";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing } from "@/constants/theme";
@@ -23,7 +24,7 @@ const MEDIA_FILTERS: { label: string; value: MediaTypeFilter }[] = [
   { label: "영화", value: "movie" }
 ];
 
-export default function LibraryPhotoImportScreen() {
+function LibraryPhotoImportScreen() {
   const router = useRouter();
   const addToLibrary = useAddToLibrary();
   const [imageName, setImageName] = useState("");
@@ -608,3 +609,5 @@ const styles = StyleSheet.create({
     lineHeight: 18
   }
 });
+
+export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <LibraryPhotoImportScreen /> : <Redirect href="/library" />; }

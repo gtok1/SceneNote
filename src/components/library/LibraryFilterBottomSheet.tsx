@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { useModalFocus } from "@/hooks/useModalFocus";
+import { useEffect, useMemo, useState } from "react";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -52,9 +54,9 @@ export function LibraryFilterBottomSheet({
   onOpenImport,
   onReset
 }: LibraryFilterBottomSheetProps) {
+  const modalFocus = useModalFocus(visible);
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const closeButtonRef = useRef<View>(null);
   const [draft, setDraft] = useState<LibrarySheetFilterState>(() => pickSheetFilters(filters));
   const genres = useMemo(() => createGenreFilterOptions(genreOptions), [genreOptions]);
   const selectedGenres = useMemo(() => parseGenreFilters(draft.genreFilter), [draft.genreFilter]);
@@ -62,25 +64,7 @@ export function LibraryFilterBottomSheet({
   useEffect(() => {
     if (!visible) return;
     setDraft(pickSheetFilters(filters));
-    const focusTimer = setTimeout(() => {
-      (closeButtonRef.current as unknown as { focus?: () => void } | null)?.focus?.();
-    }, 0);
-    return () => clearTimeout(focusTimer);
   }, [filters, visible]);
-
-  useEffect(() => {
-    if (!visible || Platform.OS !== "web" || typeof document === "undefined") return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [onClose, visible]);
 
   const toggleGenre = (genre: string) => {
     const nextGenres = selectedGenres.includes(genre)
@@ -90,10 +74,11 @@ export function LibraryFilterBottomSheet({
   };
 
   return (
-    <Modal animationType="slide" onDismiss={onClosed} onRequestClose={onClose} transparent visible={visible}>
+    <Modal animationType="slide" onShow={modalFocus.focusFirst} onDismiss={onClosed} onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.backdrop}>
         <Pressable accessibilityLabel="필터 닫기" onPress={onClose} style={StyleSheet.absoluteFill} />
         <View
+          ref={modalFocus.panelRef}
           accessibilityLabel="라이브러리 필터"
           accessibilityViewIsModal
           aria-modal
@@ -106,7 +91,7 @@ export function LibraryFilterBottomSheet({
             <Pressable
               accessibilityLabel="필터 닫기"
               onPress={onClose}
-              ref={closeButtonRef}
+              ref={modalFocus.firstRef}
               style={styles.iconButton}
             >
               <Ionicons color={colors.text} name="close" size={22} />
@@ -194,7 +179,7 @@ export function LibraryFilterBottomSheet({
               </View>
             </FilterSection>
 
-            <FilterSection title="데이터 관리">
+            {EXTENDED_FEATURES_ENABLED ? (            <FilterSection title="데이터 관리">
               <Pressable accessibilityRole="button" onPress={onOpenImport} style={styles.importButton}>
                 <Ionicons color={colors.text} name="cloud-upload-outline" size={19} />
                 <View style={styles.importTextBox}>
@@ -203,7 +188,7 @@ export function LibraryFilterBottomSheet({
                 </View>
                 <Ionicons color={colors.textMuted} name="chevron-forward" size={18} />
               </Pressable>
-            </FilterSection>
+            </FilterSection>) : null}
           </ScrollView>
 
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>

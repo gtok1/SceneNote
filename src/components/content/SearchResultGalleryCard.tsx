@@ -147,17 +147,19 @@ const styles = StyleSheet.create({
     lineHeight: 15
   },
   footer: {
-    alignItems: "center",
-    flexDirection: "row",
+    alignItems: "stretch",
+    flexDirection: "column",
     gap: spacing.xs,
     justifyContent: "space-between",
     paddingBottom: spacing.sm,
     paddingHorizontal: spacing.sm
   },
-  actions: { alignItems: "center", flexDirection: "row", gap: spacing.xs },
-  similarButton: { borderColor: colors.primary, borderRadius: radius.sm, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  actions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  similarButton: { minHeight: 44, justifyContent: "center", borderColor: colors.primary, borderRadius: radius.sm, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   similarText: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   source: {
+    alignSelf: "flex-start",
+    flexShrink: 0,
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.sm,
     color: colors.textMuted,
@@ -168,6 +170,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2
   },
   addButton: {
+    minHeight: 44,
+    minWidth: 44,
     backgroundColor: colors.primary,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,

@@ -1,5 +1,8 @@
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { KeyboardAvoidingView, Platform, useWindowDimensions , Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNetworkState } from "expo-network";
@@ -46,6 +49,8 @@ const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
 export default function ContentDetailScreen() {
   const params = useLocalSearchParams<{
     id: string;
+    libraryItemId?: string;
+    season?: string;
     source?: SearchResult["external_source"];
     externalId?: string;
     title?: string;
@@ -69,6 +74,10 @@ export default function ContentDetailScreen() {
     focus?: string;
   }>();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const didFocusProgress = useRef(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,7 +116,7 @@ export default function ContentDetailScreen() {
     title: watchProviderTitle
   });
   const resolvedContentId = externalDetail.data?.content.content_id ?? params.id;
-  const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId);
+  const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId && (params.libraryItemId ? item.library_item_id === params.libraryItemId : item.season_number === (params.season ? Number(params.season) : null)));
   const seasons = useSeasons(libraryItem?.content_id);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
   const addToast = useAppUIStore((state) => state.addToast);
@@ -206,9 +215,9 @@ export default function ContentDetailScreen() {
     const resultToAdd = externalDetail.data?.content ?? externalResult;
     if (!resultToAdd) return;
     addToLibrary.mutate(
-      { result: resultToAdd, status },
+      { result: resultToAdd, status, ...(params.season ? { seasonNumber: Number(params.season) } : {}) },
       {
-        onSuccess: (response) => router.replace({ pathname: "/content/[id]", params: { id: response.content_id } }),
+        onSuccess: (response) => router.replace({ pathname: "/content/[id]", params: { id: response.content_id, ...(params.season ? { season: params.season } : {}) } }),
         onError: (error) => Alert.alert("추가 실패", error.message)
       }
     );
@@ -300,7 +309,7 @@ export default function ContentDetailScreen() {
 
   const openEpisodes = () => {
     if (!libraryItem) return;
-    router.push({ pathname: "/content/[id]/episodes", params: { id: libraryItem.content_id } });
+    router.push({ pathname: "/content/[id]/episodes", params: { id: libraryItem.content_id, libraryItemId: libraryItem.library_item_id, ...(libraryItem.season_number != null ? { season: String(libraryItem.season_number) } : {}) } });
   };
 
   const saveManualProgress = (
@@ -350,8 +359,9 @@ export default function ContentDetailScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} ref={scrollViewRef}>
-      <Image source={view.posterUrl ? { uri: view.posterUrl } : null} style={styles.poster} contentFit="cover" />
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.container, { paddingBottom: 24 + insets.bottom }]} ref={scrollViewRef}>
+      <Image source={view.posterUrl ? { uri: view.posterUrl } : null} style={[styles.poster, width < 768 ? { height: 144 } : null]} contentFit="cover" />
       <View style={styles.body}>
         <Text style={styles.title}>{view.title}</Text>
         {view.originalTitle ? <Text style={styles.original}>{view.originalTitle}</Text> : null}
@@ -370,6 +380,56 @@ export default function ContentDetailScreen() {
           </View>
         ) : null}
 
+        {!externalResult || libraryItem ? (
+          <View style={styles.actions}>
+            {view.contentType !== "movie" ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  router.push({
+                    pathname: "/content/[id]/episodes",
+                    params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) }
+                  })
+                }
+                style={styles.primaryButton}
+              >
+                <Text style={styles.primaryText}>에피소드 보기</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  router.push({
+                    pathname: "/pins/new",
+                    params: { contentId: libraryItem?.content_id ?? params.id }
+                  })
+                }
+                style={styles.primaryButton}
+              >
+                <Text style={styles.primaryText}>영화 핀 추가</Text>
+              </Pressable>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({
+                  pathname: "/content/[id]/pins",
+                  params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) }
+                })
+              }
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryText}>핀 목록</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={openLibraryList}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryText}>목록</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <GenreBadgeList genres={view.genres} maxVisible={view.genres.length} />
 
         {libraryItem ? (
@@ -396,7 +456,8 @@ export default function ContentDetailScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.overview}>{view.overview || "줄거리 정보가 없습니다."}</Text>
+        <Text numberOfLines={overviewExpanded ? undefined : 3} style={styles.overview}>{view.overview || "줄거리 정보가 없습니다."}</Text>
+        {view.overview ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: overviewExpanded }} onPress={() => setOverviewExpanded(value => !value)} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: colors.primary }}>{overviewExpanded ? "줄거리 접기" : "줄거리 더보기"}</Text></Pressable> : null}
 
         <WatchProviderList
           error={watchProviders.error}
@@ -404,7 +465,7 @@ export default function ContentDetailScreen() {
           providers={watchProviders.data.providers}
         />
 
-        {view.cast.length ? (
+        {EXTENDED_FEATURES_ENABLED && view.cast.length ? (
           <View style={styles.castSection}>
             <Text style={styles.sectionTitle}>{view.contentType === "anime" ? "성우" : "출연 배우"}</Text>
             <Text style={styles.castHint}>처음 누르면 좋아하는 인물에 등록되고, 등록된 인물은 상세 화면으로 이동합니다.</Text>
@@ -501,7 +562,7 @@ export default function ContentDetailScreen() {
           </View>
         ) : null}
 
-        {libraryItem ? (
+        {EXTENDED_FEATURES_ENABLED && libraryItem ? (
           <ContentReviewEditor
             contentId={libraryItem.content_id}
             contentAirDate={view.airDate}
@@ -514,58 +575,10 @@ export default function ContentDetailScreen() {
           />
         ) : null}
 
-        {!externalResult || libraryItem ? (
-          <View style={styles.actions}>
-            {view.hasSeasons ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push({
-                    pathname: "/content/[id]/episodes",
-                    params: { id: libraryItem?.content_id ?? params.id }
-                  })
-                }
-                style={styles.primaryButton}
-              >
-                <Text style={styles.primaryText}>에피소드 보기</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push({
-                    pathname: "/pins/new",
-                    params: { contentId: libraryItem?.content_id ?? params.id }
-                  })
-                }
-                style={styles.primaryButton}
-              >
-                <Text style={styles.primaryText}>영화 핀 추가</Text>
-              </Pressable>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                router.push({
-                  pathname: "/content/[id]/pins",
-                  params: { id: libraryItem?.content_id ?? params.id }
-                })
-              }
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryText}>핀 목록</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={openLibraryList}
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryText}>목록</Text>
-            </Pressable>
-          </View>
-        ) : null}
+
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -675,7 +688,7 @@ function WatchCountInput({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    paddingBottom: 112
+    paddingBottom: 24
   },
   poster: {
     alignSelf: "center",

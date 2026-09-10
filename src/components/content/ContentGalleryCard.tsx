@@ -1,3 +1,4 @@
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -49,7 +50,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
         />
         <View style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>
-            {item.title_primary}
+            {item.title_primary}{item.season_number != null ? ` · 시즌 ${item.season_number}` : ""}
           </Text>
           <Text numberOfLines={1} style={styles.meta}>
             {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
@@ -61,7 +62,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
               {cast.map((member) => member.name).join(", ")}
             </Text>
           ) : null}
-          {reviewLabel ? (
+          {EXTENDED_FEATURES_ENABLED && reviewLabel ? (
             <Text numberOfLines={1} style={styles.review}>
               {reviewLabel}
             </Text>
@@ -93,7 +94,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
         </Pressable>
         {onAddPin ? (
           <Pressable
-            accessibilityLabel="핀 추가"
+            accessibilityLabel={`${item.title_primary} 핀 추가`}
             accessibilityRole="button"
             onPress={onAddPin}
             style={styles.pinButton}
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 32,
+    height: 44,
     justifyContent: "center",
     position: "absolute",
     right: spacing.sm,
@@ -136,7 +137,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
     top: spacing.sm,
-    width: 32
+    width: 44
   },
   poster: {
     aspectRatio: 2 / 3,

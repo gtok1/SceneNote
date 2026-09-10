@@ -1,3 +1,4 @@
+import { KeyboardScreen } from "@/components/common/KeyboardScreen";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,7 +16,7 @@ const forgotPasswordHref = "/forgot-password" as Href;
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const { session, updatePassword } = useAuth();
-  const { control, handleSubmit, formState } = useForm<PasswordUpdateFormValues>({
+  const { control, handleSubmit, formState, setFocus } = useForm<PasswordUpdateFormValues>({
     resolver: zodResolver(passwordUpdateSchema),
     defaultValues: { password: "", confirmPassword: "" }
   });
@@ -30,7 +31,7 @@ export default function ResetPasswordScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
         <Text style={styles.subtitle}>새 비밀번호를 설정해 주세요</Text>
@@ -41,12 +42,8 @@ export default function ResetPasswordScreen() {
           <Text style={styles.notice}>
             이메일로 받은 비밀번호 설정 링크를 열면 새 비밀번호를 설정할 수 있어요.
           </Text>
-          <Link href={forgotPasswordHref} style={styles.link}>
-            설정 링크 다시 받기
-          </Link>
-          <Link href="/sign-in" style={styles.secondaryLink}>
-            로그인으로 돌아가기
-          </Link>
+          <Link href={forgotPasswordHref} asChild><Pressable accessibilityRole="link" style={styles.link}><Text style={{ color: colors.primary, textAlign: "center" }}>설정 링크 다시 받기</Text></Pressable></Link>
+          <Link href="/sign-in" asChild><Pressable accessibilityRole="link" style={styles.secondaryLink}><Text style={{ color: colors.primary, textAlign: "center" }}>로그인으로 돌아가기</Text></Pressable></Link>
         </View>
       ) : (
         <View style={styles.form}>
@@ -55,15 +52,22 @@ export default function ResetPasswordScreen() {
             name="password"
             render={({ field, fieldState }) => (
               <View style={styles.field}>
-                <TextInput
-                  onBlur={field.onBlur}
+                <Text style={{ color: colors.text, fontWeight: "700" }}>새 비밀번호</Text>
+              <TextInput
+                ref={field.ref}
+                accessibilityLabel="새 비밀번호"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="new-password"
+                returnKeyType="next"
+                onSubmitEditing={() => setFocus("confirmPassword")}
+                                  onBlur={field.onBlur}
                   onChangeText={field.onChange}
                   placeholder="새 비밀번호"
                   secureTextEntry
                   style={styles.input}
                   value={field.value}
                 />
-                {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+                {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
               </View>
             )}
           />
@@ -72,19 +76,26 @@ export default function ResetPasswordScreen() {
             name="confirmPassword"
             render={({ field, fieldState }) => (
               <View style={styles.field}>
-                <TextInput
-                  onBlur={field.onBlur}
+                <Text style={{ color: colors.text, fontWeight: "700" }}>새 비밀번호 확인</Text>
+              <TextInput
+                ref={field.ref}
+                accessibilityLabel="새 비밀번호 확인"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="new-password"
+                returnKeyType="done"
+                onSubmitEditing={submit}
+                                  onBlur={field.onBlur}
                   onChangeText={field.onChange}
                   placeholder="새 비밀번호 확인"
                   secureTextEntry
                   style={styles.input}
                   value={field.value}
                 />
-                {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+                {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
               </View>
             )}
           />
-          {updatePassword.error ? <Text style={styles.error}>{updatePassword.error.message}</Text> : null}
+          {updatePassword.error ? <Text accessibilityRole="alert" style={styles.error}>{updatePassword.error.message}</Text> : null}
           <Pressable
             accessibilityRole="button"
             disabled={formState.isSubmitting || updatePassword.isPending}
@@ -100,14 +111,14 @@ export default function ResetPasswordScreen() {
           </Pressable>
         </View>
       )}
-    </View>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xl
   },
@@ -162,12 +173,18 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   link: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.primary,
     fontWeight: "700",
     padding: spacing.md,
     textAlign: "center"
   },
   secondaryLink: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: "700",

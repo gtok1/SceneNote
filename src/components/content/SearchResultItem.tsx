@@ -174,13 +174,15 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   addButton: {
+    minHeight: 44,
+    minWidth: 44,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
   actions: { alignItems: "stretch", gap: spacing.xs },
-  similarButton: { borderColor: colors.primary, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  similarButton: { minHeight: 44, justifyContent: "center", borderColor: colors.primary, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
   similarText: { color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: "center" },
   addButtonDisabled: {
     opacity: 0.6

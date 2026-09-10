@@ -1,3 +1,4 @@
+import { KeyboardScreen } from "@/components/common/KeyboardScreen";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -32,7 +33,7 @@ export default function OnboardingScreen() {
   const isLast = index === slides.length - 1;
 
   return (
-    <View style={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <View style={styles.dots}>
         {slides.map((item, itemIndex) => (
           <View
@@ -68,14 +69,14 @@ export default function OnboardingScreen() {
           <Text style={styles.primaryText}>다음</Text>
         </Pressable>
       )}
-    </View>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "space-between",
     padding: spacing.xl
   },
@@ -128,6 +129,8 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   link: {
+    minHeight: 48,
+    paddingVertical: 14,
     color: colors.primary,
     fontWeight: "700",
     padding: spacing.md,

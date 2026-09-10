@@ -1,7 +1,8 @@
+import { Redirect , useRouter } from "expo-router";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { useRouter } from "expo-router";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -17,7 +18,7 @@ const CATEGORY_FILTERS: { label: string; value: PersonCategory | "all" }[] = [
   { label: "성우", value: "voice_actor" }
 ];
 
-export default function PeopleScreen() {
+function PeopleScreen() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<PersonCategory | "all">("all");
@@ -255,3 +256,5 @@ const styles = StyleSheet.create({
     opacity: 0.55
   }
 });
+
+export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <PeopleScreen /> : <Redirect href="/library" />; }

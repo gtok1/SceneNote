@@ -92,9 +92,11 @@ const styles = StyleSheet.create({
   },
   scroller: {
     flexGrow: 0,
-    maxHeight: 44
+    minHeight: 44
   },
   chip: {
+    minHeight: 44,
+    minWidth: 44,
     alignSelf: "flex-start",
     borderColor: colors.border,
     borderRadius: radius.md,

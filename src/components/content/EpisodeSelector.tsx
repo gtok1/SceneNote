@@ -83,6 +83,7 @@ const EpisodeRow = memo(function EpisodeRow({
   return (
     <View style={styles.row}>
       <Pressable
+        accessibilityLabel={`${episode.episode_number}화 시청 완료`}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: watched }}
         onPress={onToggle}
@@ -108,7 +109,7 @@ const EpisodeRow = memo(function EpisodeRow({
             .join(" · ")}
         </Text>
       </Pressable>
-      <Pressable accessibilityRole="button" onPress={onAddPin} style={styles.pinButton}>
+      <Pressable accessibilityLabel={`${episode.episode_number}화 핀 추가`} accessibilityRole="button" onPress={onAddPin} style={styles.pinButton}>
         <Text style={styles.pinText}>핀</Text>
       </Pressable>
     </View>

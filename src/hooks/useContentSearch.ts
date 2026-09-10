@@ -9,7 +9,8 @@ import { ALL_COUNTRY_FILTER, isBrowseMode } from "@/utils/countryFilter";
 export function useContentSearch(
   query: string,
   mediaType: MediaTypeFilter = "all",
-  country: string = ALL_COUNTRY_FILTER
+  country: string = ALL_COUNTRY_FILTER,
+  options: { enabled?: boolean } = {}
 ) {
   const normalizedQuery = query.trim();
   const browsing = isBrowseMode(normalizedQuery, country);
@@ -20,7 +21,7 @@ export function useContentSearch(
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasNextPage ? lastPage.page + 1 : undefined,
     // Browse mode has no query to be long enough, the country stands in for it.
-    enabled: browsing || normalizedQuery.length >= 2,
+    enabled: (options.enabled ?? true) && (browsing || normalizedQuery.length >= 2),
     staleTime: 5 * 60_000
   });
 

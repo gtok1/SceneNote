@@ -1,3 +1,4 @@
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -45,7 +46,7 @@ export const ContentCard = memo(function ContentCard({
       />
       <View style={[styles.body, compact ? styles.bodyCompact : null]}>
         <Text numberOfLines={compact ? 1 : 2} style={[styles.title, compact ? styles.titleCompact : null]}>
-          {item.title_primary}
+          {item.title_primary}{item.season_number != null ? ` · 시즌 ${item.season_number}` : ""}
         </Text>
         <Text numberOfLines={1} style={[styles.meta, compact ? styles.metaCompact : null]}>
           {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
@@ -57,7 +58,7 @@ export const ContentCard = memo(function ContentCard({
             {cast.map((member) => member.name).join(", ")}
           </Text>
         ) : null}
-        {reviewLabel ? (
+        {EXTENDED_FEATURES_ENABLED && reviewLabel ? (
           <Text numberOfLines={1} style={[styles.review, compact ? styles.reviewCompact : null]}>
             {reviewLabel}
           </Text>
@@ -179,6 +180,7 @@ const styles = StyleSheet.create({
     borderWidth: 1
   },
   continueButtonCompact: {
+    minHeight: 44,
     paddingHorizontal: spacing.xs,
     paddingVertical: 3
   },

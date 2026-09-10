@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useModalFocus } from "@/hooks/useModalFocus";
+import { KeyboardAvoidingView, Platform ,
   Alert,
   Modal,
   Pressable,
@@ -10,6 +12,7 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -148,6 +151,8 @@ export default function LibraryScreen() {
     setEditingProgressItemId(item.library_item_id);
   };
 
+  const insets = useSafeAreaInsets();
+  const progressFocus = useModalFocus(Boolean(editingProgressItem));
   const closeProgressEditor = () => {
     if (!updateManualProgress.isPending) setEditingProgressItemId(null);
   };
@@ -369,7 +374,7 @@ export default function LibraryScreen() {
             <LibraryStatusFilterBar compact onChange={(value) => commitFilters({ statusFilter: value })} value={statusFilter} />
             <View style={styles.mobileToolRow}>
               <View style={styles.mobileToolGroup}>
-                <Pressable
+                {EXTENDED_FEATURES_ENABLED ? (<Pressable
                   accessibilityLabel={isSharing ? "공유 중" : "라이브러리 공유"}
                   accessibilityRole="button"
                   disabled={isSharing || library.isLoading}
@@ -377,7 +382,7 @@ export default function LibraryScreen() {
                   style={[styles.mobileIconButton, isSharing || library.isLoading ? styles.toolButtonDisabled : null]}
                 >
                   <Ionicons color={colors.textMuted} name="share-social-outline" size={19} />
-                </Pressable>
+                </Pressable>) : null}
                 <Pressable
                   accessibilityLabel="필터 초기화"
                   accessibilityRole="button"
@@ -460,7 +465,7 @@ export default function LibraryScreen() {
           </ScrollView>
 
           <View style={styles.toolGroup}>
-            <Pressable
+            {EXTENDED_FEATURES_ENABLED ? (<Pressable
               accessibilityRole="button"
               disabled={isSharing || library.isLoading}
               onPress={shareCurrentView}
@@ -468,7 +473,7 @@ export default function LibraryScreen() {
             >
               <Ionicons color={colors.textMuted} name="share-social-outline" size={16} />
               <Text style={styles.filterText}>{isSharing ? "공유 중" : "공유"}</Text>
-            </Pressable>
+            </Pressable>) : null}
 
             {[
               { label: "자세히", value: "detail" as const, icon: "list-outline" as const },
@@ -567,10 +572,10 @@ export default function LibraryScreen() {
           <View style={styles.advancedFilters}>
             <View style={styles.advancedFilterHeader}>
               <Text style={styles.advancedFilterTitle}>상세 필터</Text>
-              <Pressable accessibilityRole="button" onPress={openLibraryImport} style={styles.toolButton}>
+              {EXTENDED_FEATURES_ENABLED ? (<Pressable accessibilityRole="button" onPress={openLibraryImport} style={styles.toolButton}>
                 <Ionicons color={colors.textMuted} name="cloud-upload-outline" size={17} />
                 <Text style={styles.filterText}>엑셀 업로드</Text>
-              </Pressable>
+              </Pressable>) : null}
             </View>
             <View style={styles.dateRow}>
               <YearSelect onChange={(value) => commitFilters({ year: value })} value={year} />
@@ -694,14 +699,14 @@ export default function LibraryScreen() {
               onOpenEpisodes={() =>
                 router.push({
                   pathname: "/content/[id]/episodes",
-                  params: { id: item.content_id }
+                  params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}) }
                 })
               }
               onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({
                   pathname: "/content/[id]",
-                  params: { id: item.content_id, ...libraryRouteParams }
+                  params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}), ...libraryRouteParams }
                 })
               }
             />
@@ -711,14 +716,14 @@ export default function LibraryScreen() {
               onOpenEpisodes={() =>
                 router.push({
                   pathname: "/content/[id]/episodes",
-                  params: { id: item.content_id }
+                  params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}) }
                 })
               }
               onOpenProgressSetting={() => openProgressEditor(item)}
               onPress={() =>
                 router.push({
                   pathname: "/content/[id]",
-                  params: { id: item.content_id, ...libraryRouteParams }
+                  params: { id: item.content_id, libraryItemId: item.library_item_id, ...(item.season_number != null ? { season: String(item.season_number) } : {}), ...libraryRouteParams }
                 })
               }
             />
@@ -744,10 +749,11 @@ export default function LibraryScreen() {
         animationType="fade"
         onRequestClose={closeProgressEditor}
         transparent
+        onShow={progressFocus.focusFirst}
         visible={Boolean(editingProgressItem)}
       >
-        <View style={styles.progressModalBackdrop}>
-          <View accessibilityViewIsModal style={styles.progressModalPanel}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.progressModalBackdrop}>
+          <View ref={progressFocus.panelRef} role="dialog" aria-modal accessibilityLabel="시청 위치 편집" accessibilityViewIsModal style={[styles.progressModalPanel, { paddingBottom: insets.bottom }]}>
             <View style={styles.progressModalHeader}>
               <View style={styles.progressModalTitleBox}>
                 <Text numberOfLines={1} style={styles.progressModalTitle}>
@@ -756,6 +762,7 @@ export default function LibraryScreen() {
                 <Text style={styles.progressModalSubtitle}>시청 위치 바로 수정</Text>
               </View>
               <Pressable
+                ref={progressFocus.firstRef}
                 accessibilityLabel="시청 진행 편집 닫기"
                 accessibilityRole="button"
                 disabled={updateManualProgress.isPending}
@@ -766,7 +773,7 @@ export default function LibraryScreen() {
               </Pressable>
             </View>
             {editingProgressItem ? (
-              <ScrollView contentContainerStyle={styles.progressModalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }} contentContainerStyle={styles.progressModalContent}>
                 <EpisodeProgressCard
                   isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
                   isSaving={updateManualProgress.isPending}
@@ -776,7 +783,7 @@ export default function LibraryScreen() {
                     setEditingProgressItemId(null);
                     router.push({
                       pathname: "/content/[id]/episodes",
-                      params: { id: editingProgressItem.content_id }
+                      params: { id: editingProgressItem.content_id, libraryItemId: editingProgressItem.library_item_id, ...(editingProgressItem.season_number != null ? { season: String(editingProgressItem.season_number) } : {}) }
                     });
                   }}
                   onSave={saveProgress}
@@ -785,7 +792,7 @@ export default function LibraryScreen() {
               </ScrollView>
             ) : null}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -825,7 +832,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   listContent: {
-    paddingBottom: 104
+    paddingBottom: 24
   },
   filterSection: {
     gap: spacing.sm,
@@ -982,7 +989,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     justifyContent: "center",
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: spacing.lg
   },
   contentTypeFilterText: {

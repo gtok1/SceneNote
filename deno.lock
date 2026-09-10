@@ -1,0 +1,56 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.112.3"
+  },
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.112.3": "f6b9130984301066587e8917dfab3b3d60be47dc966bd3d04c733bc9423c1cf9"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@expo/vector-icons@15",
+        "npm:@hookform/resolvers@^3.9.0",
+        "npm:@react-native-async-storage/async-storage@^2.1.0",
+        "npm:@shopify/flash-list@2.0.2",
+        "npm:@supabase/supabase-js@^2.45.0",
+        "npm:@tanstack/react-query@^5.59.0",
+        "npm:@types/react@~19.1.10",
+        "npm:eslint-config-expo@10.0",
+        "npm:eslint@9",
+        "npm:expo-constants@18",
+        "npm:expo-document-picker@~14.0.8",
+        "npm:expo-image@3",
+        "npm:expo-linear-gradient@~15.0.8",
+        "npm:expo-linking@8",
+        "npm:expo-network@~8.0.8",
+        "npm:expo-router@6",
+        "npm:expo-secure-store@15",
+        "npm:expo-sharing@~14.0.8",
+        "npm:expo-status-bar@3",
+        "npm:expo@54",
+        "npm:jotai@^2.19.1",
+        "npm:prettier@^3.3.3",
+        "npm:react-dom@^19.1.0",
+        "npm:react-hook-form@^7.53.0",
+        "npm:react-native-gesture-handler@2.28",
+        "npm:react-native-gifted-charts@^1.4.76",
+        "npm:react-native-linear-gradient@^2.8.3",
+        "npm:react-native-safe-area-context@5.6",
+        "npm:react-native-screens@4.16",
+        "npm:react-native-svg@15.12.1",
+        "npm:react-native-url-polyfill@2",
+        "npm:react-native-view-shot@4.0.3",
+        "npm:react-native-web@~0.21.2",
+        "npm:react-native@0.81.5",
+        "npm:react@19.1.0",
+        "npm:tesseract.js@7",
+        "npm:tsx@^4.19.0",
+        "npm:typescript@^5.8.0",
+        "npm:xlsx@~0.18.5",
+        "npm:zod@^3.23.8",
+        "npm:zustand@5"
+      ]
+    }
+  }
+}

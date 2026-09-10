@@ -95,12 +95,12 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
 
 const styles = StyleSheet.create({
   card: {
-    alignItems: "center",
+    alignItems: "stretch",
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
+    flexDirection: "column",
     gap: spacing.md,
     marginHorizontal: spacing.lg,
     padding: spacing.md
@@ -130,12 +130,12 @@ const styles = StyleSheet.create({
   reasonContent: { flex: 1, gap: 2 },
   reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   reasonText: { color: colors.text, fontSize: 12, fontWeight: "700", lineHeight: 17 },
-  actions: { alignItems: "stretch", gap: spacing.sm },
-  quickButton: { alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "center", padding: spacing.xs },
-  feedbackActions: { flexDirection: "row", justifyContent: "center" },
-  iconButton: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
+  actions: { flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: spacing.sm },
+  quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "center", padding: spacing.xs },
+  feedbackActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" },
+  iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
-  addButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  addButton: { minHeight: 44, backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   disabled: { opacity: 0.55 },
   addText: { color: colors.surface, fontSize: 12, fontWeight: "900" }
 });

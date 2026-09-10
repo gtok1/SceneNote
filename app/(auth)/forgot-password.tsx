@@ -1,3 +1,4 @@
+import { KeyboardScreen } from "@/components/common/KeyboardScreen";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,7 +24,7 @@ export default function ForgotPasswordScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>SceneNote</Text>
         <Text style={styles.subtitle}>가입한 이메일로 비밀번호 설정 링크를 보내드려요</Text>
@@ -35,8 +36,15 @@ export default function ForgotPasswordScreen() {
           name="email"
           render={({ field, fieldState }) => (
             <View style={styles.field}>
+              <Text style={{ color: colors.text, fontWeight: "700" }}>이메일</Text>
               <TextInput
-                autoCapitalize="none"
+                ref={field.ref}
+                accessibilityLabel="이메일"
+                aria-invalid={Boolean(fieldState.error)}
+                autoComplete="email"
+                returnKeyType="done"
+                onSubmitEditing={submit}
+                                autoCapitalize="none"
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
@@ -44,12 +52,12 @@ export default function ForgotPasswordScreen() {
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
             </View>
           )}
         />
         {requestPasswordReset.error ? (
-          <Text style={styles.error}>{requestPasswordReset.error.message}</Text>
+          <Text accessibilityRole="alert" style={styles.error}>{requestPasswordReset.error.message}</Text>
         ) : null}
         {requestPasswordReset.isSuccess ? (
           <Text style={styles.success}>
@@ -69,18 +77,16 @@ export default function ForgotPasswordScreen() {
             {requestPasswordReset.isPending ? "보내는 중" : "설정 링크 보내기"}
           </Text>
         </Pressable>
-        <Link href="/sign-in" style={styles.link}>
-          로그인으로 돌아가기
-        </Link>
+        <Link href="/sign-in" asChild><Pressable accessibilityRole="link" style={styles.link}><Text style={{ color: colors.primary, textAlign: "center" }}>로그인으로 돌아가기</Text></Pressable></Link>
       </View>
-    </View>
+    </KeyboardScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xl
   },
@@ -127,6 +133,9 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   link: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingVertical: 14,
     color: colors.primary,
     fontWeight: "700",
     padding: spacing.md,

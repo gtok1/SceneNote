@@ -1,3 +1,5 @@
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useModalFocus } from "@/hooks/useModalFocus";
 import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -34,6 +36,8 @@ export function RecommendationQuickViewModal({
   onMoreLikeThis,
   onReduceTheme
 }: RecommendationQuickViewModalProps) {
+  const insets = useSafeAreaInsets();
+  const { panelRef, firstRef, focusFirst } = useModalFocus(Boolean(item));
   const detail = useExternalContentDetail(
     item?.external_source,
     item?.external_id,
@@ -60,26 +64,27 @@ export function RecommendationQuickViewModal({
 
   return (
     <Modal
+      onShow={focusFirst}
       animationType="fade"
       onRequestClose={onClose}
       presentationStyle="overFullScreen"
       transparent
       visible
     >
-      <View accessibilityViewIsModal style={styles.backdrop}>
+      <View accessibilityViewIsModal style={[styles.backdrop, {paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16)}]}>
         <Pressable accessibilityLabel="빠른 보기 닫기" accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
-        <View accessibilityLabel={`${item.title_primary} 빠른 보기`} accessibilityRole="summary" style={styles.dialog}>
+        <View accessibilityLabel={`${item.title_primary} 빠른 보기`} ref={panelRef} role="dialog" aria-modal accessibilityViewIsModal style={styles.dialog}>
           <View style={styles.header}>
             <View style={styles.headerTitle}>
               <Text style={styles.eyebrow}>빠른 보기</Text>
               <Text numberOfLines={2} style={styles.title}>{item.title_primary}</Text>
             </View>
-            <Pressable accessibilityLabel="빠른 보기 닫기" accessibilityRole="button" onPress={onClose} style={styles.closeButton}>
+            <Pressable accessibilityLabel="빠른 보기 닫기" accessibilityRole="button" ref={firstRef} onPress={onClose} style={styles.closeButton}>
               <Ionicons color={colors.text} name="close" size={22} />
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{flexShrink: 1}} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             <View style={styles.hero}>
               <Image
                 accessibilityLabel={`${item.title_primary} 포스터`}
@@ -124,8 +129,6 @@ export function RecommendationQuickViewModal({
             ) : null}
             {detail.isError ? <Text style={styles.muted}>추가 상세 정보는 현재 불러오지 못했습니다.</Text> : null}
             {resolvedPresentation.sourceLabel ? <Text style={styles.source}>작품 정보 출처: {resolvedPresentation.sourceLabel}</Text> : null}
-          </ScrollView>
-
           <View style={styles.footer}>
             <Pressable accessibilityLabel={`${item.title_primary} 관심 없음`} accessibilityRole="button" onPress={() => onNotInterested(item)} style={styles.feedbackButton}>
               <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
@@ -150,6 +153,7 @@ export function RecommendationQuickViewModal({
               <Text style={styles.primaryText}>{addLabel}</Text>
             </Pressable>
           </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -175,10 +179,10 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, gap: spacing.xs, paddingRight: spacing.md },
   eyebrow: { color: colors.primary, fontSize: 11, fontWeight: "900" },
   title: { color: colors.text, fontSize: 21, fontWeight: "900", lineHeight: 27 },
-  closeButton: { alignItems: "center", borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
+  closeButton: { alignItems: "center", borderRadius: 20, height: 44, justifyContent: "center", width: 44 },
   scrollContent: { gap: spacing.lg, padding: spacing.lg },
   hero: { alignItems: "flex-start", flexDirection: "row", gap: spacing.lg },
-  poster: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, height: 210, width: 140 },
+  poster: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, height: 132, width: 88 },
   summary: { flex: 1, gap: spacing.sm, minWidth: 0 },
   badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   statusBadge: { backgroundColor: colors.surfaceMuted, borderRadius: radius.sm, color: colors.text, fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
@@ -190,16 +194,16 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
   overview: { color: colors.text, fontSize: 14, lineHeight: 22 },
   value: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
-  trailerButton: { alignItems: "center", alignSelf: "flex-start", borderColor: colors.primary, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  trailerButton: { minHeight: 44, justifyContent: "center", alignItems: "center", alignSelf: "flex-start", borderColor: colors.primary, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   trailerText: { color: colors.primary, fontSize: 13, fontWeight: "900" },
   source: { color: colors.textMuted, fontSize: 11 },
   muted: { color: colors.textMuted, fontSize: 12 },
   footer: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, justifyContent: "flex-end", padding: spacing.lg },
-  feedbackButton: { alignItems: "center", flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
+  feedbackButton: { minHeight: 44, justifyContent: "center", alignItems: "center", flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   feedbackText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  secondaryButton: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  secondaryButton: { minHeight: 44, justifyContent: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   secondaryText: { color: colors.text, fontSize: 14, fontWeight: "900" },
-  primaryButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  primaryButton: { minHeight: 44, justifyContent: "center", backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   primaryText: { color: colors.surface, fontSize: 14, fontWeight: "900" },
   disabled: { opacity: 0.55 }
 });

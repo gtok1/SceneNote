@@ -1,3 +1,4 @@
+import { useModalFocus } from "@/hooks/useModalFocus";
 import { useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -17,6 +18,7 @@ export function YearSelect({
   endYear = new Date().getFullYear() + 1
 }: YearSelectProps) {
   const [open, setOpen] = useState(false);
+  const focus = useModalFocus(open);
   const years = useMemo(() => {
     const result: string[] = [];
     for (let year = endYear; year >= startYear; year -= 1) {
@@ -44,11 +46,11 @@ export function YearSelect({
         <Text style={styles.chevron}>{open ? "▲" : "▼"}</Text>
       </Pressable>
       {open ? (
-        <Modal animationType="fade" onRequestClose={() => setOpen(false)} transparent visible={open}>
+        <Modal onShow={focus.focusFirst} animationType="fade" onRequestClose={() => setOpen(false)} transparent visible={open}>
           <Pressable accessibilityRole="button" onPress={() => setOpen(false)} style={styles.backdrop}>
-            <Pressable accessibilityRole="menu" style={styles.menu}>
+            <View ref={focus.panelRef} role="dialog" aria-modal accessibilityViewIsModal accessibilityLabel="연도 선택" style={styles.menu}>
               <ScrollView nestedScrollEnabled style={styles.scroll}>
-                <Pressable accessibilityRole="button" onPress={() => selectYear("")} style={styles.option}>
+                <Pressable ref={focus.firstRef} accessibilityRole="button" onPress={() => selectYear("")} style={styles.option}>
                   <Text style={[styles.optionText, !value ? styles.optionTextSelected : null]}>전체 연도</Text>
                 </Pressable>
                 {years.map((year) => {
@@ -66,7 +68,7 @@ export function YearSelect({
                   );
                 })}
               </ScrollView>
-            </Pressable>
+            </View>
           </Pressable>
         </Modal>
       ) : null}
@@ -84,6 +86,8 @@ const styles = StyleSheet.create({
     zIndex: 5000
   },
   trigger: {
+    minHeight: 44,
+    minWidth: 44,
     alignItems: "center",
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -129,6 +133,8 @@ const styles = StyleSheet.create({
     maxHeight: 240
   },
   option: {
+    minHeight: 44,
+    minWidth: 44,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },

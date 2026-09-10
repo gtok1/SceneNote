@@ -1,9 +1,10 @@
+import { Redirect , useRouter } from "expo-router";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
-import { useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing } from "@/constants/theme";
@@ -32,7 +33,7 @@ const SUMMARY_ITEMS: { key: keyof BulkImportSummary; label: string }[] = [
   { key: "tmdb_cache_hits", label: "캐시" }
 ];
 
-export default function LibraryImportScreen() {
+function LibraryImportScreen() {
   const router = useRouter();
   const bulkImport = useNetflixBulkImport();
   const [fileName, setFileName] = useState("");
@@ -809,3 +810,5 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   }
 });
+
+export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <LibraryImportScreen /> : <Redirect href="/library" />; }

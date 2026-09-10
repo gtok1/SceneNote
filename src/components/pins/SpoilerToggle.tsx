@@ -10,6 +10,7 @@ interface SpoilerToggleProps {
 export function SpoilerToggle({ isSpoiler, onToggle }: SpoilerToggleProps) {
   return (
     <Pressable
+      accessibilityLabel="스포일러 포함"
       accessibilityRole="switch"
       accessibilityState={{ checked: isSpoiler }}
       onPress={() => onToggle(!isSpoiler)}
@@ -25,6 +26,7 @@ export function SpoilerToggle({ isSpoiler, onToggle }: SpoilerToggleProps) {
 
 const styles = StyleSheet.create({
   row: {
+    minHeight: 48,
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md

@@ -27,7 +27,7 @@ export const SIMILAR_SEARCH_EXAMPLES = [
   "도깨비와 스토리가 비슷한 드라마"
 ] as const;
 
-const TRIGGER = /(?:와|과|처럼|같은(?:데|\s*작품)?|느낌(?:의|인)?|비슷(?:한|하게)?|닮은)/u;
+const TRIGGER = /(?:[와과](?=\s*(?:스토리|분위기|세계관|배경|설정|관계|장르|캐릭터|서사|결|비슷|닮|같은|느낌|처럼))|처럼|같은(?:데|\s*작품)?|느낌(?:의|인)?|비슷(?:한|하게)?|닮은)/u;
 
 export function normalizeSearchQuery(query: string): string {
   return query.normalize("NFKC").replace(/[\u0000-\u001f<>]/gu, " ").replace(/\s+/gu, " ").trim();

@@ -1,3 +1,5 @@
+import { FilterSheet } from "@/components/common/FilterSheet";
+import { createSearchFilterDraft, emptySearchFilters, type SearchFilterDraft } from "@/utils/searchFilterDraft";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -38,6 +40,7 @@ interface ContentSearchBarProps {
   onCountryFilterChange?: (value: string) => void;
   statusFilter?: LibraryStatusFilter;
   onStatusFilterChange?: (value: LibraryStatusFilter) => void;
+  onApplyFilters?: (filters: SearchFilterDraft) => void;
   autoFocus?: boolean;
   examples?: readonly string[];
   onExamplePress?: (value: string) => void;
@@ -60,6 +63,7 @@ export function ContentSearchBar({
   onCountryFilterChange,
   statusFilter = "all",
   onStatusFilterChange,
+  onApplyFilters,
   autoFocus = false,
   examples = [],
   onExamplePress
@@ -73,32 +77,26 @@ export function ContentSearchBar({
     Boolean(year),
     sortOrder !== "latest"
   ].filter(Boolean).length;
-  const submitAfterSelection = () => {
-    setTimeout(onSubmit, 0);
+  const [draft, setDraft] = useState(() => createSearchFilterDraft({ mediaType: mediaTypeFilter, countryFilter, genreFilter, statusFilter, year, sortOrder }));
+  const openFilters = () => {
+    setDraft(createSearchFilterDraft({ mediaType: mediaTypeFilter, countryFilter, genreFilter, statusFilter, year, sortOrder }));
+    setFiltersOpen(true);
   };
-  const changeMediaType = (nextMediaType: MediaTypeFilter) => {
-    onMediaTypeChange(nextMediaType);
-    submitAfterSelection();
+  const apply = () => {
+    if (onApplyFilters) onApplyFilters(draft);
+    else {
+      onMediaTypeChange(draft.mediaType); onCountryFilterChange?.(draft.countryFilter);
+      onGenreFilterChange?.(draft.genreFilter); onStatusFilterChange?.(draft.statusFilter);
+      onYearChange(draft.year); onSortOrderChange(draft.sortOrder);
+    }
+    setFiltersOpen(false);
   };
-  const changeYear = (nextYear: string) => {
-    onYearChange(nextYear);
-    submitAfterSelection();
-  };
-  const changeSortOrder = (nextSortOrder: DateSortOrder) => {
-    onSortOrderChange(nextSortOrder);
-    submitAfterSelection();
-  };
-  const changeStatusFilter = (nextStatusFilter: LibraryStatusFilter) => {
-    onStatusFilterChange?.(nextStatusFilter);
-    submitAfterSelection();
-  };
-  const changeGenreFilter = (nextGenreFilter: string) => {
-    onGenreFilterChange?.(nextGenreFilter);
-  };
-  const changeCountryFilter = (nextCountryFilter: string) => {
-    onCountryFilterChange?.(nextCountryFilter);
-    submitAfterSelection();
-  };
+  const changeMediaType = (mediaType: MediaTypeFilter) => setDraft(value => ({ ...value, mediaType }));
+  const changeYear = (year: string) => setDraft(value => ({ ...value, year }));
+  const changeSortOrder = (sortOrder: DateSortOrder) => setDraft(value => ({ ...value, sortOrder }));
+  const changeStatusFilter = (statusFilter: LibraryStatusFilter) => setDraft(value => ({ ...value, statusFilter }));
+  const changeGenreFilter = (genreFilter: string) => setDraft(value => ({ ...value, genreFilter }));
+  const changeCountryFilter = (countryFilter: string) => setDraft(value => ({ ...value, countryFilter }));
 
   return (
     <View style={styles.container}>
@@ -108,7 +106,7 @@ export function ContentSearchBar({
           autoFocus={autoFocus}
           onChangeText={onChangeText}
           onSubmitEditing={onSubmit}
-          placeholder="작품명 또는 ‘도깨비 같은 드라마’로 검색"
+          placeholder="작품명으로 검색"
           returnKeyType="search"
           style={styles.input}
           value={value}
@@ -116,21 +114,11 @@ export function ContentSearchBar({
         <Pressable accessibilityRole="button" onPress={onSubmit} style={styles.button}>
           <Text style={styles.buttonText}>검색</Text>
         </Pressable>
-      </View>
-      {examples.length > 0 ? (
-        <View style={styles.examples}>
-          {examples.map((example) => (
-            <Pressable accessibilityLabel={`예시 검색: ${example}`} accessibilityRole="button" key={example} onPress={() => onExamplePress?.(example)} style={styles.exampleChip}>
-              <Text numberOfLines={1} style={styles.exampleText}>{example}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
       <View style={styles.toolbar}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: filtersOpen }}
-          onPress={() => setFiltersOpen((current) => !current)}
+          onPress={openFilters}
           style={[
             styles.toolButton,
             (filtersOpen || activeFilterCount > 0) && styles.toolButtonSelected
@@ -151,14 +139,26 @@ export function ContentSearchBar({
           </Text>
         </Pressable>
       </View>
-      {filtersOpen ? (
+      </View>
+      {examples.length > 0 ? (
+        <View style={styles.examples}>
+          {examples.map((example) => (
+            <Pressable accessibilityLabel={`예시 검색: ${example}`} accessibilityRole="button" key={example} onPress={() => onExamplePress?.(example)} style={styles.exampleChip}>
+              <Text numberOfLines={1} style={styles.exampleText}>{example}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <FilterSheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={apply} onReset={() => setDraft(createSearchFilterDraft(emptySearchFilters))}>
         <View style={styles.filterPanel}>
           <View style={styles.filters}>
             {FILTERS.map((filter) => {
-              const selected = filter.value === mediaTypeFilter;
+              const selected = filter.value === draft.mediaType;
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ selected }}
                   key={filter.value}
                   onPress={() => changeMediaType(filter.value)}
                   style={[styles.filter, selected && styles.filterSelected]}
@@ -175,10 +175,11 @@ export function ContentSearchBar({
               <Text style={styles.groupLabel}>나라</Text>
               <View style={styles.filters}>
                 {[{ code: ALL_COUNTRY_FILTER, label: "전체" }, ...COUNTRY_FILTER_OPTIONS].map((option) => {
-                  const selected = option.code === countryFilter;
+                  const selected = option.code === draft.countryFilter;
                   return (
                     <Pressable
                       accessibilityRole="button"
+                  accessibilityState={{ selected }}
                       key={option.code}
                       onPress={() => changeCountryFilter(option.code)}
                       style={[styles.filter, selected && styles.filterSelected]}
@@ -195,10 +196,11 @@ export function ContentSearchBar({
           {onStatusFilterChange ? (
             <View style={styles.filters}>
               {STATUS_FILTERS.map((filter) => {
-                const selected = filter === statusFilter;
+                const selected = filter === draft.statusFilter;
                 return (
                   <Pressable
                     accessibilityRole="button"
+                  accessibilityState={{ selected }}
                     key={filter}
                     onPress={() => changeStatusFilter(filter)}
                     style={[styles.filter, selected && styles.filterSelected]}
@@ -215,19 +217,20 @@ export function ContentSearchBar({
             <GenreFilterChips
               genres={genreOptions}
               onChange={changeGenreFilter}
-              value={genreFilter}
+              value={draft.genreFilter}
             />
           ) : null}
           <View style={styles.dateRow}>
-            <YearSelect onChange={changeYear} value={year} />
+            <YearSelect onChange={changeYear} value={draft.year} />
             {[
               { label: "최신순", value: "latest" as const },
               { label: "오래된순", value: "oldest" as const }
             ].map((item) => {
-              const selected = item.value === sortOrder;
+              const selected = item.value === draft.sortOrder;
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ selected }}
                   key={item.value}
                   onPress={() => changeSortOrder(item.value)}
                   style={[styles.filter, selected && styles.filterSelected]}
@@ -238,7 +241,7 @@ export function ContentSearchBar({
             })}
           </View>
         </View>
-      ) : null}
+      </FilterSheet>
     </View>
   );
 }
@@ -256,6 +259,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm
   },
   input: {
+    minWidth: 0,
+    flexShrink: 1,
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -266,7 +271,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md
   },
-  button: {
+  button: { minHeight: 48, minWidth: 48,
     alignItems: "center",
     backgroundColor: colors.primary,
     borderRadius: radius.md,
@@ -284,9 +289,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm
   },
   examples: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  exampleChip: { backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  exampleChip: { minHeight: 44, minWidth: 44, justifyContent: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   exampleText: { color: colors.primary, fontSize: 11, fontWeight: "700" },
-  toolButton: {
+  toolButton: { minHeight: 44, minWidth: 44, justifyContent: "center",
     alignItems: "center",
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -334,7 +339,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.sm
   },
-  filter: {
+  filter: { minHeight: 44, minWidth: 44, justifyContent: "center",
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,

@@ -31,11 +31,12 @@ export function PinTimelineList({
 }: PinTimelineListProps) {
   const [revealedSpoilers, setRevealedSpoilers] = useAtom(revealedSpoilerPinIdsAtom);
 
-  if (isLoading) return <LoadingSkeleton variant="pin-item" count={4} />;
-  if (hasError) return onRetry ? <ErrorState onRetry={onRetry} /> : <ErrorState />;
+  if (isLoading && !pins.length) return <LoadingSkeleton variant="pin-item" count={4} />;
+  if (hasError && !pins.length) return onRetry ? <ErrorState onRetry={onRetry} /> : <ErrorState />;
 
   return (
     <FlashList
+      ListHeaderComponent={hasError && onRetry ? <ErrorState message="저장된 핀을 표시합니다. 다시 불러와 주세요." onRetry={onRetry} /> : null}
       ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
       ListEmptyComponent={<EmptyState title={emptyTitle} description={emptyDescription} />}
       data={pins}

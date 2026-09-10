@@ -21,9 +21,9 @@ export default function NewPinScreen() {
         contentId={params.contentId}
         episodeId={params.episodeId || null}
         mode="create"
-        onCancel={() => router.back()}
+        onCancel={() => router.canGoBack() ? router.back() : router.replace("/pins")}
         onSuccess={(created) =>
-          router.replace({ pathname: "/pins/[id]", params: { id: created.id } })
+          router.dismissTo({ pathname: "/content/[id]/pins", params: { id: created.content_id, ...(created.episode_id ? { episodeId: created.episode_id } : {}) } })
         }
       />
     </View>

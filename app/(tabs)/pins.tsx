@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { useCallback , useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect , useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
 import { useAtom } from "jotai";
 
 import { revealedSpoilerPinIdsAtom } from "@/atoms/spoilerAtom";
@@ -32,8 +34,9 @@ const emotionFilterOptions = EMOTION_OPTIONS.map((value) => ({
 type ViewMode = "list" | "timeline";
 
 export default function PinsScreen() {
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const showDetailPanel = shouldShowPinDetailPanel(width);
+  const showDetailPanel = shouldShowPinDetailPanel(width, width - spacing.xl * 3);
   const [sortMode, setSortMode] = useState<PinSortMode>("latest");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export default function PinsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [revealedSpoilers, setRevealedSpoilers] = useAtom(revealedSpoilerPinIdsAtom);
+  useFocusEffect(useCallback(() => () => setRevealedSpoilers(new Set()), [setRevealedSpoilers]));
   const plainShareRef = useRef<View | null>(null);
   const maskedShareRef = useRef<View | null>(null);
   const allPins = useAllPins();
@@ -141,17 +145,18 @@ export default function PinsScreen() {
     ]);
   };
 
-  const listData = isLoading || isError ? [] : sortedPins;
+  const listData = sortedPins;
   const emptyTitle = hasActiveFilter ? "검색 결과가 없어요" : "아직 저장된 핀이 없어요";
   const emptyDescription = hasActiveFilter ? "다른 키워드나 필터를 사용해보세요." : "감동적인 장면을 발견하면 핀으로 남겨보세요.";
   const listHeader = (
     <View style={styles.listHeader}>
-      <View style={styles.header}>
+      {isError && sortedPins.length ? <ErrorState message="저장된 기록을 표시합니다. 연결 후 다시 시도해 주세요." onRetry={() => selectedTagId ? taggedPins.refetch() : allPins.refetch()} /> : null}
+      <View style={[styles.header, width < 768 ? { flexDirection: "column", alignItems: "stretch" } : null]}>
         <View style={styles.headerCopy}>
           <Text style={styles.title}>핀</Text>
           <Text style={styles.subtitle}>감동적인 장면과 기억하고 싶은 대사를 모아보세요.</Text>
         </View>
-        <View style={styles.headerTools}>
+        <View style={[styles.headerTools, { maxWidth: "100%" }]}>
           <View style={styles.searchBox}>
             <Ionicons color={colors.textMuted} name="search-outline" size={18} />
             <TextInput
@@ -222,7 +227,7 @@ export default function PinsScreen() {
   );
 
   return (
-    <View style={styles.shell}>
+    <View style={[styles.shell, { paddingTop: insets.top }]}>
       <View style={styles.page}>
         <View style={styles.contentGrid}>
           <View style={styles.mainColumn}>
@@ -282,9 +287,9 @@ export default function PinsScreen() {
           /> : null}
         </View>
       </View>
-      {selectedPin ? (
-        <View pointerEvents="none" style={styles.captureLayer}>
-          <PinShareCard pin={selectedPin} ref={plainShareRef} />
+      {EXTENDED_FEATURES_ENABLED && selectedPin ? (
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden pointerEvents="none" style={styles.captureLayer}>
+          <PinShareCard maskMemo={selectedPin.is_spoiler && !revealedSpoilers.has(selectedPin.id)} pin={selectedPin} ref={plainShareRef} />
           <PinShareCard maskMemo pin={selectedPin} ref={maskedShareRef} />
         </View>
       ) : null}
@@ -645,7 +650,7 @@ function PinDetailPanel({
         <Ionicons color={colors.surface} name="open-outline" size={18} />
         <Text style={styles.primaryActionText}>핀 상세 열기</Text>
       </Pressable>
-      {Platform.OS !== "web" ? (
+      {EXTENDED_FEATURES_ENABLED && Platform.OS !== "web" ? (
         <Pressable accessibilityRole="button" onPress={onShare} style={styles.secondaryAction}>
           <Ionicons color={colors.primary} name="share-social-outline" size={18} />
           <Text style={styles.secondaryActionText}>공유</Text>
@@ -696,7 +701,7 @@ const styles = StyleSheet.create({
   },
   page: {
     flex: 1,
-    paddingBottom: 96,
+    paddingBottom: 24,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xl
   },
@@ -753,7 +758,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     height: 44,
     paddingHorizontal: spacing.md,
-    width: 320
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 320
   },
   searchInput: {
     color: "#0F172A",
@@ -792,7 +799,7 @@ const styles = StyleSheet.create({
   segment: {
     alignItems: "center",
     borderRadius: 11,
-    height: 36,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.lg
   },
@@ -822,7 +829,7 @@ const styles = StyleSheet.create({
   },
   chipScroller: {
     flexGrow: 0,
-    maxHeight: 40
+    minHeight: 44
   },
   chipRow: {
     alignItems: "center",
@@ -835,7 +842,7 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 36,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.lg
   },
@@ -923,7 +930,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   pinFlashContent: {
-    paddingBottom: 96
+    paddingBottom: 24
   },
   listEmpty: {
     paddingTop: spacing.md
@@ -1062,9 +1069,9 @@ const styles = StyleSheet.create({
   },
   moreButton: {
     alignItems: "center",
-    height: 36,
+    minHeight: 44,
     justifyContent: "center",
-    width: 36
+    width: 44
   },
   spoilerInline: {
     alignSelf: "flex-start",

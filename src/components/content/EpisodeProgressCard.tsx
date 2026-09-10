@@ -105,6 +105,7 @@ export function EpisodeProgressCard({
   };
 
   const save = () => {
+    if (saveDisabled) return;
     const normalized = normalizeManualEpisodeInput({
       rawEpisodeNumber,
       seasonNumber: selectedSeasonNumber,

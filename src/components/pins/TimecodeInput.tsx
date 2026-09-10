@@ -1,24 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import {
   formatSecondsToTimecode,
   isTimeWithinEpisode,
-  normalizeTimecodeInput,
+  resolveTimecodeInput,
   parseTimecodeToSeconds
 } from "@/utils/timecode";
 
 interface TimecodeInputProps {
+  inputRef?: Ref<TextInput>;
+  editable?: boolean;
   value: string;
   onChangeText: (value: string) => void;
   onChangeSeconds: (seconds: number | null) => void;
   maxSeconds?: number | null;
   placeholder?: string;
-  errorMessage?: string;
+  errorMessage?: string | undefined;
 }
 
 export function TimecodeInput({
+  inputRef,
+  editable = true,
   value,
   onChangeText,
   onChangeSeconds,
@@ -34,7 +38,7 @@ export function TimecodeInput({
   }, [onChangeSeconds, value]);
 
   const normalize = () => {
-    const normalized = normalizeTimecodeInput(value);
+    const normalized = resolveTimecodeInput(value, "blur").text;
     onChangeText(normalized);
     const seconds = parseTimecodeToSeconds(normalized);
     onChangeSeconds(seconds);
@@ -64,15 +68,19 @@ export function TimecodeInput({
   return (
     <View style={styles.container}>
       <TextInput
-        accessibilityLabel="타임코드"
+        ref={inputRef}
+        editable={editable}
+        accessibilityLabel="시간"
+        aria-describedby="pin-time-error"
+        aria-invalid={Boolean(localError || errorMessage)}
         keyboardType="numeric"
         onBlur={normalize}
-        onChangeText={(text) => onChangeText(text.replace(/\D/g, ""))}
+        onChangeText={(text) => { setLocalError(null); onChangeText(resolveTimecodeInput(text, "change").text); }}
         placeholder={placeholder}
         style={[styles.input, (localError || errorMessage) && styles.inputError]}
         value={value}
       />
-      {localError || errorMessage ? <Text style={styles.error}>{localError ?? errorMessage}</Text> : null}
+      {localError || errorMessage ? <Text nativeID="pin-time-error" accessibilityRole="alert" style={styles.error}>{localError ?? errorMessage}</Text> : null}
     </View>
   );
 }

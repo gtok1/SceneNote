@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { createRecommendationRequestScope } from "@/utils/searchRecommendationPolicy";
 import { queryKeys } from "@/lib/query";
 import {
   getPersonalizedRecommendations,
@@ -60,6 +61,17 @@ export function usePersonalizedRecommendations(
     [mediaType, user?.id]
   );
   const cacheIdentity = cacheKey.join(":");
+  const enabled = Boolean(user && (options.enabled ?? true));
+  // Each user/filter/activation receives a distinct request lifetime.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const scope = useMemo(() => createRecommendationRequestScope(), [cacheIdentity, enabled]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const isCurrent = () => enabled && scope.isActive() && currentScope.current === scope;
+  useEffect(() => () => {
+    scope.close();
+    if (enabled) void queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
+  }, [scope, enabled, queryClient, cacheKey]);
   const [timedOutCacheIdentity, setTimedOutCacheIdentity] = useState<string | null>(null);
   const initialLoadingTimedOut = timedOutCacheIdentity === cacheIdentity;
   const [emptyContinuationStopped, setEmptyContinuationStopped] = useState(false);
@@ -97,7 +109,7 @@ export function usePersonalizedRecommendations(
           signal
         })
       ),
-    enabled: Boolean(user && (options.enabled ?? true)),
+    enabled,
     retry: 0,
     staleTime: 10 * 60_000
   });
@@ -120,41 +132,52 @@ export function usePersonalizedRecommendations(
     setEmptyContinuationStopped(false);
     emptyContinuationAttempts.current = 0;
     emptyContinuationStartedAt.current = null;
+    setRefreshErrors({}); setRefillErrors({}); setLoadMoreErrors({});
+    lastFailedRefills.current.clear();
   }, [cacheIdentity]);
 
   useEffect(() => {
-    if (!recommendationQuery.isLoading || recommendationQuery.data || initialLoadingTimedOut) return;
+    if (!enabled || !recommendationQuery.isLoading || recommendationQuery.data || initialLoadingTimedOut) return;
     const timeoutId = setTimeout(() => {
       setTimedOutCacheIdentity(cacheIdentity);
       void queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
     }, INITIAL_LOADING_DEADLINE_MS);
     return () => clearTimeout(timeoutId);
-  }, [cacheIdentity, cacheKey, initialLoadingTimedOut, queryClient, recommendationQuery.data, recommendationQuery.isLoading]);
+  }, [enabled, cacheIdentity, cacheKey, initialLoadingTimedOut, queryClient, recommendationQuery.data, recommendationQuery.isLoading]);
 
   useEffect(() => {
-    if (!user || !recommendationQuery.data?.items.length) return;
+    if (!enabled || !user || !recommendationQuery.data?.items.length) return;
     const items = recommendationQuery.data.items;
     rememberRecommendationSessionSeenIds(
       user.id,
       collectRecommendationSessionSeenIds(items)
     );
-    const batchKey = `${mediaType}:${items.map((item) => item.canonical_id).sort().join("|")}`;
-    if (
-      recordedImpressionBatches.current.has(batchKey) ||
-      impressionBatchesInFlight.current.has(batchKey)
-    ) {
-      return;
-    }
-    impressionBatchesInFlight.current.add(batchKey);
-    void recordImpressionsWithRetry(items)
-      .then(() => recordedImpressionBatches.current.add(batchKey))
-      .catch((error) => console.error("recommendation impression persistence failed:", error))
-      .finally(() => impressionBatchesInFlight.current.delete(batchKey));
-  }, [mediaType, recommendationQuery.data?.items, user]);
+    const identity = (item: PersonalizedRecommendation) => `${user.id}:${mediaType}:${item.canonical_id}`;
+    const unseen = items.filter(item =>
+      createRecommendationIdentityAliases(item).every(key => !libraryIdentityKeys.has(key)) &&
+      !recordedImpressionBatches.current.has(identity(item)) &&
+      !impressionBatchesInFlight.current.has(identity(item))
+    );
+    if (!unseen.length) return;
+    const controller = scope.controller();
+    unseen.forEach(item => impressionBatchesInFlight.current.add(identity(item)));
+    void (async () => {
+      for (let offset = 0; offset < unseen.length && !controller.signal.aborted; offset += 12) {
+        const batch = unseen.slice(offset, offset + 12);
+        await recordImpressionsWithRetry(batch, controller.signal);
+        if (!controller.signal.aborted) batch.forEach(item => recordedImpressionBatches.current.add(identity(item)));
+      }
+    })().catch((error) => {
+      if (!controller.signal.aborted) console.error("recommendation impression persistence failed:", error);
+    }).finally(() => {
+      unseen.forEach(item => impressionBatchesInFlight.current.delete(identity(item)));
+      scope.release(controller);
+    });
+  }, [enabled, scope, mediaType, recommendationQuery.data?.items, libraryIdentityKeys, user]);
 
   const refresh = async (): Promise<boolean> => {
     if (
-      !user ||
+      !isCurrent() || !user ||
       refreshMutation.isPending ||
       refillMutation.isPending ||
       loadMoreMutation.isPending ||
@@ -172,6 +195,7 @@ export function usePersonalizedRecommendations(
 
     try {
       await queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
+      if (!isCurrent()) return false;
       const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
       if (!current) {
         setTimedOutCacheIdentity(null);
@@ -184,7 +208,7 @@ export function usePersonalizedRecommendations(
         collectRecommendationSessionSeenIds(current.items)
       );
 
-      const controller = new AbortController();
+      const controller = scope.controller();
       const request = createRequest({
         userId: user.id,
         cursor: current.next_cursor,
@@ -205,6 +229,8 @@ export function usePersonalizedRecommendations(
             refreshMutation.reset();
           }
         );
+        scope.release(controller);
+        if (!isCurrent()) return false;
         queryClient.setQueryData(cacheKey, next);
         rememberRecommendationSessionSeenIds(
           user.id,
@@ -214,6 +240,8 @@ export function usePersonalizedRecommendations(
         setRefillError(mediaType, null);
         return true;
       } catch (error) {
+        if (!isCurrent()) return false;
+        scope.release(controller);
         setRefreshError(mediaType, toErrorMessage(error, "새 추천을 불러오지 못했습니다"));
         return false;
       }
@@ -225,6 +253,7 @@ export function usePersonalizedRecommendations(
   const removeOptimistically = (
     recommendationId: string
   ): RemovedFeedItem<PersonalizedRecommendation> | null => {
+    if (!isCurrent()) return null;
     const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
     if (!current) return null;
 
@@ -273,7 +302,7 @@ export function usePersonalizedRecommendations(
     removed: RemovedFeedItem<PersonalizedRecommendation>
   ): Promise<RecommendationRefillResult> => {
     if (
-      !user ||
+      !isCurrent() || !user ||
       refillMutation.isPending ||
       refreshMutation.isPending ||
       loadMoreMutation.isPending ||
@@ -288,6 +317,7 @@ export function usePersonalizedRecommendations(
 
     try {
       await queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
+      if (!isCurrent()) return "failed";
       const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
       if (!current) return "failed";
 
@@ -297,7 +327,7 @@ export function usePersonalizedRecommendations(
         ...removedIds
       ]);
 
-      const controller = new AbortController();
+      const controller = scope.controller();
       const request = createRequest({
         userId: user.id,
         cursor: current.next_cursor,
@@ -321,6 +351,8 @@ export function usePersonalizedRecommendations(
             refillMutation.reset();
           }
         );
+        scope.release(controller);
+        if (!isCurrent()) return "failed";
         const replacement = next.items[0];
 
         if (!replacement) {
@@ -363,6 +395,8 @@ export function usePersonalizedRecommendations(
         lastFailedRefills.current.delete(mediaType);
         return "refilled";
       } catch (error) {
+        if (!isCurrent()) return "failed";
+        scope.release(controller);
         lastFailedRefills.current.set(mediaType, removed);
         setRefillError(mediaType, toErrorMessage(error, "새 추천 한 작품을 불러오지 못했습니다"));
         return "failed";
@@ -378,9 +412,9 @@ export function usePersonalizedRecommendations(
     return refill(removed);
   };
 
-  const loadMore = async (): Promise<boolean> => {
+  const loadMore = async (limit = PERSONALIZED_RECOMMENDATION_BATCH_SIZE): Promise<boolean> => {
     if (
-      !user ||
+      !isCurrent() || !user ||
       recommendationQuery.isFetching ||
       refreshMutation.isPending ||
       refillMutation.isPending ||
@@ -397,6 +431,7 @@ export function usePersonalizedRecommendations(
     setLoadMoreError(mediaType, null);
     try {
       await queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
+      if (!isCurrent()) return false;
       const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
       if (!current || current.is_exhausted || !current.next_cursor) return false;
 
@@ -405,12 +440,12 @@ export function usePersonalizedRecommendations(
         setLoadMoreError(mediaType, "새 추천 탐색 시간이 초과되었습니다. 다시 시도해 주세요.");
         return false;
       }
-      const controller = new AbortController();
+      const controller = scope.controller();
       const request = createRequest({
         userId: user.id,
         cursor: current.next_cursor,
         excludeIds: collectRecommendationSessionSeenIds(current.items),
-        limit: PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
+        limit,
         mediaType,
         signal: controller.signal
       });
@@ -422,6 +457,8 @@ export function usePersonalizedRecommendations(
           loadMoreMutation.reset();
         }
       );
+      scope.release(controller);
+      if (!isCurrent()) return false;
       let appendedItemCount = 0;
       queryClient.setQueryData<PersonalizedRecommendationsResponse>(cacheKey, (latest) => {
         const base = latest ?? current;
@@ -454,11 +491,10 @@ export function usePersonalizedRecommendations(
         };
       });
       rememberRecommendationSessionSeenIds(user.id, collectRecommendationSessionSeenIds(next.items));
-      void recordImpressionsWithRetry(next.items).catch((error) =>
-        console.error("appended recommendation impression persistence failed:", error)
-      );
+
       return appendedItemCount > 0;
     } catch (error) {
+      if (!isCurrent()) return false;
       setLoadMoreError(mediaType, toErrorMessage(error, "다음 추천을 불러오지 못했습니다"));
       return false;
     } finally {
@@ -499,6 +535,7 @@ export function usePersonalizedRecommendations(
   });
 
   useEffect(() => {
+    if (!enabled) return;
     if (emptyContinuationDecision === "idle") {
       emptyContinuationAttempts.current = 0;
       emptyContinuationStartedAt.current = null;
@@ -518,13 +555,16 @@ export function usePersonalizedRecommendations(
     emptyContinuationStartedAt.current ??= Date.now();
     emptyContinuationAttempts.current += 1;
     setEmptyContinuationStopped(false);
-    void loadMoreRef.current();
-  }, [emptyContinuationDecision]);
+    void loadMoreRef.current(PERSONALIZED_RECOMMENDATION_BATCH_SIZE - visibleRecommendationCount);
+  }, [enabled, emptyContinuationDecision, visibleRecommendationCount]);
 
+  const feedbackInFlight = useRef(false);
   const submitFeedback = async (
     item: PersonalizedRecommendation,
     input: { targetType: "content" | "theme"; targetKey: string; action: "more" | "less" | "exclude" | "not_interested"; remove: boolean }
   ): Promise<RecommendationRefillResult | "saved"> => {
+    if (!isCurrent() || feedbackInFlight.current) throw new Error("지금은 추천 피드백을 저장할 수 없습니다. 연결 상태를 확인해 주세요.");
+    feedbackInFlight.current = true;
     const removed = input.remove ? removeOptimistically(item.canonical_id) : null;
     try {
       const feedback: RecommendationFeedback[] = [{
@@ -547,12 +587,13 @@ export function usePersonalizedRecommendations(
           })));
       }
       await recordPersonalizedRecommendationFeedback(feedback);
+      if (!isCurrent()) return "saved";
       if (removed) return refill(removed);
       return "saved";
     } catch (error) {
       if (removed) restore(removed);
       throw error;
-    }
+    } finally { feedbackInFlight.current = false; }
   };
   const refreshVariables = refreshMutation.variables;
   const refillVariables = refillMutation.variables;
@@ -564,6 +605,7 @@ export function usePersonalizedRecommendations(
     : null;
 
   const retryInitial = async () => {
+    if (!isCurrent()) return { data: undefined };
     setTimedOutCacheIdentity(null);
     setEmptyContinuationStopped(false);
     emptyContinuationAttempts.current = 0;
@@ -656,12 +698,14 @@ function countVisibleRecommendations(
 }
 
 async function recordImpressionsWithRetry(
-  items: readonly PersonalizedRecommendation[]
+  items: readonly PersonalizedRecommendation[],
+  signal: AbortSignal
 ): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (signal.aborted) return;
     try {
-      await recordPersonalizedRecommendationImpressions(items);
+      await recordPersonalizedRecommendationImpressions(items, signal);
       return;
     } catch (error) {
       lastError = error;

@@ -230,9 +230,9 @@ async function fetchTmdbDramaMonth(
   url.searchParams.set("with_origin_country", country);
   url.searchParams.set("without_genres", "16");
 
-  const payload = await fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), {
-    headers: applyTmdbAuth(url, apiKey)
-  });
+  // V3 authentication mutates the query string, so it must precede URL serialization.
+  const headers = applyTmdbAuth(url, apiKey);
+  const payload = await fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers });
   const items = (payload.results ?? [])
     .map((item, index) => normalizeTmdbDrama(item, request, index))
     .filter((item): item is CatalogRecommendationCandidate => Boolean(item));
@@ -252,9 +252,8 @@ async function fetchTmdbMovieMonth(
   url.searchParams.set("sort_by", "popularity.desc");
   url.searchParams.set("watch_region", TMDB_REGION);
 
-  const payload = await fetchJson<TmdbPage<TmdbMovieItem>>(url.toString(), {
-    headers: applyTmdbAuth(url, apiKey)
-  });
+  const headers = applyTmdbAuth(url, apiKey);
+  const payload = await fetchJson<TmdbPage<TmdbMovieItem>>(url.toString(), { headers });
   const items = (payload.results ?? [])
     .map((item, index) => normalizeTmdbMovie(item, request, index))
     .filter((item): item is CatalogRecommendationCandidate => Boolean(item));
@@ -331,9 +330,8 @@ async function fetchTmdbKoreanAnimeMonth(request: RecommendationProviderRequest)
       url.searchParams.set("watch_region", TMDB_REGION);
       url.searchParams.set("with_origin_country", "JP");
       url.searchParams.set("with_genres", "16");
-      return fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), {
-        headers: applyTmdbAuth(url, apiKey)
-      });
+      const headers = applyTmdbAuth(url, apiKey);
+      return fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers });
     })
   );
   return pages.flatMap((page) => page.results ?? []);

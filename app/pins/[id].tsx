@@ -1,18 +1,19 @@
-import { useRef, useState } from "react";
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PinComposer } from "@/components/pins/PinComposer";
-import { PinShareCard } from "@/components/pins/PinShareCard";
+import { EMOTION_LABELS } from "@/constants/emotions";
+import { usePinContext } from "@/hooks/usePinContext";
+import { formatSecondsToTimecode } from "@/utils/timecode";
+import { TagChip } from "@/components/pins/TagChip";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing } from "@/constants/theme";
 import { usePin } from "@/hooks/useTimelinePins";
-import type { TimelinePin } from "@/types/pins";
-import { sharePinCardImage } from "@/utils/pinShare";
 
 export default function PinDetailScreen() {
   const { id } = useLocalSearchParams<{
@@ -20,50 +21,20 @@ export default function PinDetailScreen() {
   }>();
   const router = useRouter();
   const pin = usePin(id);
-  const plainShareRef = useRef<View | null>(null);
-  const maskedShareRef = useRef<View | null>(null);
+  const context = usePinContext(pin.data?.content_id ?? "", pin.data?.episode_id ?? null);
+  const insets = useSafeAreaInsets();
   const [isSpoilerRevealed, setSpoilerRevealed] = useState(false);
   const [isEditing, setEditing] = useState(false);
+
+  useFocusEffect(useCallback(() => { setSpoilerRevealed(false); return () => setSpoilerRevealed(false); }, []));
 
   if (pin.isLoading) return <LoadingSkeleton variant="pin-item" />;
   if (pin.isError) return <ErrorState message={pin.error.message} onRetry={() => pin.refetch()} />;
   if (!pin.data) return <EmptyState title="핀을 찾을 수 없습니다" />;
   const currentPin = pin.data;
 
-  const sharePin = (target: TimelinePin) => {
-    if (Platform.OS === "web") return;
-
-    const capture = async (maskMemo: boolean) => {
-      try {
-        await sharePinCardImage(maskMemo ? maskedShareRef : plainShareRef);
-      } catch (error) {
-        console.error("Pin share failed:", error);
-        Alert.alert("공유 실패", error instanceof Error ? error.message : "핀 이미지를 공유하지 못했습니다.");
-      }
-    };
-
-    if (!target.is_spoiler) {
-      void capture(false);
-      return;
-    }
-
-    Alert.alert("스포일러 핀입니다", "메모를 가린 카드로 공유할까요?", [
-      { text: "취소", style: "cancel" },
-      { text: "가리고 공유", onPress: () => void capture(true) },
-      { text: "그대로 공유", onPress: () => void capture(false) }
-    ]);
-  };
-
   return (
     <View style={styles.container}>
-      {Platform.OS !== "web" ? (
-        <View style={styles.actionRow}>
-          <Pressable accessibilityRole="button" onPress={() => sharePin(currentPin)} style={styles.shareButton}>
-            <Ionicons color={colors.surface} name="share-social-outline" size={18} />
-            <Text style={styles.shareButtonText}>공유</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {isEditing ? (
         <PinComposer
           contentId={currentPin.content_id}
@@ -73,11 +44,13 @@ export default function PinDetailScreen() {
           onCancel={() => setEditing(false)}
           onSuccess={(updated) => {
             setEditing(false);
-            router.replace({ pathname: "/pins/[id]", params: { id: updated.id } });
+            router.dismissTo({ pathname: "/content/[id]/pins", params: { id: updated.content_id, ...(updated.episode_id ? { episodeId: updated.episode_id } : {}) } });
           }}
         />
       ) : (
-        <View style={styles.detailBody}>
+        <ScrollView contentContainerStyle={[styles.detailBody, { paddingBottom: insets.bottom + spacing.lg }]}>
+          <Text style={styles.memo}>{context.data?.title ?? currentPin.content_title ?? "작품"}</Text>
+          <Text style={styles.detailLabel}>{context.data?.label ?? (currentPin.episode_id ? `${currentPin.episode_number ?? ""}화` : "영화")} · {currentPin.timestamp_seconds === null ? "시간 없음" : formatSecondsToTimecode(currentPin.timestamp_seconds)}</Text>
           <Text style={styles.detailLabel}>메모</Text>
           {currentPin.is_spoiler && !isSpoilerRevealed ? (
             <Pressable accessibilityRole="button" onPress={() => setSpoilerRevealed(true)} style={styles.spoilerGate}>
@@ -86,18 +59,17 @@ export default function PinDetailScreen() {
           ) : (
             <Text style={styles.memo}>{currentPin.memo?.trim() || "메모 없음"}</Text>
           )}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>{currentPin.tags?.map(tag => <TagChip key={tag.id} tag={tag} />)}</View>
+          <Text style={styles.detailLabel}>감정 · {EMOTION_LABELS[currentPin.emotion ?? "none"]}</Text>
           <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.editButton}>
             <Text style={styles.editButtonText}>핀 편집</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backButton}>
+          <Pressable accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace("/pins")} style={styles.backButton}>
             <Text style={styles.backButtonText}>목록으로</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       )}
-      <View pointerEvents="none" style={styles.captureLayer}>
-        <PinShareCard pin={currentPin} ref={plainShareRef} />
-        <PinShareCard maskMemo pin={currentPin} ref={maskedShareRef} />
-      </View>
+
     </View>
   );
 }

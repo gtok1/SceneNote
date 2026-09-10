@@ -1,3 +1,5 @@
+import { Redirect , useLocalSearchParams, useRouter } from "expo-router";
+import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,7 +14,6 @@ import {
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -61,7 +62,7 @@ const STATUS_OPTIONS: {
   { icon: "bookmark", label: "보고 싶어요", value: "wishlist" }
 ];
 
-export default function PersonDetailScreen() {
+function PersonDetailScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_LAYOUT_MIN_WIDTH;
@@ -1196,3 +1197,5 @@ const styles = StyleSheet.create({
   },
   removeButtonText: { color: colors.danger, fontSize: 13, fontWeight: "900" }
 });
+
+export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <PersonDetailScreen /> : <Redirect href="/library" />; }

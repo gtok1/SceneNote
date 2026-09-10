@@ -16,6 +16,7 @@ const config: ExpoConfig = {
     bundleIdentifier: "com.scenenote.app"
   },
   android: {
+    softwareKeyboardLayoutMode: "resize",
     package: "com.scenenote.app"
   },
   web: {

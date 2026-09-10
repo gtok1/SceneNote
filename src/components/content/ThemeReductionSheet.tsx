@@ -1,4 +1,6 @@
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useModalFocus } from "@/hooks/useModalFocus";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 
@@ -20,10 +22,13 @@ export function ThemeReductionSheet({
   onClose,
   onSelect
 }: ThemeReductionSheetProps) {
+  const insets = useSafeAreaInsets();
+  const { panelRef, firstRef, focusFirst } = useModalFocus(visible);
   const isSubmitting = submittingThemeKey !== null;
 
   return (
     <Modal
+      onShow={focusFirst}
       animationType="slide"
       onRequestClose={isSubmitting ? undefined : onClose}
       transparent
@@ -41,7 +46,8 @@ export function ThemeReductionSheet({
           accessibilityViewIsModal
           aria-modal
           role="dialog"
-          style={styles.sheet}
+          ref={panelRef}
+          style={[styles.sheet, { maxHeight: "85%", paddingBottom: Math.max(insets.bottom, 24) }]}
         >
           <View style={styles.handle} />
           <View style={styles.header}>
@@ -52,6 +58,8 @@ export function ThemeReductionSheet({
             <Pressable
               accessibilityLabel="테마 선택 닫기"
               disabled={isSubmitting}
+              ref={firstRef}
+              accessibilityRole="button"
               hitSlop={8}
               onPress={onClose}
               style={styles.closeButton}
@@ -60,7 +68,7 @@ export function ThemeReductionSheet({
             </Pressable>
           </View>
 
-          <View style={styles.options}>
+          <ScrollView style={{flexShrink: 1}} contentContainerStyle={styles.options}>
             {themes.map((theme) => {
               const themeKey = `${theme.family}:${theme.key}`;
               const isCurrentTheme = submittingThemeKey === themeKey;
@@ -88,7 +96,7 @@ export function ThemeReductionSheet({
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>

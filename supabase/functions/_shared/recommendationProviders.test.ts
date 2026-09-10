@@ -54,3 +54,44 @@ function tmdb(overrides: Partial<TmdbTvItem>): TmdbTvItem {
     ...overrides
   };
 }
+
+describe("TMDB authentication request construction", () => {
+  for (const credentialKind of ["v3", "bearer"] as const) {
+    it(`authenticates drama, movie and anime localization before serializing the URL (${credentialKind})`, async () => {
+      const { fetchRecommendationProviderPage } = await import("./recommendationProviders.ts");
+      const originalFetch = globalThis.fetch;
+      const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+      const credential = credentialKind === "v3" ? "test-only-v3-key" : "eyJ.test.signature";
+      Object.defineProperty(globalThis, "Deno", { configurable: true, value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? credential : undefined } } });
+      let authenticatedRequests = 0;
+      globalThis.fetch = async (input, init) => {
+        const url = new URL(String(input));
+        if (url.hostname === "api.themoviedb.org") {
+          const headers = new Headers(init?.headers);
+          if (credentialKind === "v3") {
+            assert.equal(url.searchParams.get("api_key"), credential);
+            assert.equal(headers.has("Authorization"), false);
+          } else {
+            assert.equal(headers.get("Authorization"), `Bearer ${credential}`);
+            assert.equal(url.searchParams.has("api_key"), false);
+          }
+          authenticatedRequests += 1;
+          return new Response(JSON.stringify({results:[],total_pages:0}), {status:200});
+        }
+        assert.equal(url.hostname, "graphql.anilist.co");
+        return new Response(JSON.stringify({data:{Page:{pageInfo:{hasNextPage:false},media:[]}}}), {status:200});
+      };
+      try {
+        const month = credentialKind === "v3" ? "2025-02" : "2025-03";
+        for (const provider of ["tmdb_kr", "tmdb_jp", "tmdb_movie", "anilist"] as const) {
+          await fetchRecommendationProviderPage({provider,month,asOfDate:`${month}-20`,page:1});
+        }
+        assert.equal(authenticatedRequests, 6); // KR, JP, movies and three anime localization pages.
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalDeno) Object.defineProperty(globalThis,"Deno",originalDeno);
+        else Reflect.deleteProperty(globalThis,"Deno");
+      }
+    });
+  }
+});

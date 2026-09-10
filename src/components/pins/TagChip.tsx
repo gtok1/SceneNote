@@ -17,12 +17,13 @@ export const TagChip = memo(function TagChip({ tag, selected, onPress, onRemove 
   return (
     <Container
       accessibilityRole={onPress ? "button" : undefined}
+      accessibilityState={{ selected: Boolean(selected) }}
       onPress={onPress}
       style={[styles.chip, selected && styles.selected]}
     >
       <Text style={[styles.text, selected && styles.selectedText]}>#{tag.name}</Text>
       {onRemove ? (
-        <Pressable accessibilityRole="button" onPress={onRemove} hitSlop={8}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${tag.name} 삭제`} onPress={onRemove} style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}>
           <Text style={styles.remove}>×</Text>
         </Pressable>
       ) : null}
@@ -32,6 +33,8 @@ export const TagChip = memo(function TagChip({ tag, selected, onPress, onRemove 
 
 const styles = StyleSheet.create({
   chip: {
+    minHeight: 44,
+    minWidth: 44,
     alignItems: "center",
     alignSelf: "flex-start",
     backgroundColor: colors.surfaceMuted,

@@ -106,7 +106,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
-    maxHeight: 116,
     overflow: "hidden"
   },
   compactRow: {
@@ -120,7 +119,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 40,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.md
   },
@@ -136,7 +135,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     gap: spacing.sm,
-    height: 40,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.md
   },
@@ -155,7 +154,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 36,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.md,
     minWidth: 72

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StackBackButton } from "@/components/common/StackBackButton";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
@@ -10,7 +12,6 @@ import {
   ArchiveBoxIcon,
   CompassIcon,
   HomeTheaterIcon,
-  PersonChatIcon,
   PinQuoteIcon,
   UserSettingsIcon
 } from "@/components/icons/FooterIcons";
@@ -25,9 +26,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.root}>
       <AppProviders>
         <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
+        <Stack screenOptions={{ headerShown: true, title: "SceneNote", headerBackVisible: false, headerLeft: () => <StackBackButton /> }}>
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="share/index" />
           <Stack.Screen name="share/[id]" />
           <Stack.Screen name="people/[id]" />
@@ -145,13 +146,13 @@ const navItems = [
   { href: "/search", label: "검색", icon: CompassIcon, ariaLabel: "검색으로 이동" },
   { href: "/library", label: "라이브러리", icon: ArchiveBoxIcon, ariaLabel: "라이브러리로 이동" },
   { href: "/pins", label: "핀", icon: PinQuoteIcon, ariaLabel: "핀으로 이동" },
-  { href: "/people", label: "인물", icon: PersonChatIcon, ariaLabel: "인물로 이동" },
   { href: "/profile", label: "프로필", icon: UserSettingsIcon, ariaLabel: "프로필로 이동" }
 ] as const;
 
 type NavHref = (typeof navItems)[number]["href"];
 
 function GlobalBottomNav() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useGlobalSearchParams();
@@ -163,7 +164,7 @@ function GlobalBottomNav() {
   if (!session || segments[0] !== "(tabs)") return null;
 
   return (
-    <View style={styles.bottomNav}>
+    <View style={[styles.bottomNav, { paddingBottom: insets.bottom, paddingLeft: Math.max(4, insets.left), paddingRight: Math.max(4, insets.right) }]}>
       {navItems.map((item) => {
         const active = item.href === activeHref;
         const Icon = item.icon;
@@ -201,7 +202,6 @@ function getActiveNavHref(pathname: string, searchParams: Record<string, unknown
   if (route === "/search" || route.startsWith("/search/")) return "/search";
   if (route === "/library" || route.startsWith("/library/")) return "/library";
   if (route === "/pins" || route.startsWith("/pins/")) return "/pins";
-  if (route === "/people" || route.startsWith("/people/")) return "/people";
   if (route === "/profile" || route.startsWith("/profile/")) return "/profile";
 
   if (route === "/content" || route.startsWith("/content/")) {
@@ -231,29 +231,23 @@ const styles = StyleSheet.create({
     zIndex: 2000
   },
   bottomNav: {
-    alignItems: "center",
+    alignItems: "stretch",
     backgroundColor: "#FFFFFF",
     borderTopColor: "#E5E7EB",
     borderTopWidth: StyleSheet.hairlineWidth,
-    bottom: 0,
     flexDirection: "row",
-    height: 72,
-    justifyContent: "space-around",
-    left: 0,
-    paddingHorizontal: 16,
-    position: "absolute",
-    right: 0,
-    zIndex: 1000
+    flexShrink: 0,
+    paddingTop: 8
   },
   navItem: {
     alignItems: "center",
     borderRadius: 14,
     flex: 1,
+    minWidth: 0,
     gap: 4,
-    height: 56,
+    minHeight: 56,
+    paddingVertical: 8,
     justifyContent: "center",
-    maxWidth: 112,
-    minWidth: 72,
     position: "relative"
   },
   navItemHovered: {
@@ -277,7 +271,8 @@ const styles = StyleSheet.create({
     color: "#64748B",
     fontSize: 12,
     fontWeight: "500",
-    lineHeight: 12
+    textAlign: "center",
+    lineHeight: 16
   },
   navLabelActive: {
     color: colors.primary,

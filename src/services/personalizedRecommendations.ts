@@ -1,3 +1,4 @@
+import { recommendationProviderError } from "@/utils/searchRecommendationPolicy";
 import { supabase } from "@/lib/supabase";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import {
@@ -47,7 +48,7 @@ export async function recordPersonalizedRecommendationFeedback(
 ): Promise<void> {
   const { data, error } = await supabase.functions.invoke<{ saved?: boolean }>(
     "personalized-recommendations",
-    { body: createPersonalizedRecommendationFeedbackBody(feedback) }
+    { body: createPersonalizedRecommendationFeedbackBody(feedback), timeout: 10_000 }
   );
   if (error) throw new Error(error.message || "추천 피드백을 저장하지 못했습니다");
   if (!data?.saved) throw new Error("추천 피드백 응답이 올바르지 않습니다");
@@ -106,6 +107,7 @@ export async function getPersonalizedRecommendations(
   const failedSources = new Set<string>();
   const warnings = new Set<string>();
   let broadened = false;
+  let partial = false;
   let scanBudgetReached = false;
   let profileMode: RecommendationProfileMode = "cold_start";
 
@@ -124,6 +126,7 @@ export async function getPersonalizedRecommendations(
       page.failedSources.forEach((source) => failedSources.add(source));
       page.warnings.forEach((warning) => warnings.add(warning));
       broadened ||= page.broadened;
+      partial ||= page.partial;
       scanBudgetReached ||= page.scanBudgetReached;
       profileMode = page.profileMode;
       return page;
@@ -146,19 +149,22 @@ export async function getPersonalizedRecommendations(
     scan_budget_reached: scanBudgetReached,
     broadened,
     profile_mode: profileMode,
-    partial: failedSources.size > 0 && collection.items.length < request.limit,
+    partial: partial || failedSources.size > 0,
     failed_sources: [...failedSources],
     warnings: [...warnings]
   };
 }
 
 export async function recordPersonalizedRecommendationImpressions(
-  items: readonly PersonalizedRecommendation[]
+  items: readonly PersonalizedRecommendation[],
+  signal?: AbortSignal
 ): Promise<void> {
   if (items.length === 0) return;
   const { data, error } = await supabase.functions.invoke<{ saved?: number }>(
     "personalized-recommendations",
     {
+      timeout: 10_000,
+      ...(signal ? { signal } : {}),
       body: {
         action: "record_impressions",
         impressions: items.slice(0, 12)
@@ -191,12 +197,27 @@ async function fetchPersonalizedRecommendationPage(input: {
     { body, timeout: 10_000, ...(input.signal ? { signal: input.signal } : {}) }
   );
   if (error) {
-    throw new Error("추천 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    const response = error.context instanceof Response ? error.context : null;
+    const status = response?.status ?? null;
+    if (__DEV__ && response) {
+      const payload: unknown = await response.clone().json().catch(() => null);
+      const code = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
+      const knownCodes = ["ALL_PROVIDERS_FAILED", "RECOMMENDATION_FAILED", "INVALID_CURSOR", "LIBRARY_QUERY_FAILED", "FEEDBACK_QUERY_FAILED", "UNAUTHORIZED", "INVALID_REQUEST"];
+      console.warn("recommendation diagnostic", JSON.stringify({action:"recommend", status, code:typeof code === "string" && knownCodes.includes(code) ? code : "UNKNOWN"}));
+    }
+    throw new Error(status ? `추천 서버에 연결하지 못했습니다 (${status}). 다시 시도해 주세요.` : "추천 연결이 끊겼거나 응답 시간이 초과되었습니다. 다시 시도해 주세요.");
   }
   if (!data || !Array.isArray(data.items)) {
     throw new Error("개인화 추천 응답이 올바르지 않습니다");
   }
 
+  if (__DEV__) console.info("recommendation response", JSON.stringify({
+    action: "recommend", mediaType: input.mediaType, cursor: input.cursor ? "continuation" : "initial",
+    count: data.items.length, hasMore: data.has_more, partial: data.partial,
+    failedSources: (data.failed_sources ?? []).filter(source => ["tmdb", "anilist", "tmdb_kr", "tmdb_jp", "tmdb_movie"].includes(source))
+  }));
+  const providerError = recommendationProviderError(Boolean(data.providers_blocked), data.items.length);
+  if (providerError) throw new Error(providerError);
   const exhausted = Boolean(data.is_exhausted);
   const nextCursor = data.next_cursor ?? null;
   const hasMore = data.has_more ?? (!exhausted && Boolean(nextCursor));

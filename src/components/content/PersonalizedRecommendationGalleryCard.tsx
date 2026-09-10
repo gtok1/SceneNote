@@ -174,6 +174,7 @@ const styles = StyleSheet.create({
   reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   reasonText: { color: colors.text, fontSize: 11, fontWeight: "700", lineHeight: 15 },
   footer: {
+    flexWrap: "wrap",
     alignItems: "center",
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -182,10 +183,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     padding: spacing.sm
   },
-  quickButton: { alignItems: "center", flexDirection: "row", gap: 4, paddingVertical: spacing.xs },
-  iconButton: { alignItems: "center", height: 32, justifyContent: "center", width: 28 },
+  quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: 4, paddingVertical: spacing.xs },
+  iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
-  addButton: { backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  addButton: { minHeight: 44, backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   disabled: { opacity: 0.55 },
   addText: { color: colors.surface, fontSize: 11, fontWeight: "900" }
 });

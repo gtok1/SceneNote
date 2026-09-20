@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   decodeRecommendationCursor,
+  encodeRecommendationCursor,
   getKstMonthKey,
   hasKoreanDisplayTitle,
   scanRecommendationCatalog,
@@ -415,13 +416,78 @@ describe("provider failure semantics", () => {
         { tmdb_kr: { "2026-07": [drama] }, tmdb_jp: { "2026-07": [[]] } },
         new Set(["anilist:2026-07:1"])
       ),
-      { mediaType: "all", now: NOW }
+      { mediaType: "all", now: NOW, minimumMonth: "2026-07" }
     );
 
     assert.equal(result.items.length, 5);
     assert.equal(result.providersBlocked, true);
     assert.equal(result.allProvidersFailed, false);
     assert.equal(result.exhausted, false);
+  });
+
+  it("continues into older healthy results when an unavailable provider has no current-month results", async () => {
+    const calls: string[] = [];
+    const older = candidate("older-drama", "2026-06-01", 100, {
+      external_source: "tmdb", content_type: "kdrama"
+    });
+    const provider = fetcher({ tmdb_kr: { "2026-06": [[older]] } },
+      new Set(["anilist:2026-07:1", "anilist:2026-06:1"]), calls);
+    const first = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, maxMonthsPerRequest: 1, maxProviderRoundsPerRequest: 1
+    });
+    assert.equal(first.allProvidersFailed, false);
+    assert.equal(first.scanBudgetReached, true);
+    assert.equal(first.providersBlocked, false);
+    const next = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, cursor: first.nextCursor, limit: 1,
+      maxMonthsPerRequest: 1, maxProviderRoundsPerRequest: 1
+    });
+    assert.deepEqual(next.items.map((item) => item.external_id), ["older-drama"]);
+    assert.equal(next.allProvidersFailed, false);
+    assert(next.failedProviders.includes("anilist"));
+    assert.equal(calls.filter((call) => call === "anilist:2026-07:1").length, 1);
+    assert.equal(calls.length, 6);
+  });
+
+  it("recovers an existing cursor stalled on a failed provider without querying that month again", async () => {
+    const cursor = decodeRecommendationCursor(null, "all", NOW);
+    cursor.providers.tmdb_kr.done = true;
+    cursor.providers.tmdb_jp.done = true;
+    cursor.providers.anilist.failures = 1;
+    const calls: string[] = [];
+    const result = await scanRecommendationCatalog(fetcher({ tmdb_kr: { "2026-06": [[
+      candidate("recovered", "2026-06-01", 10, { external_source: "tmdb", content_type: "kdrama" })
+    ]] } }, new Set(), calls), {
+      mediaType: "all", now: NOW, cursor: encodeRecommendationCursor(cursor), limit: 1,
+      maxMonthsPerRequest: 1, maxProviderRoundsPerRequest: 1
+    });
+    assert.equal(result.items.length, 1);
+    assert(calls.every((call) => call.includes("2026-06")));
+    assert.equal(result.allProvidersFailed, false);
+  });
+
+  it("does not repeatedly retry a failed provider while healthy pages remain", async () => {
+    const calls: string[] = [];
+    const result = await scanRecommendationCatalog(fetcher({ tmdb_kr: { "2026-07": [[], [
+      candidate("page-two", "2026-07-01", 10, { external_source: "tmdb", content_type: "kdrama" })
+    ]] } }, new Set(["anilist:2026-07:1"]), calls), {
+      mediaType: "all", now: NOW, limit: 1
+    });
+    assert.equal(result.items.length, 1);
+    assert.equal(calls.filter((call) => call.startsWith("anilist:")).length, 1);
+  });
+
+  it("keeps an anime-only outage retryable and recovers on the next attempt", async () => {
+    const failed = await scanRecommendationCatalog(fetcher({}, new Set(["anilist:2026-07:1"])), {
+      mediaType: "anime", now: NOW
+    });
+    assert.equal(failed.allProvidersFailed, true);
+    assert.equal(failed.exhausted, false);
+    const recovered = await scanRecommendationCatalog(fetcher({ anilist: { "2026-07": [[
+      candidate("recovered-anime", "2026-07-01")
+    ]] } }), { mediaType: "anime", now: NOW, cursor: failed.nextCursor, limit: 1 });
+    assert.equal(recovered.items.length, 1);
+    assert.equal(recovered.allProvidersFailed, false);
   });
 });
 

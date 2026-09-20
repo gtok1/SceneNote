@@ -127,6 +127,12 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
   const selectedIdentitySets: Set<string>[] = [];
   const warnings = new Set<string>();
   const failedProviders = new Set<RecommendationProvider>();
+  for (const provider of activeProviders) {
+    if (state.providers[provider].failures > 0) {
+      failedProviders.add(provider);
+      warnings.add(`${provider}:unavailable`);
+    }
+  }
   const visitedMonths = new Set<string>();
   let providerRounds = 0;
   let broadened = state.month !== currentMonth;
@@ -137,6 +143,26 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       return completedResult(selected, profile.mode, broadened, warnings, failedProviders);
     }
 
+    // A failed provider must not hold healthy providers at an exhausted month.
+    // Keep failures distinct from done, so an entirely unavailable catalog still
+    // returns a retryable error. A new month retries each provider once.
+    const monthComplete = activeProviders.every((provider) => state.providers[provider].done);
+    const healthyMonthComplete = activeProviders.every((provider) => {
+      const providerState = state.providers[provider];
+      return providerState.done || providerState.failures > 0;
+    }) && activeProviders.some((provider) => state.providers[provider].done);
+    if (monthComplete || healthyMonthComplete) {
+      const previous = previousMonth(state.month);
+      if (compareMonths(previous, minimumMonth) < 0 && monthComplete) {
+        return completedResult(selected, profile.mode, broadened, warnings, failedProviders);
+      }
+      if (compareMonths(previous, minimumMonth) >= 0) {
+        state = moveCursorToMonth(state, previous, activeProviders);
+        broadened = true;
+        continue;
+      }
+    }
+
     if (!visitedMonths.has(state.month)) {
       if (visitedMonths.size >= maxMonths) {
         scanBudgetReached = true;
@@ -145,22 +171,14 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       visitedMonths.add(state.month);
     }
 
-    if (activeProviders.every((provider) => state.providers[provider].done)) {
-      const previous = previousMonth(state.month);
-      if (compareMonths(previous, minimumMonth) < 0) {
-        return completedResult(selected, profile.mode, broadened, warnings, failedProviders);
-      }
-      state = moveCursorToMonth(state, previous, activeProviders);
-      broadened = true;
-      continue;
-    }
-
     if (providerRounds >= maxRounds) {
       scanBudgetReached = true;
       break;
     }
 
-    const attemptedProviders = activeProviders.filter((provider) => !state.providers[provider].done);
+    const pendingProviders = activeProviders.filter((provider) => !state.providers[provider].done);
+    const healthyPendingProviders = pendingProviders.filter((provider) => state.providers[provider].failures === 0);
+    const attemptedProviders = healthyPendingProviders.length > 0 ? healthyPendingProviders : pendingProviders;
     const settledPages = await Promise.allSettled(
       attemptedProviders.map((provider) =>
         fetchProviderPage({
@@ -182,7 +200,7 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
         state.providers[provider].failures = 0;
         return;
       }
-      state.providers[provider].failures += 1;
+      state.providers[provider].failures = Math.min(100, state.providers[provider].failures + 1);
       failedProviders.add(provider);
       warnings.add(`${provider}:unavailable`);
     });

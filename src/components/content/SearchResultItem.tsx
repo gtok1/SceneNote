@@ -12,9 +12,10 @@ import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 interface SearchResultItemProps {
   result: SearchResult;
   onPress: () => void;
-  onAddToLibrary?: () => void;
-  addLabel?: string;
-  isAddDisabled?: boolean;
+  onAddToWishlist?: () => void;
+  onMarkCompleted?: () => void;
+  areActionsDisabled?: boolean;
+  isActionPending?: boolean;
   libraryItems?: readonly LibraryListItem[];
   recommendationReason?: string | null;
   onFindSimilar?: () => void;
@@ -23,9 +24,10 @@ interface SearchResultItemProps {
 export const SearchResultItem = memo(function SearchResultItem({
   result,
   onPress,
-  onAddToLibrary,
-  addLabel = "추가",
-  isAddDisabled = false,
+  onAddToWishlist,
+  onMarkCompleted,
+  areActionsDisabled = false,
+  isActionPending = false,
   libraryItems = [],
   recommendationReason,
   onFindSimilar
@@ -85,16 +87,28 @@ export const SearchResultItem = memo(function SearchResultItem({
           <Text style={styles.similarText}>비슷한 작품</Text>
         </Pressable>
       ) : null}
-      {onAddToLibrary ? (
+      {onAddToWishlist ? (
         <Pressable
-          accessibilityLabel={`${result.title_primary} ${addLabel}`}
+          accessibilityLabel={`${result.title_primary} 보고 싶음`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
-          disabled={isAddDisabled}
-          onPress={onAddToLibrary}
-          style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
+          accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+          disabled={areActionsDisabled}
+          onPress={onAddToWishlist}
+          style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}
         >
-          <Text style={styles.addText}>{addLabel}</Text>
+          <Text style={styles.addText}>보고 싶음</Text>
+        </Pressable>
+      ) : null}
+      {onMarkCompleted ? (
+        <Pressable
+          accessibilityLabel={`${result.title_primary} 완료`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+          disabled={areActionsDisabled}
+          onPress={onMarkCompleted}
+          style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}
+        >
+          <Text style={styles.addText}>완료</Text>
         </Pressable>
       ) : null}
       </View>
@@ -174,6 +188,8 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   addButton: {
+    alignItems: "center",
+    justifyContent: "center",
     minHeight: 44,
     minWidth: 44,
     backgroundColor: colors.primary,

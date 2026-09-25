@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
+import { useAiringAvailability } from "@/hooks/useAiringAvailability";
 import { useLibraryItemCast } from "@/hooks/useLibraryItemCast";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
@@ -35,6 +36,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
   const continueLabel = createContinueWatchingLabel(item);
+  const { availableCount, upcomingLabel } = useAiringAvailability(item);
   const onOpenContinue = continueLabel?.action === "open_progress_setting"
     ? onOpenProgressSetting ?? onOpenEpisodes
     : onOpenEpisodes;
@@ -52,6 +54,15 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
           <Text numberOfLines={2} style={styles.title}>
             {item.title_primary}{item.season_number != null ? ` · 시즌 ${item.season_number}` : ""}
           </Text>
+          {availableCount > 0 ? (
+            <Text accessibilityLabel={`공개된 미시청 회차 ${availableCount}개`} style={styles.availableBadge}>
+              새 회차 · 지금 볼 {availableCount}개
+            </Text>
+          ) : upcomingLabel ? (
+            <Text accessibilityLabel={`다음 화 ${upcomingLabel}`} style={styles.upcomingBadge}>
+              {upcomingLabel}
+            </Text>
+          ) : null}
           <Text numberOfLines={1} style={styles.meta}>
             {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
           </Text>
@@ -159,6 +170,28 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     fontWeight: "700"
+  },
+  availableBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.successSoft,
+    borderRadius: radius.sm,
+    color: colors.success,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
+  },
+  upcomingBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.sm,
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
   },
   review: {
     color: colors.primary,

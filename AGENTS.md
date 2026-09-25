@@ -6,6 +6,7 @@
 
 | 문서 | 내용 | 언제 읽나 |
 |------|------|-----------|
+| `docs/00_codex_doc_pattern.md` | 명세서 + Codex 프롬프트 짝의 작성 패턴·스켈레톤·체크리스트 | 새 명세서나 작업 지시문을 **쓰기 전에** |
 | `docs/11_screen_implementation_spec.md` | MVP 전체 화면 구현·QA 기준안. 화면 명세 포맷의 원본 | 화면을 만들거나 고칠 때 항상 |
 | `docs/12_episode_progress_spec.md` | 시청 진행 위치(몇 화까지 봤는지) 설정 기능 전체 명세 | 라이브러리·진행률·이어보기 관련 작업 |
 | `docs/13_codex_prompt_episode_progress.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
@@ -14,6 +15,12 @@
 | `docs/16_codex_prompt_season_search.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
 | `docs/17_season_library_tracking_spec.md` | 시즌 단위 라이브러리 추적 명세. `user_library_items.season_number` 도입과 검색 시즌 펼치기 | 검색·등록·시즌 관련 작업 |
 | `docs/18_codex_prompt_season_library_tracking.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
+| `docs/26_recommendation_and_season_lookup_fixes_spec.md` | 코드 리뷰 결함 3건 명세. 추천 제공처 복구 보고(F-1)와 시즌 라이브러리 조회 폴백(F-2·F-3) | 추천 장애 보고·시즌 등록 상태 조회 관련 작업 |
+| `docs/27_excluded_relationship_themes_spec.md` | 추천 피드에서 BL·GL·백합·퀴어 테마 작품을 하드 제외하는 명세. 테마 별칭 확장과 서버·클라이언트 이중 적용 | 추천 후보 필터·테마 분류 관련 작업 |
+| `docs/28_recommendation_scroll_pagination_fixes_spec.md` | 추천 피드 스크롤 추가 로딩과 카드 액션 정렬 회귀 수정 명세 | 검색 추천 피드·추천 카드 화면 작업 |
+| `docs/29_codex_prompt_recommendation_scroll_pagination_fixes.md` | 위 회귀 수정의 Codex 작업 지시문 | 위 결함을 구현할 때 |
+| `docs/30_recommendation_fill_and_action_consistency_fixes_spec.md` | 추천 12개 미달·탐색 시간 초과와 카드 세 번째 행동 아이콘 노출 재수정 명세 | 검색 추천 보충·카드 행동 작업 |
+| `docs/31_usability_review_fixes_spec.md` | 사용성 검토 결함 U-1~U-11. 모바일 핀 열기, 라이브러리 삭제 확인, 회차·시즌 장면순 정렬, 핀 상세 편집/삭제 이동, 에피소드 다음 회차 스크롤, 태그 제안 | 핀 탭·핀 작성·작품 상세·에피소드 목록 작업 |
 
 **규칙**
 

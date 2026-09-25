@@ -83,26 +83,36 @@ export const PersonalizedRecommendationGalleryCard = memo(
           </Pressable>
 
           <View style={styles.footer}>
-            <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={styles.iconButton}>
-              <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
-            </Pressable>
-            <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={styles.iconButton}>
-              <Ionicons color={colors.textMuted} name="git-compare-outline" size={18} />
-            </Pressable>
-            {onReduceTheme ? (
-              <Pressable accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`} accessibilityRole="button" onPress={onReduceTheme} style={styles.iconButton}>
-                <Ionicons color={colors.textMuted} name="options-outline" size={18} />
+            <View style={styles.footerTopRow}>
+              <View style={styles.feedbackActions}>
+                <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={styles.iconButton}>
+                  <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
+                </Pressable>
+                <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={styles.iconButton}>
+                  <Ionicons color={colors.textMuted} name="git-compare-outline" size={18} />
+                </Pressable>
+                <Pressable
+                  accessibilityHint={onReduceTheme ? "이 작품과 비슷한 테마의 추천을 줄입니다" : "이 작품에는 조절할 수 있는 테마 정보가 없습니다"}
+                  accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !onReduceTheme }}
+                  disabled={!onReduceTheme}
+                  onPress={onReduceTheme}
+                  style={[styles.iconButton, !onReduceTheme ? styles.disabledThemeIcon : null]}
+                >
+                  <Ionicons color={colors.textMuted} name="options-outline" size={18} />
+                </Pressable>
+              </View>
+              <Pressable
+                accessibilityLabel={`${result.title_primary} 빠른 보기`}
+                accessibilityRole="button"
+                onPress={onOpenQuickView}
+                style={styles.quickButton}
+              >
+                <Ionicons color={colors.text} name="eye-outline" size={14} />
+                <Text style={styles.quickText}>빠른 보기</Text>
               </Pressable>
-            ) : null}
-            <Pressable
-              accessibilityLabel={`${result.title_primary} 빠른 보기`}
-              accessibilityRole="button"
-              onPress={onOpenQuickView}
-              style={styles.quickButton}
-            >
-              <Ionicons color={colors.text} name="eye-outline" size={14} />
-              <Text style={styles.quickText}>빠른 보기</Text>
-            </Pressable>
+            </View>
             <Pressable
               accessibilityLabel={`${result.title_primary} ${addLabel}`}
               accessibilityRole="button"
@@ -174,19 +184,24 @@ const styles = StyleSheet.create({
   reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   reasonText: { color: colors.text, fontSize: 11, fontWeight: "700", lineHeight: 15 },
   footer: {
-    flexWrap: "wrap",
-    alignItems: "center",
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
     gap: spacing.xs,
-    justifyContent: "space-between",
     padding: spacing.sm
   },
-  quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: 4, paddingVertical: spacing.xs },
+  footerTopRow: {
+    alignItems: "center",
+    columnGap: spacing.xs,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between"
+  },
+  feedbackActions: { flexDirection: "row" },
+  quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: 4, justifyContent: "center", marginLeft: "auto" },
   iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  disabledThemeIcon: { opacity: 0.4 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
-  addButton: { minHeight: 44, backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  addButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.sm },
   disabled: { opacity: 0.55 },
   addText: { color: colors.surface, fontSize: 11, fontWeight: "900" }
 });

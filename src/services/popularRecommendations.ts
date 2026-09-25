@@ -7,10 +7,13 @@ import {
   isWithinCandidateWindow,
   rankPopularRecommendations
 } from "@/utils/popularRanking";
+import { filterExcludedRecommendations, type RecommendationExclusions } from "@/utils/excludedThemes";
 
 export type RecommendationCategory = "drama" | "anime";
 
 export interface PopularRecommendation extends SearchResult {
+  keywords?: string[] | null;
+  themes?: { family?: string | null; key?: string | null }[] | null;
   category: RecommendationCategory;
   rank: number;
   trend_source: string;
@@ -35,7 +38,10 @@ interface LastGoodRecommendationCache {
   response: PopularRecommendationsResponse;
 }
 
-export async function getPopularRecommendations(): Promise<PopularRecommendationsResponse> {
+export async function getPopularRecommendations(
+  userId: string,
+  exclusions: RecommendationExclusions
+): Promise<PopularRecommendationsResponse> {
   try {
     const { data, error } = await supabase.functions.invoke<PopularRecommendationsResponse>("popular-recommendations", {
       body: {
@@ -48,8 +54,8 @@ export async function getPopularRecommendations(): Promise<PopularRecommendation
     if (!data) throw new Error("추천 응답이 비어 있습니다");
 
     const normalizedCategories = {
-      drama: normalizeRecommendationDates(data.categories?.drama ?? []).map(applyKoreanTitleFallback),
-      anime: normalizeRecommendationDates(data.categories?.anime ?? []).map(applyKoreanTitleFallback)
+      drama: filterExcludedRecommendations(normalizeRecommendationDates(data.categories?.drama ?? []).map(applyKoreanTitleFallback), exclusions),
+      anime: filterExcludedRecommendations(normalizeRecommendationDates(data.categories?.anime ?? []).map(applyKoreanTitleFallback), exclusions)
     };
     const response = {
       ...data,
@@ -62,18 +68,26 @@ export async function getPopularRecommendations(): Promise<PopularRecommendation
       stale: false
     };
 
-    await saveLastGoodRecommendations(response);
+    await saveLastGoodRecommendations(response, userId, exclusions);
     return response;
   } catch (error) {
-    return getLastGoodRecommendations(error instanceof Error ? error.message : "추천을 불러오지 못했습니다");
+    return getLastGoodRecommendations(userId, exclusions, error instanceof Error ? error.message : "추천을 불러오지 못했습니다");
   }
 }
 
-async function getLastGoodRecommendations(reason?: string): Promise<PopularRecommendationsResponse> {
-  const cached = await readLastGoodRecommendations();
+async function getLastGoodRecommendations(
+  userId: string,
+  exclusions: RecommendationExclusions,
+  reason?: string
+): Promise<PopularRecommendationsResponse> {
+  const cached = await readLastGoodRecommendations(userId, exclusions);
   if (cached) {
     return {
       ...cached.response,
+      categories: {
+        drama: filterExcludedRecommendations(cached.response.categories.drama, exclusions),
+        anime: filterExcludedRecommendations(cached.response.categories.anime, exclusions)
+      },
       failedSources: cached.response.failedSources ?? [],
       partial: true,
       stale: true
@@ -174,7 +188,17 @@ function monthFromDate(value: string | null | undefined): number | null {
   return Number.isFinite(month) && month >= 1 && month <= 12 ? month : null;
 }
 
-async function saveLastGoodRecommendations(response: PopularRecommendationsResponse): Promise<void> {
+function recommendationCacheKey(userId: string, exclusions: RecommendationExclusions): string {
+  const themeKeys = [...exclusions.excludedThemeKeys].sort();
+  const genreKeys = [...exclusions.excludedGenres].sort();
+  return `${LAST_GOOD_RECOMMENDATIONS_KEY}:${userId}:${JSON.stringify([themeKeys, genreKeys])}`;
+}
+
+async function saveLastGoodRecommendations(
+  response: PopularRecommendationsResponse,
+  userId: string,
+  exclusions: RecommendationExclusions
+): Promise<void> {
   try {
     const cache: LastGoodRecommendationCache = {
       savedAt: new Date().toISOString(),
@@ -184,15 +208,18 @@ async function saveLastGoodRecommendations(response: PopularRecommendationsRespo
       }
     };
 
-    await AsyncStorage.setItem(LAST_GOOD_RECOMMENDATIONS_KEY, JSON.stringify(cache));
+    await AsyncStorage.setItem(recommendationCacheKey(userId, exclusions), JSON.stringify(cache));
   } catch (error) {
     console.warn("popular recommendations last-good cache write failed:", error);
   }
 }
 
-async function readLastGoodRecommendations(): Promise<LastGoodRecommendationCache | null> {
+async function readLastGoodRecommendations(
+  userId: string,
+  exclusions: RecommendationExclusions
+): Promise<LastGoodRecommendationCache | null> {
   try {
-    const rawValue = await AsyncStorage.getItem(LAST_GOOD_RECOMMENDATIONS_KEY);
+    const rawValue = await AsyncStorage.getItem(recommendationCacheKey(userId, exclusions));
     if (!rawValue) return null;
 
     const parsed = JSON.parse(rawValue) as Partial<LastGoodRecommendationCache>;

@@ -4,9 +4,9 @@ import {
   type RecommendationCandidate
 } from "./recommendationEngine.ts";
 
-// Keep thirty full batches distinct while allowing older cards to re-enter the
-// pool instead of permanently exhausting recommendations as history grows.
-export const RECENT_RECOMMENDATION_IMPRESSION_LIMIT = 30 * 12;
+// Avoid repeating the two most recent batches. A longer exclusion window can
+// exhaust sparse monthly catalogs and force many empty provider requests.
+export const RECENT_RECOMMENDATION_IMPRESSION_LIMIT = 2 * 12;
 
 export interface RecommendationImpressionRow {
   user_id: string;

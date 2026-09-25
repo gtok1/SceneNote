@@ -10,8 +10,8 @@ import {
 import type { RecommendationCandidate } from "./recommendationEngine.ts";
 
 describe("recommendation impression rows", () => {
-  it("keeps thirty full recommendation batches in the recent exclusion window", () => {
-    assert.equal(RECENT_RECOMMENDATION_IMPRESSION_LIMIT, 360);
+  it("keeps the two most recent recommendation batches out of the next request", () => {
+    assert.equal(RECENT_RECOMMENDATION_IMPRESSION_LIMIT, 24);
   });
 
   it("builds one batch row per displayed canonical work", () => {

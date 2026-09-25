@@ -1,6 +1,13 @@
 import type { CastMemberMeta, ContentMeta, EpisodeMeta, ExternalSource, SeasonMeta } from "./types.ts";
 import { normalizeGenreNames } from "./genres.ts";
 import { hasTmdbAnimationGenre } from "./tmdbClassification.ts";
+import {
+  koreaDateOnly,
+  releasedEpisodeFromAniList,
+  releasedEpisodeFromDatedEpisodes,
+  upcomingEpisodeFromAniList,
+  upcomingEpisodeFromDatedEpisodes
+} from "./episodeAvailability.ts";
 
 const TMDB_LANGUAGE = "ko-KR";
 
@@ -716,6 +723,64 @@ export async function fetchContentDetail(
     case "tvmaze":
       return fetchTvmazeDetail(externalId);
   }
+}
+
+export async function fetchEpisodeAvailability(params: {
+  source: ExternalSource;
+  externalId: string;
+  seasonNumber: number;
+  episodeCount?: number | null;
+}, now: Date = new Date()): Promise<{
+  releasedEpisodeNumber: number | null;
+  upcomingEpisodeNumber: number | null;
+  nextAirDate: string | null;
+}> {
+  if (params.source === "anilist") {
+    const endpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
+    const payload = await postJson<{
+      data?: {
+        Media?: {
+          status?: string | null;
+          episodes?: number | null;
+          nextAiringEpisode?: { episode: number; airingAt: number } | null;
+        } | null;
+      };
+      errors?: { message?: string }[];
+    }>(endpoint, {
+      query: `query GetEpisodeAvailability($id: Int!) {
+        Media(id: $id, type: ANIME) {
+          status
+          episodes
+          nextAiringEpisode { episode airingAt }
+        }
+      }`,
+      variables: { id: Number.parseInt(params.externalId, 10) }
+    });
+    if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList airing query failed");
+    if (!payload.data?.Media) return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null };
+    const releasedEpisodeNumber = releasedEpisodeFromAniList(
+      payload.data.Media.status,
+      payload.data.Media.episodes,
+      payload.data.Media.nextAiringEpisode,
+      Math.floor(now.getTime() / 1000)
+    );
+    const upcoming = upcomingEpisodeFromAniList(payload.data.Media.nextAiringEpisode, Math.floor(now.getTime() / 1000));
+    return {
+      releasedEpisodeNumber,
+      upcomingEpisodeNumber: upcoming?.episodeNumber ?? null,
+      nextAirDate: upcoming?.airDate ?? null
+    };
+  }
+
+  if (params.source === "kitsu") return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null };
+  const episodes = await fetchEpisodesForSeason(params);
+  const todayInKorea = koreaDateOnly(now);
+  const upcoming = upcomingEpisodeFromDatedEpisodes(episodes, todayInKorea);
+  return {
+    releasedEpisodeNumber: releasedEpisodeFromDatedEpisodes(episodes, todayInKorea),
+    upcomingEpisodeNumber: upcoming?.episodeNumber ?? null,
+    nextAirDate: upcoming?.airDate ?? null
+  };
 }
 
 export async function fetchEpisodesForSeason(params: {

@@ -5,7 +5,7 @@ import type {
 } from "./recommendationCatalog.ts";
 import type { RecommendationCandidate } from "./recommendationEngine.ts";
 import { inferTmdbTvContentType } from "./tmdbClassification.ts";
-import { normalizeContentThemes } from "./recommendationThemes.ts";
+import { normalizeContentThemes, type ContentTheme } from "./recommendationThemes.ts";
 
 export interface CatalogRecommendationCandidate extends RecommendationCandidate {
   title_original: string | null;
@@ -109,6 +109,11 @@ const TMDB_MAX_PAGE = 500;
 const TMDB_ANIME_LOCALIZATION_PAGES = 3;
 const PROVIDER_CACHE_TTL_MS = 10 * 60_000;
 const PROVIDER_CACHE_MAX_ENTRIES = 300;
+const TMDB_KEYWORD_CACHE_TTL_MS = 24 * 60 * 60_000;
+const TMDB_KEYWORD_FAILURE_TTL_MS = 60_000;
+const TMDB_KEYWORD_CACHE_MAX_ENTRIES = 2_000;
+const TMDB_KEYWORD_CONCURRENCY = 8;
+export const TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT = 8;
 
 const providerPageCache = new Map<
   string,
@@ -118,6 +123,102 @@ const animeLocalizationCache = new Map<
   string,
   { expiresAt: number; promise: Promise<TmdbTvItem[]> }
 >();
+const tmdbKeywordCache = new Map<string, { expiresAt: number; promise: Promise<string[] | null> }>();
+const tmdbKeywordWaiters: (() => void)[] = [];
+let activeTmdbKeywordRequests = 0;
+
+interface TmdbKeywordPayload {
+  results?: { name?: string | null }[] | null;
+  keywords?: { name?: string | null }[] | null;
+}
+
+export interface TmdbKeywordCandidate {
+  external_source: string;
+  external_id: string;
+  content_type: string;
+  genres?: readonly string[] | null;
+  keywords?: readonly string[] | null;
+  themes?: readonly ContentTheme[] | null;
+}
+
+// Discovery and trending endpoints only return broad genre IDs. Fetch structured
+// keywords for users who enabled relationship exclusions; reuse them across
+// personalized and popular requests without adding latency for other accounts.
+export async function enrichTmdbRecommendationCandidates<T extends TmdbKeywordCandidate>(
+  candidates: readonly T[],
+  shouldLookup: (candidate: T) => boolean = () => true
+): Promise<T[]> {
+  let lookupCount = 0;
+  return Promise.all(candidates.map(async (candidate) => {
+    if (candidate.external_source !== "tmdb" || !/^\d+$/u.test(candidate.external_id)) return candidate;
+    // Already-seen/library candidates are excluded by the catalog scanner. Do
+    // not spend the bounded keyword budget on them before it reaches new works.
+    if (!shouldLookup(candidate)) return candidate;
+    if (lookupCount >= TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT) return candidate;
+    lookupCount += 1;
+    const kind = candidate.content_type === "movie" ? "movie" : "tv";
+    const keywords = await getCachedTmdbKeywords(kind, candidate.external_id);
+    if (keywords === null) return candidate;
+    return {
+      ...candidate,
+      keywords,
+      themes: normalizeContentThemes({ external_source: "tmdb", genres: candidate.genres, keywords })
+    };
+  }));
+}
+
+async function getCachedTmdbKeywords(kind: "tv" | "movie", id: string): Promise<string[] | null> {
+  const key = `${kind}:${id}`;
+  const now = Date.now();
+  const cached = tmdbKeywordCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = withTmdbKeywordSlot(() => fetchTmdbKeywords(kind, id));
+  tmdbKeywordCache.set(key, { expiresAt: now + TMDB_KEYWORD_CACHE_TTL_MS, promise });
+  while (tmdbKeywordCache.size > TMDB_KEYWORD_CACHE_MAX_ENTRIES) {
+    const oldest = tmdbKeywordCache.keys().next().value;
+    if (!oldest) break;
+    tmdbKeywordCache.delete(oldest);
+  }
+  const result = await promise;
+  if (result === null) {
+    tmdbKeywordCache.set(key, {
+      expiresAt: Date.now() + TMDB_KEYWORD_FAILURE_TTL_MS,
+      promise: Promise.resolve(null)
+    });
+  }
+  return result;
+}
+
+async function withTmdbKeywordSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeTmdbKeywordRequests >= TMDB_KEYWORD_CONCURRENCY) {
+    await new Promise<void>((resolve) => tmdbKeywordWaiters.push(resolve));
+  } else {
+    activeTmdbKeywordRequests += 1;
+  }
+  try {
+    return await task();
+  } finally {
+    const next = tmdbKeywordWaiters.shift();
+    if (next) next();
+    else activeTmdbKeywordRequests -= 1;
+  }
+}
+
+async function fetchTmdbKeywords(kind: "tv" | "movie", id: string): Promise<string[] | null> {
+  const apiKey = Deno.env.get("TMDB_API_KEY");
+  if (!apiKey) return null;
+  const url = new URL(`https://api.themoviedb.org/3/${kind}/${id}/keywords`);
+  const headers = applyTmdbAuth(url, apiKey);
+  try {
+    const payload = await fetchJson<TmdbKeywordPayload>(url.toString(), { headers }, 2_500);
+    const tags = kind === "movie" ? payload.keywords : payload.results;
+    if (!Array.isArray(tags)) return null;
+    return [...new Set(tags.map((entry) => entry.name?.trim()).filter((name): name is string => Boolean(name)))];
+  } catch (error) {
+    console.warn(`TMDB ${kind} keyword lookup failed for ${id}:`, error);
+    return null;
+  }
+}
 
 const TMDB_GENRE_NAMES = new Map<number, string>([
   [12, "Adventure"],
@@ -422,7 +523,8 @@ function normalizeAniListAnime(
   const providerRank = (request.page - 1) * ANILIST_PAGE_SIZE + index + 1;
   const localizedOverview = hasHangul(koreanItem?.overview) ? cleanText(koreanItem?.overview) : null;
   const sourceTags = (item.tags ?? [])
-    .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler && finiteOr(tag.rank, 0) >= 40)
+    // Even low-ranked provider tags are decisive for a user's hard exclusions.
+    .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler)
     .map((tag) => ({ name: tag.name?.trim() ?? "", source: "anilist", rank: tag.rank }))
     .filter((tag) => Boolean(tag.name));
   return {

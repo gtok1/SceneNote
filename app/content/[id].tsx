@@ -37,6 +37,7 @@ import type { WatchStatus } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
+import { resolveContentLibraryItem } from "@/utils/seasonLibraryMatch";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 import {
   describeWatchCountSaveState,
@@ -45,6 +46,12 @@ import {
 
 const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
+
+function parseSeasonParam(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export default function ContentDetailScreen() {
   const params = useLocalSearchParams<{
@@ -116,7 +123,13 @@ export default function ContentDetailScreen() {
     title: watchProviderTitle
   });
   const resolvedContentId = externalDetail.data?.content.content_id ?? params.id;
-  const libraryItem = library.data?.find((item) => item.content_id === resolvedContentId && (params.libraryItemId ? item.library_item_id === params.libraryItemId : item.season_number === (params.season ? Number(params.season) : null)));
+  const requestedSeason = parseSeasonParam(params.season);
+  const libraryMatch = resolveContentLibraryItem(library.data ?? [], {
+    contentId: resolvedContentId,
+    libraryItemId: params.libraryItemId ?? null,
+    seasonNumber: requestedSeason
+  });
+  const libraryItem = libraryMatch.kind === "none" ? undefined : libraryMatch.item;
   const seasons = useSeasons(libraryItem?.content_id);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
   const addToast = useAppUIStore((state) => state.addToast);
@@ -215,7 +228,7 @@ export default function ContentDetailScreen() {
     const resultToAdd = externalDetail.data?.content ?? externalResult;
     if (!resultToAdd) return;
     addToLibrary.mutate(
-      { result: resultToAdd, status, ...(params.season ? { seasonNumber: Number(params.season) } : {}) },
+      { result: resultToAdd, status, ...(requestedSeason !== null ? { seasonNumber: requestedSeason } : {}) },
       {
         onSuccess: (response) => router.replace({ pathname: "/content/[id]", params: { id: response.content_id, ...(params.season ? { season: params.season } : {}) } }),
         onError: (error) => Alert.alert("추가 실패", error.message)
@@ -456,6 +469,19 @@ export default function ContentDetailScreen() {
           </View>
         ) : null}
 
+        {libraryItem ? (
+          <ContentReviewEditor
+            contentId={libraryItem.content_id}
+            contentAirDate={view.airDate}
+            contentEndDate={view.endDate}
+            contentAirYear={view.airYear}
+            firstWatchedAt={libraryItem.first_watched_at}
+            lastWatchedAt={libraryItem.last_watched_at}
+            libraryItemId={libraryItem.library_item_id}
+            onSaved={() => addToast("내 감상을 저장했어요.", "success")}
+          />
+        ) : null}
+
         <Text numberOfLines={overviewExpanded ? undefined : 3} style={styles.overview}>{view.overview || "줄거리 정보가 없습니다."}</Text>
         {view.overview ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: overviewExpanded }} onPress={() => setOverviewExpanded(value => !value)} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: colors.primary }}>{overviewExpanded ? "줄거리 접기" : "줄거리 더보기"}</Text></Pressable> : null}
 
@@ -561,20 +587,6 @@ export default function ContentDetailScreen() {
             ) : null}
           </View>
         ) : null}
-
-        {EXTENDED_FEATURES_ENABLED && libraryItem ? (
-          <ContentReviewEditor
-            contentId={libraryItem.content_id}
-            contentAirDate={view.airDate}
-            contentEndDate={view.endDate}
-            contentAirYear={view.airYear}
-            firstWatchedAt={libraryItem.first_watched_at}
-            lastWatchedAt={libraryItem.last_watched_at}
-            libraryItemId={libraryItem.library_item_id}
-            onSaved={openLibraryList}
-          />
-        ) : null}
-
 
       </View>
     </ScrollView>

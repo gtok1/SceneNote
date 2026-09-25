@@ -1,4 +1,4 @@
-import { fetchEpisodesForSeason } from "../_shared/externalContent.ts";
+import { fetchEpisodeAvailability, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ExternalSource } from "../_shared/types.ts";
@@ -7,6 +7,7 @@ interface FetchEpisodesRequest {
   content_id?: string;
   season_id?: string;
   force_refresh?: boolean;
+  availability_only?: boolean;
 }
 
 interface SeasonRow {
@@ -36,6 +37,7 @@ Deno.serve(async (req: Request) => {
   const contentId = body.value.content_id?.trim();
   const seasonId = body.value.season_id?.trim();
   const forceRefresh = body.value.force_refresh ?? false;
+  const availabilityOnly = body.value.availability_only ?? false;
 
   if (!contentId || !seasonId) {
     return jsonError(400, "INVALID_REQUEST", "content_id and season_id are required");
@@ -54,6 +56,26 @@ Deno.serve(async (req: Request) => {
   if (!season) return jsonError(404, "SEASON_NOT_FOUND", "Season was not found");
 
   const seasonRow = season as SeasonRow;
+
+  if (availabilityOnly) {
+    if (!seasonRow.contents) return jsonError(404, "CONTENT_NOT_FOUND", "Related content metadata was not found");
+    try {
+      const availability = await fetchEpisodeAvailability({
+        source: seasonRow.contents.source_api,
+        externalId: seasonRow.contents.source_id,
+        seasonNumber: seasonRow.season_number,
+        episodeCount: seasonRow.episode_count
+      });
+      return json({
+        released_episode_number: availability.releasedEpisodeNumber,
+        upcoming_episode_number: availability.upcomingEpisodeNumber,
+        next_air_date: availability.nextAirDate,
+        season_id: seasonId
+      });
+    } catch {
+      return jsonError(503, "API_ERROR", "Failed to check episode availability");
+    }
+  }
 
   if (!forceRefresh) {
     const { data: existingEpisodes, error: existingError } = await adminClient

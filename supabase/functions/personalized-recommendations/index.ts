@@ -4,6 +4,7 @@ import {
   type RecommendationProvider
 } from "../_shared/recommendationCatalog.ts";
 import {
+  createRecommendationIdentityAliases,
   type RecommendationCandidate,
   type RecommendationLibraryItem,
   type RecommendationFeedback,
@@ -15,7 +16,16 @@ import {
   createRecommendationImpressionRows,
   RECENT_RECOMMENDATION_IMPRESSION_LIMIT
 } from "../_shared/recommendationImpressions.ts";
-import { fetchRecommendationProviderPage } from "../_shared/recommendationProviders.ts";
+import {
+  enrichTmdbRecommendationCandidates,
+  fetchRecommendationProviderPage,
+  TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT
+} from "../_shared/recommendationProviders.ts";
+import {
+  filterRecommendationsForUser,
+  isRecommendationExcludedForUser,
+  userRecommendationFiltersFromFeedback
+} from "../_shared/recommendationUserFilters.ts";
 import { mergeLibraryRowsByContent } from "./libraryRowMerge.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createUserClient, requireUser } from "../_shared/supabase.ts";
@@ -173,13 +183,50 @@ Deno.serve(async (req: Request) => {
       .map(normalizeLibraryItem);
     const recentSeenIds = await loadRecentSeenIdentityKeys(userClient, user.id);
     const feedback = (feedbackResult.data ?? []) as RecommendationFeedback[];
-    const result = await scanRecommendationCatalog(fetchRecommendationProviderPage, {
+    const filters = userRecommendationFiltersFromFeedback(feedback);
+    const keywordLookupExclusions = new Set(
+      [
+        ...validated.value.excludeIds,
+        ...recentSeenIds,
+        ...libraryItems.flatMap(createRecommendationIdentityAliases),
+        ...feedback
+          .filter((item) => item.target_type === "content" &&
+            (item.action === "not_interested" || item.action === "exclude"))
+          .flatMap((item) => [item.target_key, item.source_content_id ?? ""])
+      ].map(normalizeRecommendationIdentityKey).filter(Boolean)
+    );
+    let keywordLookupLimited = false;
+    const providerFetcher = filters.excludedThemeKeys.length > 0
+      ? async (request: Parameters<typeof fetchRecommendationProviderPage>[0]) => {
+          const page = await fetchRecommendationProviderPage(request);
+          const visibleGenres = filterRecommendationsForUser(page.items, {
+            excludedThemeKeys: [],
+            excludedGenres: filters.excludedGenres
+          });
+          const needsKeywordLookup = (candidate: RecommendationCandidate) =>
+            createRecommendationIdentityAliases(candidate)
+              .every((identity) => !keywordLookupExclusions.has(normalizeRecommendationIdentityKey(identity)));
+          const enriched = await enrichTmdbRecommendationCandidates(
+            visibleGenres,
+            needsKeywordLookup
+          );
+          if (visibleGenres.filter((candidate) => candidate.external_source === "tmdb" && needsKeywordLookup(candidate)).length >
+            TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT ||
+            enriched.some((candidate) => candidate.external_source === "tmdb" &&
+              needsKeywordLookup(candidate) && !candidate.keywords?.length)) {
+            keywordLookupLimited = true;
+          }
+          return { ...page, items: enriched };
+        }
+      : fetchRecommendationProviderPage;
+    const result = await scanRecommendationCatalog(providerFetcher, {
       limit: validated.value.limit,
       mediaType: validated.value.mediaType,
       cursor: validated.value.cursor,
       excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
-      candidateFilter: hasKoreanDisplayTitle,
+      candidateFilter: (candidate) =>
+        hasKoreanDisplayTitle(candidate) && !isRecommendationExcludedForUser(candidate, filters),
       maxMonthsPerRequest: 1,
       maxProviderRoundsPerRequest: 1,
       feedback
@@ -205,6 +252,7 @@ Deno.serve(async (req: Request) => {
       broadened: result.broadened,
       profile_mode: result.profileMode,
       warnings: result.warnings,
+      filter_limited: keywordLookupLimited,
       failed_sources: failedSources,
       partial: result.providersBlocked && failedSources.length > 0 && result.items.length < validated.value.limit
     });
@@ -406,6 +454,10 @@ function normalizeFailedSources(providers: readonly RecommendationProvider[]): s
   return Array.from(
     new Set(providers.map((provider) => (provider.startsWith("tmdb_") ? "tmdb" : provider)))
   );
+}
+
+function normalizeRecommendationIdentityKey(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 function normalizeLibraryItem(row: RawLibraryRow): RecommendationLibraryItem {

@@ -36,9 +36,59 @@ export type EmptyRecommendationContinuationDecision =
 
 // The Edge Function intentionally scans one provider round per request, so an
 // empty or partial batch must follow its cursor without allowing an unbounded loop.
-export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS = 32;
+export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS = 6;
 export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS = 45_000;
+export const MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS = 3;
+// Each request has a 12-second deadline. Do not start a request with a shorter
+// remaining cycle budget, which would manufacture a timeout near the limit.
+export const MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS = 12_000;
 export const PERSONALIZED_RECOMMENDATION_BATCH_SIZE = 12;
+
+export function shouldAutoLoadNextRecommendationBatch(
+  input: RecommendationScrollResumeInput
+): boolean {
+  return input.visibleCount >= PERSONALIZED_RECOMMENDATION_BATCH_SIZE &&
+    input.hasMore &&
+    Boolean(input.nextCursor?.trim()) &&
+    input.nextCursor !== input.lastRequestedCursor &&
+    !input.isExhausted &&
+    !input.isLoading &&
+    !input.hasError &&
+    !input.automaticSearchStopped &&
+    input.scrolledDown &&
+    input.nearEnd;
+}
+
+export interface RecommendationScrollResumeInput {
+  visibleCount: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+  lastRequestedCursor: string | null;
+  isExhausted: boolean;
+  isLoading: boolean;
+  hasError: boolean;
+  automaticSearchStopped: boolean;
+  scrolledDown: boolean;
+  nearEnd: boolean;
+}
+
+// A bounded automatic search may leave fewer than twelve visible cards. Only a
+// fresh user scroll may resume it, and each cursor can start at most one cycle.
+export function shouldResumeRecommendationSearchOnScroll(
+  input: RecommendationScrollResumeInput
+): boolean {
+  return input.visibleCount > 0 &&
+    input.visibleCount < PERSONALIZED_RECOMMENDATION_BATCH_SIZE &&
+    input.hasMore &&
+    Boolean(input.nextCursor?.trim()) &&
+    input.nextCursor !== input.lastRequestedCursor &&
+    !input.isExhausted &&
+    !input.isLoading &&
+    !input.hasError &&
+    input.automaticSearchStopped &&
+    input.scrolledDown &&
+    input.nearEnd;
+}
 
 export interface EmptyRecommendationContinuationInput {
   hasData: boolean;
@@ -50,6 +100,7 @@ export interface EmptyRecommendationContinuationInput {
   nextCursor: string | null;
   isExhausted: boolean;
   continuationAttempts: number;
+  consecutiveNoProgressAttempts: number;
   maxContinuationAttempts: number;
   elapsedMs: number;
   maxDurationMs: number;
@@ -86,13 +137,23 @@ export function replaceRecommendationFeed<T>(
 export function appendRecommendationFeed<T, TId>(
   state: RecommendationFeedState<T>,
   batch: RecommendationFeedBatch<T>,
-  idSelector: (item: T) => TId
+  idSelector: (item: T) => TId,
+  aliasSelector?: (item: T) => readonly string[]
 ): RecommendationFeedState<T> {
   const knownIds = new Set(state.items.map(idSelector));
+  const knownAliases = new Set<string>();
+  if (aliasSelector) {
+    for (const item of state.items) {
+      for (const alias of aliasSelector(item)) knownAliases.add(alias);
+    }
+  }
   const appended = batch.items.filter((item) => {
     const id = idSelector(item);
     if (knownIds.has(id)) return false;
+    const aliases = aliasSelector?.(item) ?? [];
+    if (aliases.some((alias) => knownAliases.has(alias))) return false;
     knownIds.add(id);
+    for (const alias of aliases) knownAliases.add(alias);
     return true;
   });
 
@@ -184,11 +245,20 @@ export function decideEmptyRecommendationContinuation(
     input.hasMore &&
     Boolean(input.nextCursor) &&
     input.continuationAttempts < input.maxContinuationAttempts &&
-    input.elapsedMs < input.maxDurationMs
+    input.consecutiveNoProgressAttempts < MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS &&
+    input.maxDurationMs - input.elapsedMs >= MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS
   ) {
     return "continue";
   }
   return "stopped";
+}
+
+export function advanceRecommendationNoProgressStreak(
+  previousStreak: number,
+  previousVisibleCount: number,
+  nextVisibleCount: number
+): number {
+  return nextVisibleCount > previousVisibleCount ? 0 : previousStreak + 1;
 }
 
 export function createRecommendationFeedKey<TMediaType extends string>(

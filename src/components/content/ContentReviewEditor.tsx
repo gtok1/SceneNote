@@ -50,6 +50,7 @@ export function ContentReviewEditor({
   const [isSpoiler, setIsSpoiler] = useState(false);
   const [firstWatchedDate, setFirstWatchedDate] = useState<WatchDateParts>(EMPTY_WATCH_DATE);
   const [lastWatchedDate, setLastWatchedDate] = useState<WatchDateParts>(EMPTY_WATCH_DATE);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const releaseWatchDate = useMemo(() => createReleaseWatchDate(contentAirDate), [contentAirDate]);
   const completionWatchDate = useMemo(
     () => createCompletionWatchDate(contentEndDate, releaseWatchDate),
@@ -78,6 +79,7 @@ export function ContentReviewEditor({
   }, [completionWatchDate, firstWatchedAt, lastWatchedAt, releaseWatchDate]);
 
   const submit = async () => {
+    setSubmitError(null);
     let nextFirstWatchedAt: string | null;
     let nextLastWatchedAt: string | null;
     try {
@@ -85,13 +87,15 @@ export function ContentReviewEditor({
       nextLastWatchedAt = toIsoWatchDate(
         lastWatchedDate,
         "마지막 본 시기",
-        completionWatchDate?.isoDate ?? releaseWatchDate?.isoDate
+        releaseWatchDate?.isoDate
       );
       if (nextFirstWatchedAt && nextLastWatchedAt && nextFirstWatchedAt > nextLastWatchedAt) {
         throw new Error("처음 본 시기가 마지막 본 시기보다 늦을 수 없습니다.");
       }
     } catch (error) {
-      Alert.alert("본 시기 확인", error instanceof Error ? error.message : "본 시기를 확인해 주세요.");
+      const message = error instanceof Error ? error.message : "본 시기를 확인해 주세요.";
+      setSubmitError(message);
+      Alert.alert("본 시기 확인", message);
       return;
     }
 
@@ -99,7 +103,7 @@ export function ContentReviewEditor({
     const hasWatchDateChange =
       nextFirstWatchedAt !== (firstWatchedAt ?? null) || nextLastWatchedAt !== (lastWatchedAt ?? null);
     if (!hasReviewInput && !hasWatchDateChange) {
-      onSaved();
+      setSubmitError("별점, 후기 또는 본 시기를 입력해 주세요.");
       return;
     }
 
@@ -128,7 +132,9 @@ export function ContentReviewEditor({
 
       onSaved();
     } catch (error) {
-      Alert.alert("저장 실패", error instanceof Error ? error.message : "감상 기록을 저장하지 못했습니다.");
+      const message = error instanceof Error ? error.message : "감상 기록을 저장하지 못했습니다.";
+      setSubmitError(message);
+      Alert.alert("저장 실패", message);
     }
   };
 
@@ -210,6 +216,7 @@ export function ContentReviewEditor({
       </View>
 
       {review.isError ? <Text style={styles.errorText}>{review.error.message}</Text> : null}
+      {submitError ? <Text accessibilityLiveRegion="polite" style={styles.errorText}>{submitError}</Text> : null}
 
       <Pressable
         accessibilityRole="button"
@@ -396,9 +403,11 @@ function createDateHint(
   releaseYear: number | undefined
 ): string {
   if (releaseDate && completionDate && completionDate.isoDate !== releaseDate.isoDate) {
-    return `처음은 공개일(${formatKoreanDate(releaseDate.isoDate)}), 마지막은 마지막 방영일(${formatKoreanDate(
+    return `처음과 마지막은 공개일(${formatKoreanDate(
+      releaseDate.isoDate
+    )}) 이후로 입력돼요. 마지막 방영일은 ${formatKoreanDate(
       completionDate.isoDate
-    )}) 이후로 입력돼요.`;
+    )}로 기록되어 있어요.`;
   }
 
   if (releaseDate) {

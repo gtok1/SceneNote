@@ -6,8 +6,11 @@ import {
   createRecommendationFeedKey,
   createRecommendationFeedState,
   decideEmptyRecommendationContinuation,
+  advanceRecommendationNoProgressStreak,
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS,
+  MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS,
+  MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS,
   PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
   refillRecommendationFeedItem,
   removeRecommendationFeedItem,
@@ -15,6 +18,8 @@ import {
   restoreRecommendationFeedItem,
   setRecommendationRefillError,
   setRecommendationRefreshError,
+  shouldAutoLoadNextRecommendationBatch,
+  shouldResumeRecommendationSearchOnScroll,
   shouldShowRecommendationFeed
 } from "./recommendationFeed";
 
@@ -37,6 +42,7 @@ describe("recommendation feed state", () => {
       nextCursor: "page-2",
       isExhausted: false,
       continuationAttempts: 0,
+      consecutiveNoProgressAttempts: 0,
       maxContinuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
       elapsedMs: 0,
       maxDurationMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS
@@ -46,8 +52,8 @@ describe("recommendation feed state", () => {
     assert.equal(
       decideEmptyRecommendationContinuation({
         ...base,
-        continuationAttempts: 25,
-        elapsedMs: 20_000
+        continuationAttempts: 2,
+        elapsedMs: 9_000
       }),
       "continue"
     );
@@ -55,9 +61,25 @@ describe("recommendation feed state", () => {
       decideEmptyRecommendationContinuation({
         ...base,
         continuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS - 1,
-        elapsedMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS - 1
+        elapsedMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS - MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS
       }),
       "continue"
+    );
+    assert.equal(MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS, 6);
+    assert.equal(MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS, 45_000);
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        elapsedMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS - MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS + 1
+      }),
+      "stopped"
+    );
+    assert.equal(
+      decideEmptyRecommendationContinuation({
+        ...base,
+        consecutiveNoProgressAttempts: MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS
+      }),
+      "stopped"
     );
     assert.equal(
       decideEmptyRecommendationContinuation({ ...base, isLoading: true }),
@@ -102,6 +124,79 @@ describe("recommendation feed state", () => {
     );
   });
 
+  it("stops after three zero-growth rounds and resets the streak when visible cards grow", () => {
+    assert.equal(MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS, 3);
+    let streak = 0;
+    streak = advanceRecommendationNoProgressStreak(streak, 2, 2);
+    assert.equal(streak, 1);
+    streak = advanceRecommendationNoProgressStreak(streak, 2, 2);
+    assert.equal(streak, 2);
+    streak = advanceRecommendationNoProgressStreak(streak, 2, 3);
+    assert.equal(streak, 0);
+    streak = advanceRecommendationNoProgressStreak(streak, 3, 3);
+    assert.equal(streak, 1);
+    streak = advanceRecommendationNoProgressStreak(streak, 3, 3);
+    streak = advanceRecommendationNoProgressStreak(streak, 3, 3);
+    assert.equal(streak, 3);
+  });
+
+  it("does not restart short or failed recommendation scans from list end", () => {
+    const ready = {
+      visibleCount: PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
+      hasMore: true,
+      nextCursor: "page-2",
+      lastRequestedCursor: "page-1",
+      isExhausted: false,
+      isLoading: false,
+      hasError: false,
+      automaticSearchStopped: false,
+      scrolledDown: true,
+      nearEnd: true
+    };
+    assert.equal(shouldAutoLoadNextRecommendationBatch(ready), true);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, scrolledDown: false }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, nearEnd: false }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, lastRequestedCursor: "page-2" }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, nextCursor: "page-3" }), true);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, visibleCount: 3 }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, hasError: true }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, automaticSearchStopped: true }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, isLoading: true }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, hasMore: false }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, nextCursor: null }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, nextCursor: "" }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, isExhausted: true }), false);
+  });
+
+  it("resumes a stopped partial feed only after a new downward near-end scroll", () => {
+    const ready = {
+      visibleCount: 7,
+      hasMore: true,
+      nextCursor: "page-3",
+      lastRequestedCursor: "page-2",
+      isExhausted: false,
+      isLoading: false,
+      hasError: false,
+      automaticSearchStopped: true,
+      scrolledDown: true,
+      nearEnd: true
+    };
+
+    assert.equal(shouldResumeRecommendationSearchOnScroll(ready), true);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, scrolledDown: false }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, nearEnd: false }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, lastRequestedCursor: "page-3" }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, isLoading: true }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, hasError: true }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, isExhausted: true }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, nextCursor: null }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, nextCursor: "" }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, hasMore: false }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, automaticSearchStopped: false }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, visibleCount: 0 }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...ready, visibleCount: PERSONALIZED_RECOMMENDATION_BATCH_SIZE }), false);
+  });
+
   it("replaces the current batch with twelve new recommendations", () => {
     const initial = createRecommendationFeedState<FeedItem>({
       items: itemsFrom(1),
@@ -140,6 +235,35 @@ describe("recommendation feed state", () => {
     assert.deepEqual(appended.items.map(itemId), Array.from({ length: 24 }, (_, index) => index + 1));
     assert.equal(appended.cursor, "page-3");
     assert.equal(appended.broadened, true);
+  });
+
+  it("rejects cross-source identity aliases already shown or appended in the same batch", () => {
+    interface CrossSourceItem {
+      id: string;
+      aliases: string[];
+    }
+    const first: CrossSourceItem = {
+      id: "tmdb:tv:123",
+      aliases: ["tmdb:tv:123", "title:shared-drama"]
+    };
+    const incoming: CrossSourceItem[] = [
+      { id: "tvmaze:55", aliases: ["tvmaze:55", "title:shared-drama"] },
+      { id: "anilist:10", aliases: ["anilist:10", "title:new-anime"] },
+      { id: "kitsu:11", aliases: ["kitsu:11", "title:new-anime"] },
+      { id: "tmdb:tv:999", aliases: ["tmdb:tv:999", "title:other-drama"] }
+    ];
+    const initial = createRecommendationFeedState<CrossSourceItem>({ items: [first] });
+
+    const withAliases = appendRecommendationFeed(
+      initial,
+      { items: incoming, cursor: "page-3" },
+      (item) => item.id,
+      (item) => item.aliases
+    );
+    assert.deepEqual(withAliases.items.map((item) => item.id), ["tmdb:tv:123", "anilist:10", "tmdb:tv:999"]);
+
+    const legacy = appendRecommendationFeed(initial, { items: incoming }, (item) => item.id);
+    assert.equal(legacy.items.length, 5);
   });
 
   it("keeps the current recommendations when refresh fails", () => {

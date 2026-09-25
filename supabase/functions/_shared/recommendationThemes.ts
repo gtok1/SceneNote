@@ -22,6 +22,34 @@ export interface ContentTheme {
   source_key: string;
 }
 
+export const EXCLUDED_THEME_KEYS = ["boys-love", "girls-love", "queer-romance"] as const;
+export type ExcludedThemeKey = (typeof EXCLUDED_THEME_KEYS)[number];
+
+export interface ExcludedThemeInput {
+  external_source?: string | null;
+  genres?: readonly string[] | null;
+  keywords?: readonly string[] | null;
+  source_tags?: readonly SourceContentTag[] | null;
+  themes?: readonly { family?: string | null; key?: string | null }[] | null;
+}
+
+export function hasExcludedTheme(
+  input: ExcludedThemeInput,
+  excludedKeys: readonly string[]
+): boolean {
+  const keys = new Set(excludedKeys);
+  if (keys.size === 0) return false;
+  if (input.themes?.some((theme) => theme.family === "relationship" && keys.has(theme.key ?? ""))) {
+    return true;
+  }
+  return normalizeContentThemes({
+    external_source: input.external_source,
+    genres: input.genres,
+    keywords: input.keywords,
+    source_tags: input.source_tags
+  }).some((theme) => keys.has(theme.key));
+}
+
 // Niche gating stays stricter than user-facing actions: genre-derived themes are
 // useful explicit feedback targets, but should not become diversity keys by default.
 export const NICHE_THEME_CENTRALITY_THRESHOLD = 0.4;
@@ -41,9 +69,9 @@ interface ThemeDefinition {
 // Only provider tags with a concrete narrative meaning belong here. Broad genres
 // stay in the genre scorer and never become niche diversity keys.
 const THEME_DEFINITIONS: readonly ThemeDefinition[] = [
-  { family: "relationship", key: "boys-love", label: "BL", aliases: ["boys love", "boy's love", "bl", "yaoi", "male male romance", "male/male romance"] },
-  { family: "relationship", key: "girls-love", label: "GL", aliases: ["girls love", "girl's love", "gl", "yuri", "female female romance", "female/female romance"] },
-  { family: "relationship", key: "queer-romance", label: "퀴어 로맨스", aliases: ["lgbtq romance", "lgbtq+ romance", "queer romance", "same sex romance", "same-sex romance"] },
+  { family: "relationship", key: "boys-love", label: "BL", aliases: ["boys love", "boy's love", "bl", "yaoi", "male male romance", "male/male romance", "shounen ai", "shonen ai", "danmei", "m/m romance", "야오이", "비엘", "보이즈 러브"] },
+  { family: "relationship", key: "girls-love", label: "GL", aliases: ["girls love", "girl's love", "gl", "yuri", "female female romance", "female/female romance", "shoujo ai", "shojo ai", "백합", "걸스 러브", "f/f romance", "lesbian romance"] },
+  { family: "relationship", key: "queer-romance", label: "퀴어 로맨스", aliases: ["lgbtq romance", "lgbtq+ romance", "queer romance", "same sex romance", "same-sex romance", "lgbt", "lgbtq", "lgbtqia", "lgbtq+", "queer", "gay", "gay theme", "gay interest", "gay romance", "lesbian", "homosexuality", "homosexual", "bisexual", "transgender", "동성애", "퀴어", "성소수자"] },
   { family: "relationship", key: "workplace-romance", label: "직장 로맨스", aliases: ["workplace romance", "office romance", "직장 로맨스", "오피스 로맨스"] },
   { family: "relationship", key: "school-romance", label: "학원 로맨스", aliases: ["school romance", "high school romance", "학원 로맨스"] },
   { family: "narrative", key: "revenge", label: "복수극", aliases: ["revenge", "revenge story", "복수", "복수극"] },

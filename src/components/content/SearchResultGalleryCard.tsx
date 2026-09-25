@@ -12,9 +12,10 @@ import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 interface SearchResultGalleryCardProps {
   result: SearchResult;
   onPress: () => void;
-  onAddToLibrary?: () => void;
-  addLabel?: string;
-  isAddDisabled?: boolean;
+  onAddToWishlist?: () => void;
+  onMarkCompleted?: () => void;
+  areActionsDisabled?: boolean;
+  isActionPending?: boolean;
   libraryItems?: readonly LibraryListItem[];
   recommendationReason?: string | null;
   onFindSimilar?: () => void;
@@ -23,9 +24,10 @@ interface SearchResultGalleryCardProps {
 export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   result,
   onPress,
-  onAddToLibrary,
-  addLabel = "추가",
-  isAddDisabled = false,
+  onAddToWishlist,
+  onMarkCompleted,
+  areActionsDisabled = false,
+  isActionPending = false,
   libraryItems = [],
   recommendationReason,
   onFindSimilar
@@ -80,16 +82,28 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
               <Text style={styles.similarText}>비슷한 작품</Text>
             </Pressable>
           ) : null}
-          {onAddToLibrary ? (
+          {onAddToWishlist ? (
             <Pressable
-              accessibilityLabel={`${result.title_primary} ${addLabel}`}
+              accessibilityLabel={`${result.title_primary} 보고 싶음`}
               accessibilityRole="button"
-              accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
-              disabled={isAddDisabled}
-              onPress={onAddToLibrary}
-              style={[styles.addButton, isAddDisabled ? styles.addButtonDisabled : null]}
+              accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+              disabled={areActionsDisabled}
+              onPress={onAddToWishlist}
+              style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}
             >
-              <Text style={styles.addText}>{addLabel}</Text>
+              <Text style={styles.addText}>보고 싶음</Text>
+            </Pressable>
+          ) : null}
+          {onMarkCompleted ? (
+            <Pressable
+              accessibilityLabel={`${result.title_primary} 완료`}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+              disabled={areActionsDisabled}
+              onPress={onMarkCompleted}
+              style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}
+            >
+              <Text style={styles.addText}>완료</Text>
             </Pressable>
           ) : null}
           </View>
@@ -154,8 +168,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     paddingHorizontal: spacing.sm
   },
-  actions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  similarButton: { minHeight: 44, justifyContent: "center", borderColor: colors.primary, borderRadius: radius.sm, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  actions: { alignItems: "stretch", flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  similarButton: { alignItems: "center", minHeight: 44, justifyContent: "center", borderColor: colors.primary, borderRadius: radius.sm, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, width: "100%" },
   similarText: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   source: {
     alignSelf: "flex-start",
@@ -170,6 +184,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2
   },
   addButton: {
+    alignItems: "center",
+    flexGrow: 1,
+    justifyContent: "center",
     minHeight: 44,
     minWidth: 44,
     backgroundColor: colors.primary,

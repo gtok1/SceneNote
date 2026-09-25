@@ -72,7 +72,17 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
         <View style={styles.feedbackActions}>
           <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} onPress={onNotInterested} style={styles.iconButton}><Ionicons color={colors.textMuted} name="close-circle-outline" size={18} /></Pressable>
           <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} onPress={onMoreLikeThis} style={styles.iconButton}><Ionicons color={colors.textMuted} name="git-compare-outline" size={18} /></Pressable>
-          {onReduceTheme ? <Pressable accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`} onPress={onReduceTheme} style={styles.iconButton}><Ionicons color={colors.textMuted} name="options-outline" size={18} /></Pressable> : null}
+          <Pressable
+            accessibilityHint={onReduceTheme ? "이 작품과 비슷한 테마의 추천을 줄입니다" : "이 작품에는 조절할 수 있는 테마 정보가 없습니다"}
+            accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !onReduceTheme }}
+            disabled={!onReduceTheme}
+            onPress={onReduceTheme}
+            style={[styles.iconButton, !onReduceTheme ? styles.disabledThemeIcon : null]}
+          >
+            <Ionicons color={colors.textMuted} name="options-outline" size={18} />
+          </Pressable>
         </View>
         <Pressable accessibilityLabel={`${result.title_primary} 빠른 보기`} onPress={onOpenQuickView} style={styles.quickButton}>
           <Ionicons color={colors.text} name="eye-outline" size={15} />
@@ -134,6 +144,7 @@ const styles = StyleSheet.create({
   quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "center", padding: spacing.xs },
   feedbackActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" },
   iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  disabledThemeIcon: { opacity: 0.4 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
   addButton: { minHeight: 44, backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   disabled: { opacity: 0.55 },

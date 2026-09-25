@@ -8,8 +8,18 @@ import {
   rankPopularRecommendations,
   toFuzzyDateNumber
 } from "../_shared/popularRanking.ts";
-import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, createUserClient, requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
+import {
+  enrichTmdbRecommendationCandidates,
+  TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT
+} from "../_shared/recommendationProviders.ts";
+import { normalizeContentThemes, type ContentTheme } from "../_shared/recommendationThemes.ts";
+import {
+  filterRecommendationsForUser,
+  userRecommendationFiltersFromFeedback,
+  type UserRecommendationFilters
+} from "../_shared/recommendationUserFilters.ts";
 import type { ContentType, ExternalSource } from "../_shared/types.ts";
 
 type RecommendationCategory = "drama" | "anime";
@@ -42,6 +52,8 @@ interface PopularRecommendation {
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
+  keywords?: string[];
+  themes?: ContentTheme[];
   category: RecommendationCategory;
   rank: number;
   trend_source: string;
@@ -55,6 +67,7 @@ interface RecommendationsResponse {
   categories: Record<RecommendationCategory, PopularRecommendation[]>;
   failedSources: ExternalSource[];
   partial: boolean;
+  filter_limited?: boolean;
 }
 
 type AnimeEnrichmentPayload = Partial<
@@ -99,6 +112,12 @@ interface AniListMedia {
   episodes?: number | null;
   format?: string | null;
   genres?: string[] | null;
+  tags?: {
+    name?: string | null;
+    rank?: number | null;
+    isGeneralSpoiler?: boolean | null;
+    isMediaSpoiler?: boolean | null;
+  }[] | null;
 }
 
 interface AniListResponse {
@@ -198,6 +217,7 @@ const ANILIST_TRENDING_QUERY = `
         episodes
         format
         genres
+        tags { name rank isGeneralSpoiler isMediaSpoiler }
       }
     }
   }
@@ -209,23 +229,36 @@ Deno.serve(async (req: Request) => {
     return jsonError(405, "METHOD_NOT_ALLOWED", "POST or GET method required");
   }
 
+  let user: { id: string; jwt: string };
   try {
-    await requireUser(req);
+    user = await requireUser(req);
   } catch {
     return jsonError(401, "UNAUTHORIZED", "Valid JWT required");
   }
+
+  const userClient = createUserClient(user.jwt);
+  const { data: filterRows, error: filterError } = await userClient
+    .from("user_content_feedback")
+    .select("target_type,target_key,action")
+    .eq("user_id", user.id)
+    .eq("action", "exclude");
+  if (filterError) {
+    console.error("popular-recommendations preference query failed:", filterError);
+    return jsonError(503, "PREFERENCE_QUERY_FAILED", "Failed to load recommendation preferences");
+  }
+  const userFilters = userRecommendationFiltersFromFeedback(filterRows ?? []);
 
   const parsedOptions = await parseRecommendationOptions(req);
   if (!parsedOptions.ok) return jsonError(400, "INVALID_REQUEST", parsedOptions.message);
   const options = parsedOptions.value;
   const cacheKey = createPopularCacheKey(options);
   const cachedResponse = getCachedResponse(cacheKey);
-  if (cachedResponse) return json(cachedResponse);
+  if (cachedResponse) return json(await filterPopularResponseForUser(cachedResponse, userFilters));
   const adminClient = createAdminClient();
   const persistedResponse = await getPersistedPopularResponse(adminClient, cacheKey);
   if (persistedResponse) {
     setCachedResponse(cacheKey, persistedResponse);
-    return json(persistedResponse);
+    return json(await filterPopularResponseForUser(persistedResponse, userFilters));
   }
 
   try {
@@ -267,7 +300,7 @@ Deno.serve(async (req: Request) => {
       setCachedResponse(cacheKey, response);
       await setPersistedPopularResponse(adminClient, cacheKey, response);
     }
-    return json(response);
+    return json(await filterPopularResponseForUser(response, userFilters));
   } catch (error) {
     console.error("popular-recommendations failed:", error);
     return jsonError(500, "RECOMMENDATION_FAILED", "Failed to build popular recommendations");
@@ -493,6 +526,9 @@ function normalizeAniListAnime(
 
   const title = item.title?.english ?? item.title?.romaji ?? item.title?.native;
   if (!title?.trim()) return null;
+  const sourceTags = (item.tags ?? [])
+    .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler && Boolean(tag.name?.trim()))
+    .map((tag) => ({ name: tag.name!.trim(), source: "anilist", rank: tag.rank }));
 
   return {
     external_source: "anilist",
@@ -508,6 +544,12 @@ function normalizeAniListAnime(
     has_seasons: item.format !== "MOVIE",
     episode_count: item.episodes ?? null,
     genres: Array.from(new Set(item.genres ?? [])),
+    keywords: sourceTags.map((tag) => tag.name),
+    themes: normalizeContentThemes({
+      external_source: "anilist",
+      genres: item.genres,
+      source_tags: sourceTags
+    }),
     category: "anime",
     trend_source: "AniList 트렌딩",
     trendingIndex
@@ -734,6 +776,37 @@ function rankRecommendations(
   }));
 }
 
+async function filterPopularResponseForUser(
+  response: RecommendationsResponse,
+  filters: UserRecommendationFilters
+): Promise<RecommendationsResponse> {
+  if (filters.excludedThemeKeys.length === 0 && filters.excludedGenres.length === 0) return response;
+  let keywordLookupLimited = false;
+  const categories = await Promise.all((["drama", "anime"] as const).map(async (category) => {
+    const base = response.categories[category];
+    const visibleGenres = filterRecommendationsForUser(base, {
+      excludedThemeKeys: [],
+      excludedGenres: filters.excludedGenres
+    });
+    const enriched = filters.excludedThemeKeys.length > 0
+      ? await enrichTmdbRecommendationCandidates(visibleGenres)
+      : visibleGenres;
+    if (filters.excludedThemeKeys.length > 0 &&
+      (visibleGenres.filter((candidate) => candidate.external_source === "tmdb").length >
+        TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT ||
+        enriched.some((candidate) => candidate.external_source === "tmdb" && !candidate.keywords?.length))) {
+      keywordLookupLimited = true;
+    }
+    return filterRecommendationsForUser(enriched, filters)
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }));
+  return {
+    ...response,
+    categories: { drama: categories[0], anime: categories[1] },
+    filter_limited: keywordLookupLimited
+  };
+}
+
 async function parseRecommendationOptions(
   req: Request
 ): Promise<{ ok: true; value: RecommendationOptions } | { ok: false; message: string }> {
@@ -798,7 +871,7 @@ async function parseRecommendationOptions(
 function createPopularCacheKey(options: RecommendationOptions): string {
   return [
     "popular-recommendations",
-    "v3",
+    "v4",
     formatDateInput(options.now),
     options.candidateWindowDays,
     options.poolLimit

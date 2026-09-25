@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  enrichTmdbRecommendationCandidates,
   findTmdbKoreanAnimeLocalization,
+  TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT,
   type AniListMedia,
   type TmdbTvItem
 } from "./recommendationProviders.ts";
+import { hasExcludedTheme } from "./recommendationThemes.ts";
+import { createRecommendationIdentityAliases } from "./recommendationEngine.ts";
+import { filterRecommendationsForUser, isRecommendationExcludedForUser } from "./recommendationUserFilters.ts";
 
 const anime: AniListMedia = {
   id: 1,
@@ -94,4 +99,154 @@ describe("TMDB authentication request construction", () => {
       }
     });
   }
+});
+
+describe("TMDB recommendation keyword enrichment", () => {
+  it("adds structured TV/movie keywords and reuses their cached response", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? "test-only-key" : undefined } }
+    });
+    const requested: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("api_key"), "test-only-key");
+      requested.push(url.pathname);
+      return new Response(JSON.stringify(url.pathname.includes("/movie/")
+        ? { id: 990000002, keywords: [{ name: "family" }] }
+        : { id: 990000001, results: [{ name: "gay" }] }), { status: 200 });
+    };
+    const items = [
+      { external_source: "tmdb", external_id: "990000001", content_type: "kdrama", genres: ["Drama"] },
+      { external_source: "tmdb", external_id: "990000002", content_type: "movie", genres: ["Romance"] },
+      { external_source: "anilist", external_id: "88", content_type: "anime", genres: ["Boys' Love"] }
+    ];
+    try {
+      const enriched = await enrichTmdbRecommendationCandidates(items);
+      assert.deepEqual(enriched[0]?.keywords, ["gay"]);
+      assert.equal(hasExcludedTheme(enriched[0] ?? {}, ["queer-romance"]), true);
+      assert.deepEqual(enriched[1]?.keywords, ["family"]);
+      assert.deepEqual(enriched[2], items[2]);
+      assert.deepEqual(requested.sort(), ["/3/movie/990000002/keywords", "/3/tv/990000001/keywords"]);
+      await enrichTmdbRecommendationCandidates(items);
+      assert.equal(requested.length, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno);
+      else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
+
+  it("keeps missing provider metadata unverified for fail-closed filtering", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? "test-only-key" : undefined } }
+    });
+    globalThis.fetch = async () => new Response(JSON.stringify({ results: [] }), { status: 200 });
+    try {
+      const [item] = await enrichTmdbRecommendationCandidates([
+        { external_source: "tmdb", external_id: "990000003", content_type: "kdrama", genres: ["Drama"] }
+      ]);
+      assert.deepEqual(item?.keywords, []);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno);
+      else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
+
+  it("bounds cold keyword requests and leaves overflow candidates unverified", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? "test-only-key" : undefined } }
+    });
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ results: [{ name: "family" }] }), { status: 200 });
+    };
+    try {
+      const items = Array.from({ length: TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT + 1 }, (_, index) => ({
+        external_source: "tmdb",
+        external_id: String(990001000 + index),
+        content_type: "kdrama",
+        genres: ["Drama"]
+      }));
+      const enriched = await enrichTmdbRecommendationCandidates(items);
+      assert.equal(calls, TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT);
+      assert.deepEqual(enriched[0]?.keywords, ["family"]);
+      assert.equal(enriched.at(-1)?.keywords, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno);
+      else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
+
+  it("spends the eight lookups on eligible works after seen, library, feedback, and genre exclusions", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? "test-only-key" : undefined } }
+    });
+    const requested: string[] = [];
+    globalThis.fetch = async (input) => {
+      requested.push(new URL(String(input)).pathname);
+      return new Response(JSON.stringify({ results: [{ name: "family" }] }), { status: 200 });
+    };
+    try {
+      const items = Array.from({ length: 17 }, (_, index) => ({
+        external_source: "tmdb",
+        external_id: String(990002000 + index),
+        content_type: "kdrama",
+        title_primary: `한국 드라마 ${index}`,
+        air_year: 2026,
+        genres: index === 6 || index === 7 ? ["Romance"] : ["Drama"]
+      }));
+      const sessionSeen = items.slice(0, 2).flatMap(createRecommendationIdentityAliases);
+      const libraryItems = items.slice(2, 4).map((item) => ({
+        source_api: "tmdb",
+        source_id: item.external_id,
+        content_type: item.content_type,
+        title_primary: item.title_primary,
+        air_year: item.air_year
+      }));
+      const feedbackExcluded = items.slice(4, 6).flatMap(createRecommendationIdentityAliases);
+      const excluded = new Set([
+        ...sessionSeen,
+        ...libraryItems.flatMap(createRecommendationIdentityAliases),
+        ...feedbackExcluded
+      ]);
+      const eligibleGenres = filterRecommendationsForUser(items, {
+        excludedThemeKeys: [],
+        excludedGenres: ["romance"]
+      });
+      const enriched = await enrichTmdbRecommendationCandidates(
+        eligibleGenres,
+        (candidate) => createRecommendationIdentityAliases(candidate)
+          .every((identity) => !excluded.has(identity))
+      );
+
+      assert.equal(requested.length, TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT);
+      assert.deepEqual(requested, items.slice(8, 16).map((item) => `/3/tv/${item.external_id}/keywords`));
+      assert.equal(enriched.length, 15);
+      assert(enriched.slice(0, 6).every((item) => item.keywords === undefined));
+      assert(enriched.slice(6, 14).every((item) => item.keywords?.[0] === "family"));
+      assert.equal(enriched[14]?.keywords, undefined);
+      assert.equal(isRecommendationExcludedForUser(enriched[14] ?? {}, {
+        excludedThemeKeys: ["boys-love"], excludedGenres: []
+      }), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno);
+      else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
 });

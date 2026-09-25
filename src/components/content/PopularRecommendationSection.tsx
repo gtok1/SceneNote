@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { usePopularRecommendations } from "@/hooks/usePopularRecommendations";
+import { useRecommendationPreferences } from "@/hooks/useRecommendationPreferences";
 import type {
   RecommendationCategory,
   PopularRecommendation
@@ -18,6 +19,7 @@ import type {
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
+import { filterExcludedRecommendations } from "@/utils/excludedThemes";
 import {
   DEFAULT_CANDIDATE_WINDOW_DAYS,
   isWithinCandidateWindow,
@@ -32,6 +34,7 @@ const VISIBLE_TOP_LIMIT = 10;
 
 export function PopularRecommendationSection() {
   const router = useRouter();
+  const preferences = useRecommendationPreferences();
   const recommendations = usePopularRecommendations();
   const library = useLibrary("all");
   const addToLibrary = useAddToLibrary();
@@ -59,24 +62,25 @@ export function PopularRecommendationSection() {
   );
   const activeItems = useMemo(
     () =>
-      createVisibleRecommendations(
-        recommendations.data?.categories[category] ?? [],
+      preferences.isReady ? createVisibleRecommendations(
+        filterExcludedRecommendations(recommendations.data?.categories[category] ?? [], preferences),
         libraryKeys,
         addedKeys,
         excludedKeys,
         pageByCategory[category]
-      ),
+      ) : [],
     [
       addedKeys,
       category,
       excludedKeys,
       libraryKeys,
       pageByCategory,
+      preferences,
       recommendations.data?.categories
     ]
   );
   const hasRecommendations = activeItems.length > 0;
-  const isLoading = recommendations.isLoading || library.isLoading;
+  const isLoading = preferences.isLoading || recommendations.isLoading || library.isLoading;
 
   const openRecommendation = (item: PopularRecommendation) => {
     router.push({
@@ -192,7 +196,14 @@ export function PopularRecommendationSection() {
         />
       ) : null}
 
-      {!isLoading && !recommendations.isError && hasRecommendations ? (
+      {preferences.isError ? (
+        <ErrorState
+          message={preferences.error?.message ?? "추천 제외 설정을 불러오지 못했습니다"}
+          onRetry={() => void preferences.refetch()}
+        />
+      ) : null}
+
+      {preferences.isReady && !isLoading && !recommendations.isError && hasRecommendations ? (
         <ScrollView
           contentContainerStyle={styles.cardList}
           horizontal
@@ -219,7 +230,7 @@ export function PopularRecommendationSection() {
         </ScrollView>
       ) : null}
 
-      {!isLoading && !recommendations.isError && !hasRecommendations ? (
+      {preferences.isReady && !isLoading && !recommendations.isError && !hasRecommendations ? (
         <View style={styles.emptyFrame}>
           <EmptyState
             actionLabel="다시 시도"

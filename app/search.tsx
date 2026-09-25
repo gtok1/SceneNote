@@ -16,6 +16,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentSearchBar } from "@/components/content/ContentSearchBar";
 import { PersonalizedRecommendationGalleryCard } from "@/components/content/PersonalizedRecommendationGalleryCard";
 import { PersonalizedRecommendationListItem } from "@/components/content/PersonalizedRecommendationListItem";
+import { RecommendationExclusionSheet } from "@/components/content/RecommendationExclusionSheet";
 import { RecommendationQuickViewModal } from "@/components/content/RecommendationQuickViewModal";
 import { SearchResultGalleryCard } from "@/components/content/SearchResultGalleryCard";
 import { SearchResultItem } from "@/components/content/SearchResultItem";
@@ -26,6 +27,7 @@ import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, usePersonContentSearch } from "@/hooks/usePeople";
 import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommendations";
+import { useRecommendationPreferences } from "@/hooks/useRecommendationPreferences";
 import { useSimilarContent } from "@/hooks/useSimilarContent";
 import { resolveSimilarityAnchors, shouldAutoSelectAnchor, type SimilarContentResult } from "@/services/similarContent";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
@@ -42,8 +44,10 @@ import type { PersonSearchResult } from "@/types/people";
 import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { isBrowseMode, matchesCountryFilter } from "@/utils/countryFilter";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
+import { getSearchResultActions } from "@/utils/searchResultActions";
+import { filterVisibleRecommendationCandidates, summarizeRecommendationVisibility } from "@/utils/recommendationVisibility";
 import { matchesGenreFilter } from "@/utils/genre";
-import { shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
+import { shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
 import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
 import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus, type SimilaritySort } from "@/utils/similarSearchIntent";
@@ -62,6 +66,10 @@ export default function SearchScreen() {
   const anchorController = useRef<AbortController | null>(null);
   const activeScreen = useRef(focused);
   activeScreen.current = focused;
+  const recommendationScrollState = useRef<{
+    previousOffsetY: number | null;
+    lastRequestedCursor: string | null;
+  }>({ previousOffsetY: null, lastRequestedCursor: null });
   useEffect(() => { if (!focused || !online) { anchorGeneration.current += 1; anchorController.current?.abort(); } return () => { anchorGeneration.current += 1; anchorController.current?.abort(); }; }, [focused, online, user?.id]);
   const query = useSearchUiStore((state) => state.query);
   const setQuery = useSearchUiStore((state) => state.setQuery);
@@ -83,10 +91,15 @@ export default function SearchScreen() {
   const search = useContentSearch(query, mediaType, countryFilter, { enabled: focused && online && !similarIntent && parseSearchIntent(query).mode !== "similarity" && query.trim().length >= 2 });
   const personSearch = usePersonContentSearch(query, "all");
   const library = useLibrary("all");
+  const recommendationPreferences = useRecommendationPreferences();
+  const recommendationExclusions = useMemo(() => ({
+    excludedThemeKeys: recommendationPreferences.excludedThemeKeys,
+    excludedGenres: recommendationPreferences.excludedGenres
+  }), [recommendationPreferences.excludedThemeKeys, recommendationPreferences.excludedGenres]);
   const personalizedRecommendations = usePersonalizedRecommendations(
     mediaType,
     library.data ?? [],
-    { enabled: canRunSearchRecommendations({ enabled: SEARCH_RECOMMENDATIONS_ENABLED, signedIn: Boolean(user), focused, online, libraryReady: library.isSuccess, query, similarityMode: Boolean(similarIntent) }) }
+    { enabled: recommendationPreferences.isReady && canRunSearchRecommendations({ enabled: SEARCH_RECOMMENDATIONS_ENABLED, signedIn: Boolean(user), focused, online, libraryReady: library.isSuccess, query, similarityMode: Boolean(similarIntent) }), exclusions: recommendationExclusions }
   );
   const addToLibrary = useAddToLibrary();
   const addFavoritePerson = useAddFavoritePerson();
@@ -96,6 +109,7 @@ export default function SearchScreen() {
   const [pendingSearchKey, setPendingSearchKey] = useState<string | null>(null);
   const [pendingAddIds, setPendingAddIds] = useState<Set<string>>(() => new Set());
   const [selectedRecommendation, setSelectedRecommendation] = useState<PersonalizedRecommendation | null>(null);
+  const [recommendationExclusionsVisible, setRecommendationExclusionsVisible] = useState(false);
   const [themeReductionTarget, setThemeReductionTarget] = useState<PersonalizedRecommendation | null>(null);
   const [submittingThemeKey, setSubmittingThemeKey] = useState<string | null>(null);
   const [similarAnchor, setSimilarAnchor] = useState<SearchResult | null>(null);
@@ -105,6 +119,7 @@ export default function SearchScreen() {
   const [selectedSimilar, setSelectedSimilar] = useState<SimilarContentResult | null>(null);
   useEffect(() => {
     setSelectedRecommendation(null); setThemeReductionTarget(null); setSelectedSimilar(null);
+    setRecommendationExclusionsVisible(false);
     setAddedSearchKeys(new Set()); setAddedRecommendationKeys(new Set()); setPendingAddIds(new Set());
   }, [user?.id]);
   useEffect(() => {
@@ -184,28 +199,53 @@ export default function SearchScreen() {
   const isGallery = viewMode === "gallery";
   const galleryColumns = getResponsiveRecommendationColumns(width, fontScale);
   const showRecommendationFeed = SEARCH_RECOMMENDATIONS_ENABLED && !isSimilarityMode && shouldShowRecommendationFeed(query);
+  useEffect(() => {
+    recommendationScrollState.current = { previousOffsetY: null, lastRequestedCursor: null };
+  }, [user?.id, mediaType, recommendationExclusions, showRecommendationFeed]);
   const hasSearchInput = !showRecommendationFeed;
   const hasSearchQuery = query.trim().length >= 2;
   const activeRecommendations = useMemo(
     () =>
-      personalizedRecommendations.recommendations.filter(
-        (item) =>
-          !addedRecommendationKeys.has(createExternalKey(item)) &&
-          !isRegisteredRecommendation(item, library.data ?? [])
-      ),
-    [addedRecommendationKeys, library.data, personalizedRecommendations.recommendations]
+      recommendationPreferences.isReady ? filterVisibleRecommendationCandidates(
+        personalizedRecommendations.recommendations,
+        library.data ?? [],
+        recommendationExclusions
+      ).filter((item) => !addedRecommendationKeys.has(createExternalKey(item))) : [],
+    [addedRecommendationKeys, library.data, personalizedRecommendations.recommendations, recommendationPreferences.isReady, recommendationExclusions]
   );
+  const recommendationVisibilitySummary = useMemo(
+    () => summarizeRecommendationVisibility(
+      personalizedRecommendations.recommendations,
+      library.data ?? [],
+      recommendationExclusions
+    ),
+    [library.data, personalizedRecommendations.recommendations, recommendationExclusions]
+  );
+  useEffect(() => {
+    if (!__DEV__ || !showRecommendationFeed || !recommendationPreferences.isReady || !personalizedRecommendations.data) return;
+    console.info("recommendation visibility", JSON.stringify({
+      ...recommendationVisibilitySummary,
+      displayed: activeRecommendations.length,
+      hasMore: personalizedRecommendations.data.has_more,
+      filterLimited: personalizedRecommendations.data.filter_limited
+    }));
+  }, [activeRecommendations.length, personalizedRecommendations.data, recommendationPreferences.isReady, recommendationVisibilitySummary, showRecommendationFeed]);
   const recommendationIsLoading =
     showRecommendationFeed &&
-    (personalizedRecommendations.isInitialLoading || library.isLoading);
+    (recommendationPreferences.isLoading || personalizedRecommendations.isInitialLoading || library.isLoading);
   const recommendationNeedsContinuation =
     showRecommendationFeed &&
+    recommendationPreferences.isReady &&
     !recommendationIsLoading &&
     !personalizedRecommendations.isError &&
     activeRecommendations.length === 0 &&
     !personalizedRecommendations.isExhausted;
   const recommendationIsContinuing =
     recommendationNeedsContinuation && personalizedRecommendations.isLoadingMore;
+  const recommendationFilterLimited = recommendationPreferences.isReady && (
+    Boolean(personalizedRecommendations.data?.filter_limited) ||
+    recommendationVisibilitySummary.unverifiableTmdb > 0
+  );
   const recommendationLoadingMessage = personalizedRecommendations.isRefreshing
     ? "새 추천 12개를 불러오는 중이에요. 한국어 제목을 확인하고 있어 잠시 걸릴 수 있어요."
     : personalizedRecommendations.isRefilling
@@ -302,13 +342,14 @@ export default function SearchScreen() {
     });
   };
 
-  const addResult = (result: SearchResult) => {
+  const addResult = (result: SearchResult, status: "wishlist" | "completed") => {
     const key = createExternalKey(result);
-    if (isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)) return;
+    if (pendingSearchKey !== null || pendingAddIds.size > 0 ||
+      isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys)) return;
 
     setPendingSearchKey(key);
     addToLibrary.mutate(
-      { result, status: "wishlist" },
+      { result, status },
       {
         onSuccess: () => {
           setAddedSearchKeys((previous) => new Set(previous).add(searchSeasonIdentity(result)));
@@ -377,10 +418,16 @@ export default function SearchScreen() {
     const key = createExternalKey(result);
     const isPending = pendingSearchKey === key;
     const isAdded = isResultAlreadyAdded(result, libraryItemsByExternalKey, addedSearchKeys, addedRecommendationKeys);
-
+    const actions = getSearchResultActions(
+      result.season_number,
+      libraryItemsByExternalKey.get(key) ?? [],
+      isAdded ? "wishlist" : null,
+      !library.isSuccess || pendingSearchKey !== null || pendingAddIds.size > 0
+    );
     return {
-      label: isPending ? "추가 중" : isAdded ? "추가됨" : "추가",
-      disabled: isAdded || pendingSearchKey !== null || pendingAddIds.size > 0
+      isPending,
+      wishlistDisabled: actions.wishlistDisabled,
+      completedDisabled: actions.completedDisabled
     };
   };
 
@@ -409,6 +456,15 @@ export default function SearchScreen() {
     const refreshed = await personalizedRecommendations.refresh();
     if (!refreshed) {
       addToast("새 추천을 불러오지 못했습니다. 다시 시도해 주세요.", "error");
+    }
+  };
+
+  const toggleRecommendationExclusion = async (kind: "theme" | "genre", key: string) => {
+    try {
+      if (kind === "theme") await recommendationPreferences.toggleTheme(key);
+      else await recommendationPreferences.toggleGenre(key);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "추천 제외 설정을 저장하지 못했습니다.", "error");
     }
   };
 
@@ -489,6 +545,7 @@ export default function SearchScreen() {
     personalizedRecommendations.isLoadingMore ||
     pendingAddIds.size > 0 ||
     recommendationIsLoading ||
+    !recommendationPreferences.isReady ||
     library.isError || !online || !focused;
 
   return (
@@ -650,9 +707,31 @@ export default function SearchScreen() {
               <Text style={styles.refreshButtonText}>새 추천 12개</Text>
             </Pressable>
           </View>
+          <View style={styles.recommendationFilterRow}>
+            <Pressable
+              accessibilityLabel="이 계정의 추천 제외 테마와 장르 설정"
+              accessibilityRole="button"
+              disabled={!recommendationPreferences.isReady}
+              onPress={() => setRecommendationExclusionsVisible(true)}
+              style={[styles.recommendationFilterButton, !recommendationPreferences.isReady && styles.refreshButtonDisabled]}
+            >
+              <Ionicons color={colors.primary} name="options-outline" size={17} />
+              <Text style={styles.recommendationFilterButtonText}>추천 제외 설정</Text>
+            </Pressable>
+            <Text style={styles.resultsHint}>
+              이 계정에서 제외 중: {recommendationPreferences.excludedThemeKeys.length + recommendationPreferences.excludedGenres.length}개
+            </Text>
+          </View>
           {personalizedRecommendations.data?.profile_mode === "cold_start" ? (
             <Text style={styles.recommendationNotice}>
               작품을 추가하면 취향에 맞는 추천이 더 정확해져요.
+            </Text>
+          ) : null}
+          {recommendationFilterLimited ? (
+            <Text style={styles.resultsHint}>
+              {recommendationVisibilitySummary.unverifiableTmdb > 0
+                ? `제외 테마를 확인할 정보가 없어 추천 후보 ${recommendationVisibilitySummary.unverifiableTmdb}개를 표시하지 않았어요.`
+                : "테마 정보가 부족한 일부 작품은 이 계정의 제외 설정에 따라 표시하지 않았어요."}
             </Text>
           ) : null}
           <Text accessibilityLiveRegion="polite" style={styles.liveStatus}>
@@ -700,6 +779,12 @@ export default function SearchScreen() {
           onRetry={() => void library.refetch()}
         />
       ) : null}
+      {showRecommendationFeed && recommendationPreferences.isError ? (
+        <ErrorState
+          message={recommendationPreferences.error?.message ?? "계정별 추천 제외 설정을 불러오지 못했습니다"}
+          onRetry={() => void recommendationPreferences.refetch()}
+        />
+      ) : null}
       {showRecommendationFeed && personalizedRecommendations.isError ? (
         <ErrorState
           message={personalizedRecommendations.error?.message ?? "추천 데이터를 불러오지 못했습니다. 다시 시도해 주세요."}
@@ -713,7 +798,9 @@ export default function SearchScreen() {
         <ErrorState
           message={
             personalizedRecommendations.loadMoreError ??
-            "새 추천을 찾지 못했습니다. 다시 조회해 주세요."
+            (recommendationVisibilitySummary.unverifiableTmdb > 0
+              ? `테마 확인 정보가 없어 후보 ${recommendationVisibilitySummary.unverifiableTmdb}개를 제외했습니다. 다른 작품을 다시 찾아볼게요.`
+              : "새 추천을 찾지 못했습니다. 다시 조회해 주세요.")
           }
           onRetry={() => void personalizedRecommendations.retryEmptyContinuation()}
         />
@@ -759,6 +846,7 @@ export default function SearchScreen() {
       ) : null}
       {showRecommendationFeed &&
       !recommendationIsLoading &&
+      recommendationPreferences.isReady &&
       !library.isError &&
       !personalizedRecommendations.isError &&
       personalizedRecommendations.isExhausted &&
@@ -781,11 +869,38 @@ export default function SearchScreen() {
           </>}
           contentContainerStyle={styles.resultsList}
           data={displayedResults}
-          extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${library.data?.length ?? 0}:${personalizedRecommendations.isLoadingMore}`}
+          extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${Array.from(addedSearchKeys).join(",")}:${(library.data ?? []).map((row) => `${row.library_item_id}:${row.statuses.join(",")}`).join(";")}:${personalizedRecommendations.isLoadingMore}`}
           ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
           key={`${hasSearchInput ? "search" : "recommendations"}-${mediaType}-${viewMode}-${galleryColumns}`}
           keyExtractor={searchSeasonIdentity}
           numColumns={displayedAsGallery ? galleryColumns : 1}
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            const previousOffsetY = recommendationScrollState.current.previousOffsetY;
+            recommendationScrollState.current.previousOffsetY = contentOffset.y;
+            if (!showRecommendationFeed || !recommendationPreferences.isReady || !focused || !online) return;
+
+            const cursor = personalizedRecommendations.recommendationCursor;
+            const scrollLoadState = {
+              visibleCount: activeRecommendations.length,
+              hasMore: personalizedRecommendations.data?.has_more ?? false,
+              nextCursor: cursor,
+              lastRequestedCursor: recommendationScrollState.current.lastRequestedCursor,
+              isExhausted: personalizedRecommendations.isExhausted,
+              isLoading: personalizedRecommendations.isInitialLoading || personalizedRecommendations.isLoadingMore || personalizedRecommendations.isRefreshing || personalizedRecommendations.isRefilling,
+              hasError: personalizedRecommendations.isError || Boolean(personalizedRecommendations.loadMoreError),
+              automaticSearchStopped: personalizedRecommendations.emptyContinuationStopped,
+              scrolledDown: previousOffsetY !== null && contentOffset.y > previousOffsetY + 1,
+              nearEnd: contentOffset.y + layoutMeasurement.height >= contentSize.height - Math.max(80, layoutMeasurement.height * 0.35)
+            };
+            if (shouldAutoLoadNextRecommendationBatch(scrollLoadState)) {
+              recommendationScrollState.current.lastRequestedCursor = cursor;
+              void personalizedRecommendations.loadMore();
+            } else if (shouldResumeRecommendationSearchOnScroll(scrollLoadState)) {
+              recommendationScrollState.current.lastRequestedCursor = cursor;
+              void personalizedRecommendations.retryEmptyContinuation();
+            }
+          }}
           onEndReached={() => {
             if (
               focused && online && !isSimilarityMode &&
@@ -797,19 +912,9 @@ export default function SearchScreen() {
               void search.fetchNextPage();
               return;
             }
-            if (
-              showRecommendationFeed &&
-              !personalizedRecommendations.isExhausted &&
-              !personalizedRecommendations.isInitialLoading &&
-              !personalizedRecommendations.isLoadingMore &&
-              !personalizedRecommendations.isRefreshing &&
-              !personalizedRecommendations.isRefilling &&
-              !personalizedRecommendations.isError
-            ) {
-              void personalizedRecommendations.loadMore();
-            }
           }}
           onEndReachedThreshold={0.35}
+          scrollEventThrottle={16}
           ListFooterComponent={!isSimilarityMode && hasSearchInput && hasSearchQuery ? (
             search.isFetchingNextPage ? (
               <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
@@ -837,11 +942,15 @@ export default function SearchScreen() {
             ) : personalizedRecommendations.loadMoreError && !recommendationNeedsContinuation ? (
               <View style={styles.loadMoreFooter}>
                 <Text style={styles.loadMoreErrorText}>{personalizedRecommendations.loadMoreError}</Text>
-                <Pressable accessibilityRole="button" onPress={() => void personalizedRecommendations.loadMore()} style={styles.inlineRetryButton}>
+                <Pressable accessibilityRole="button" onPress={() => void personalizedRecommendations.retryEmptyContinuation()} style={styles.inlineRetryButton}>
                   <Text style={styles.inlineRetryText}>다시 시도</Text>
                 </Pressable>
               </View>
-            ) : personalizedRecommendations.isExhausted && activeRecommendations.length > 0 ? (
+            ) : personalizedRecommendations.emptyContinuationStopped && activeRecommendations.length > 0 && personalizedRecommendations.data?.has_more && personalizedRecommendations.recommendationCursor ? (
+              <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>
+                아래로 스크롤하면 다음 추천을 자동으로 찾습니다.
+              </Text>
+            ) : (personalizedRecommendations.isExhausted || personalizedRecommendations.data?.has_more === false || !personalizedRecommendations.recommendationCursor) && activeRecommendations.length > 0 ? (
               <Text accessibilityLiveRegion="polite" style={styles.exhaustedFooterText}>
                 현재 제공되는 추천 작품을 모두 확인했어요.
               </Text>
@@ -850,19 +959,17 @@ export default function SearchScreen() {
           renderItem={({ item }) => {
             const similarResult = isSimilarContentResult(item) ? item : null;
             const recommendation = isPersonalizedRecommendation(item) ? item : null;
-            const addState = recommendation
-              ? getRecommendationAddState(recommendation)
-              : getSearchAddState(item);
-
             if (similarResult) {
+              const actionState = getSearchAddState(item);
               return displayedAsGallery ? (
-                <SearchResultGalleryCard addLabel={addState.label} isAddDisabled={addState.disabled} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToLibrary={()=>addResult(item)} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+                <SearchResultGalleryCard areActionsDisabled={actionState.wishlistDisabled} isActionPending={actionState.isPending} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToWishlist={()=>addResult(item,"wishlist")} onMarkCompleted={()=>addResult(item,"completed")} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               ) : (
-                <SearchResultItem addLabel={addState.label} isAddDisabled={addState.disabled} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToLibrary={()=>addResult(item)} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+                <SearchResultItem areActionsDisabled={actionState.wishlistDisabled} isActionPending={actionState.isPending} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToWishlist={()=>addResult(item,"wishlist")} onMarkCompleted={()=>addResult(item,"completed")} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               );
             }
 
             if (recommendation) {
+              const addState = getRecommendationAddState(recommendation);
               const presentation = recommendationPresentations.get(recommendation.canonical_id) ??
                 mapRecommendationToCardViewModel(recommendation);
               const canReduceTheme = (recommendation.themes ?? []).some(isUserActionableTheme);
@@ -893,22 +1000,25 @@ export default function SearchScreen() {
               );
             }
 
+            const actionState = getSearchAddState(item);
             return displayedAsGallery ? (
               <SearchResultGalleryCard
-                addLabel={addState.label}
-                isAddDisabled={addState.disabled}
+                areActionsDisabled={actionState.wishlistDisabled}
+                isActionPending={actionState.isPending}
                 libraryItems={libraryItemsByExternalKey.get(createExternalKey(item)) ?? []}
-                onAddToLibrary={() => addResult(item)}
+                onAddToWishlist={() => addResult(item, "wishlist")}
+                onMarkCompleted={() => addResult(item, "completed")}
                 {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: () => findSimilarFromCard(item) } : {})}
                 onPress={() => openResult(item)}
                 result={item}
               />
             ) : (
               <SearchResultItem
-                addLabel={addState.label}
-                isAddDisabled={addState.disabled}
+                areActionsDisabled={actionState.wishlistDisabled}
+                isActionPending={actionState.isPending}
                 libraryItems={libraryItemsByExternalKey.get(createExternalKey(item)) ?? []}
-                onAddToLibrary={() => addResult(item)}
+                onAddToWishlist={() => addResult(item, "wishlist")}
+                onMarkCompleted={() => addResult(item, "completed")}
                 {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: () => findSimilarFromCard(item) } : {})}
                 onPress={() => openResult(item)}
                 result={item}
@@ -944,7 +1054,16 @@ export default function SearchScreen() {
         themes={themeReductionTarget?.themes ?? []}
         visible={themeReductionTarget !== null}
       />
-      <SimilarContentQuickViewModal addLabel={selectedSimilar?getSearchAddState(selectedSimilar).label:"추가"} isAddDisabled={selectedSimilar?getSearchAddState(selectedSimilar).disabled:true} item={selectedSimilar} onAdd={(item)=>{setSelectedSimilar(null);addResult(item);}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
+      <RecommendationExclusionSheet
+        excludedGenres={recommendationPreferences.excludedGenres}
+        excludedThemeKeys={recommendationPreferences.excludedThemeKeys}
+        isSaving={recommendationPreferences.isSaving}
+        onClose={() => setRecommendationExclusionsVisible(false)}
+        onToggleGenre={(key) => void toggleRecommendationExclusion("genre", key)}
+        onToggleTheme={(key) => void toggleRecommendationExclusion("theme", key)}
+        visible={recommendationExclusionsVisible}
+      />
+      <SimilarContentQuickViewModal areActionsDisabled={selectedSimilar?getSearchAddState(selectedSimilar).wishlistDisabled:true} isActionPending={selectedSimilar?getSearchAddState(selectedSimilar).isPending:false} item={selectedSimilar} onAddToWishlist={(item)=>{setSelectedSimilar(null);addResult(item,"wishlist");}} onMarkCompleted={(item)=>{setSelectedSimilar(null);addResult(item,"completed");}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
     </View>
   );
 }
@@ -992,28 +1111,6 @@ function isResultAlreadyAdded(
   // whole-work row from before migration 0021 must not disable its add button.
   // A non-season card keeps the old behaviour: any row for the work counts.
   return typeof result.season_number === "number" ? match.kind === "season" : match.kind !== "none";
-}
-
-function isRegisteredRecommendation(result: SearchResult, libraryItems: LibraryListItem[]): boolean {
-  return libraryItems.some((item) => {
-    if (item.source_api !== "manual" && `${item.source_api}:${item.source_id}` === createExternalKey(result)) {
-      return true;
-    }
-
-    return isSameLibraryWork(item, result);
-  });
-}
-
-function isSameLibraryWork(item: LibraryListItem, result: SearchResult): boolean {
-  if (item.content_type !== result.content_type) return false;
-  if (item.air_year && result.air_year && item.air_year !== result.air_year) return false;
-
-  const itemTitles = [item.title_primary, item.title_original]
-    .map((title) => normalizeTitleForDedupe(title ?? ""))
-    .filter((title) => title.length >= 2);
-  const resultTitles = normalizedTitleCandidates(result);
-
-  return itemTitles.some((title) => resultTitles.includes(title));
 }
 
 function filterResultsByLibraryStatus(
@@ -1291,6 +1388,28 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
     minWidth: 240
+  },
+  recommendationFilterRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  recommendationFilterButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingHorizontal: spacing.md
+  },
+  recommendationFilterButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800"
   },
   recommendationTitle: {
     color: colors.text,

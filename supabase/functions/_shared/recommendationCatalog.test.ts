@@ -488,6 +488,33 @@ describe("provider failure semantics", () => {
     ]] } }), { mediaType: "anime", now: NOW, cursor: failed.nextCursor, limit: 1 });
     assert.equal(recovered.items.length, 1);
     assert.equal(recovered.allProvidersFailed, false);
+    assert.deepEqual(recovered.failedProviders, []);
+    assert.deepEqual(recovered.warnings, []);
+  });
+
+  it("keeps reporting a provider that fails again on retry", async () => {
+    const unavailable = new Set(["anilist:2026-07:1"]);
+    const failed = await scanRecommendationCatalog(fetcher({}, unavailable), {
+      mediaType: "anime", now: NOW
+    });
+    const retried = await scanRecommendationCatalog(fetcher({}, unavailable), {
+      mediaType: "anime", now: NOW, cursor: failed.nextCursor
+    });
+    assert(retried.failedProviders.includes("anilist"));
+    assert(retried.warnings.includes("anilist:unavailable"));
+  });
+
+  it("keeps a failed provider reported when it is not retried this round", async () => {
+    const cursor = decodeRecommendationCursor(null, "all", NOW);
+    cursor.providers.anilist.failures = 1;
+    const calls: string[] = [];
+    const result = await scanRecommendationCatalog(fetcher({ tmdb_kr: { "2026-07": [[
+      candidate("healthy-drama", "2026-07-01", 10, { external_source: "tmdb", content_type: "kdrama" })
+    ]] } }, new Set(), calls), {
+      mediaType: "all", now: NOW, cursor: encodeRecommendationCursor(cursor), limit: 1
+    });
+    assert(result.failedProviders.includes("anilist"));
+    assert(!calls.some((call) => call.startsWith("anilist:")));
   });
 });
 

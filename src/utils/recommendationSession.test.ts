@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   clearRecommendationSessionSeenIds,
   collectRecommendationSessionSeenIds,
+  limitRecommendationRequestExclusions,
   readRecommendationSessionSeenIds,
   rememberRecommendationSessionSeenIds
 } from "./recommendationSession";
@@ -86,7 +87,25 @@ test("recommendation session keeps the complete seen history for a long session"
     rememberRecommendationSessionSeenIds(userId, ids);
 
     assert.deepEqual(readRecommendationSessionSeenIds(userId), ids);
+    assert.deepEqual(limitRecommendationRequestExclusions(readRecommendationSessionSeenIds(userId)), ids.slice(-200));
+    assert.deepEqual(readRecommendationSessionSeenIds(userId), ids);
   } finally {
     clearRecommendationSessionSeenIds(userId);
   }
+});
+
+test("recommendation request exclusions keep the latest 200 distinct normalized IDs", () => {
+  const ids = Array.from({ length: 205 }, (_, index) => `tmdb:${index + 1}`);
+  const limited = limitRecommendationRequestExclusions([
+    ...ids,
+    " tmdb:1 ",
+    "tmdb:205",
+    "  ",
+    "tmdb:1"
+  ]);
+
+  assert.equal(limited.length, 200);
+  assert.deepEqual(limited, [...ids.slice(6), "tmdb:1"]);
+  assert.equal(new Set(limited).size, limited.length);
+  assert.equal(ids.length, 205);
 });

@@ -103,7 +103,11 @@ export default function HomeScreen() {
 
       <UpcomingAiringSection
         items={upcomingAiringItems}
-        onPressItem={(item) => router.push({ pathname: "/content/[id]", params: { id: item.content_id } })}
+        onPressItem={(item) => router.push({ pathname: "/content/[id]", params: {
+          id: item.content_id,
+          libraryItemId: item.library_item_id,
+          ...(item.season_number != null ? { season: String(item.season_number) } : {})
+        } })}
       />
 
       <View style={styles.hero}>

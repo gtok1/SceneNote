@@ -198,6 +198,8 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       if (result.status === "fulfilled") {
         successfulPages.set(provider, result.value);
         state.providers[provider].failures = 0;
+        failedProviders.delete(provider);
+        warnings.delete(`${provider}:unavailable`);
         return;
       }
       state.providers[provider].failures = Math.min(100, state.providers[provider].failures + 1);

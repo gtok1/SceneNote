@@ -63,6 +63,7 @@ export interface PersonalizedRecommendationsResponse {
   broadened: boolean;
   profile_mode: RecommendationProfileMode;
   partial: boolean;
+  filter_limited?: boolean;
   failed_sources: string[];
   warnings: string[];
 }
@@ -86,6 +87,7 @@ interface PersonalizedRecommendationsApiResponse {
   broadened?: boolean;
   profile_mode?: RecommendationProfileMode;
   partial?: boolean;
+  filter_limited?: boolean;
   failed_sources?: string[];
   warnings?: string[];
 }
@@ -96,6 +98,7 @@ interface PersonalizedRecommendationPage
   broadened: boolean;
   profileMode: RecommendationProfileMode;
   partial: boolean;
+  filterLimited: boolean;
   failedSources: string[];
   warnings: string[];
   providersBlocked: boolean;
@@ -108,6 +111,7 @@ export async function getPersonalizedRecommendations(
   const warnings = new Set<string>();
   let broadened = false;
   let partial = false;
+  let filterLimited = false;
   let scanBudgetReached = false;
   let profileMode: RecommendationProfileMode = "cold_start";
 
@@ -127,6 +131,7 @@ export async function getPersonalizedRecommendations(
       page.warnings.forEach((warning) => warnings.add(warning));
       broadened ||= page.broadened;
       partial ||= page.partial;
+      filterLimited ||= page.filterLimited;
       scanBudgetReached ||= page.scanBudgetReached;
       profileMode = page.profileMode;
       return page;
@@ -150,6 +155,7 @@ export async function getPersonalizedRecommendations(
     broadened,
     profile_mode: profileMode,
     partial: partial || failedSources.size > 0,
+    filter_limited: filterLimited,
     failed_sources: [...failedSources],
     warnings: [...warnings]
   };
@@ -184,6 +190,7 @@ async function fetchPersonalizedRecommendationPage(input: {
   cursor: string | null;
   signal?: AbortSignal;
 }): Promise<PersonalizedRecommendationPage> {
+  const startedAt = Date.now();
   const body: Record<string, unknown> = {
     action: "recommend",
     limit: Math.min(12, Math.max(1, Math.floor(input.limit))),
@@ -203,7 +210,7 @@ async function fetchPersonalizedRecommendationPage(input: {
       const payload: unknown = await response.clone().json().catch(() => null);
       const code = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
       const knownCodes = ["ALL_PROVIDERS_FAILED", "RECOMMENDATION_FAILED", "INVALID_CURSOR", "LIBRARY_QUERY_FAILED", "FEEDBACK_QUERY_FAILED", "UNAUTHORIZED", "INVALID_REQUEST"];
-      console.warn("recommendation diagnostic", JSON.stringify({action:"recommend", status, code:typeof code === "string" && knownCodes.includes(code) ? code : "UNKNOWN"}));
+      console.warn("recommendation diagnostic", JSON.stringify({action:"recommend", status, elapsedMs: Date.now() - startedAt, code:typeof code === "string" && knownCodes.includes(code) ? code : "UNKNOWN"}));
     }
     throw new Error(status ? `추천 서버에 연결하지 못했습니다 (${status}). 다시 시도해 주세요.` : "추천 연결이 끊겼거나 응답 시간이 초과되었습니다. 다시 시도해 주세요.");
   }
@@ -213,7 +220,7 @@ async function fetchPersonalizedRecommendationPage(input: {
 
   if (__DEV__) console.info("recommendation response", JSON.stringify({
     action: "recommend", mediaType: input.mediaType, cursor: input.cursor ? "continuation" : "initial",
-    count: data.items.length, hasMore: data.has_more, partial: data.partial,
+    count: data.items.length, elapsedMs: Date.now() - startedAt, hasMore: data.has_more, partial: data.partial,
     failedSources: (data.failed_sources ?? []).filter(source => ["tmdb", "anilist", "tmdb_kr", "tmdb_jp", "tmdb_movie"].includes(source))
   }));
   const providerError = recommendationProviderError(Boolean(data.providers_blocked), data.items.length);
@@ -234,6 +241,7 @@ async function fetchPersonalizedRecommendationPage(input: {
     broadened: Boolean(data.broadened),
     profileMode: data.profile_mode ?? "cold_start",
     partial: Boolean(data.partial),
+    filterLimited: Boolean(data.filter_limited),
     failedSources: data.failed_sources ?? [],
     warnings: data.warnings ?? [],
     providersBlocked: Boolean(data.providers_blocked)

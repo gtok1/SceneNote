@@ -10,6 +10,7 @@ import type {
 } from "@/types/library";
 import { extractGenreNames, type ContentGenreJoin } from "@/utils/genre";
 import { createSeasonDisplayTitle } from "@/utils/seasonDisplay";
+import { releasedEpisodeFromKnownDates, upcomingEpisodeFromKnownDates } from "@/utils/airingAvailability";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
   createSeasonOffsetsByNumber,
@@ -717,6 +718,34 @@ export async function getEpisodes(contentId: string, seasonId: string): Promise<
 
   if (functionError) throw new Error(functionError.message);
   return functionData?.episodes ?? [];
+}
+
+export interface EpisodeAvailability {
+  releasedEpisodeNumber: number | null;
+  upcomingEpisodeNumber: number | null;
+  nextAirDate: string | null;
+}
+
+export async function getEpisodeAvailability(contentId: string, seasonId: string): Promise<EpisodeAvailability> {
+  const { data, error } = await supabase.functions.invoke<{
+    released_episode_number?: number | null;
+    upcoming_episode_number?: number | null;
+    next_air_date?: string | null;
+    episodes?: Episode[];
+  }>("fetch-episodes", {
+    body: { content_id: contentId, season_id: seasonId, availability_only: true }
+  });
+
+  if (error) throw new Error(error.message);
+  const fallbackEpisodes = data?.episodes ?? [];
+  const fallbackUpcoming = upcomingEpisodeFromKnownDates(fallbackEpisodes);
+  return {
+    releasedEpisodeNumber: typeof data?.released_episode_number === "number"
+      ? data.released_episode_number
+      : releasedEpisodeFromKnownDates(fallbackEpisodes),
+    upcomingEpisodeNumber: data?.upcoming_episode_number ?? fallbackUpcoming?.episodeNumber ?? null,
+    nextAirDate: data?.next_air_date ?? fallbackUpcoming?.airDate ?? null
+  };
 }
 
 export async function getEpisodeProgress(contentId: string): Promise<EpisodeProgress[]> {

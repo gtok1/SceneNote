@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { searchAniList } from "./adapters/anilist.ts";
 import { searchKitsu } from "./adapters/kitsu.ts";
@@ -7,7 +7,7 @@ import {
   createSearchQueryVariants,
   filterResultsByCompactQuery
 } from "./adapters/normalize.ts";
-import { discoverTmdb, searchTmdb } from "./adapters/tmdb.ts";
+import { discoverTmdb, filterSearchResultsByDiscovery, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
 import type {
   AdapterSearchResponse,
@@ -17,14 +17,17 @@ import type {
 } from "./adapters/types.ts";
 import type { SearchQueryVariant as QueryVariant } from "./adapters/normalize.ts";
 import { normalizeSearchCachePayload } from "../_shared/searchCacheMetadata.ts";
+import { discoveryFilterKey, normalizeDiscoveryFilters, type DiscoveryFilterInput, type DiscoveryFilters } from "../_shared/discoveryFilters.ts";
+import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
 
-interface SearchRequest {
+interface SearchRequest extends DiscoveryFilterInput {
   query?: string;
   media_type?: MediaTypeFilter;
   category?: MediaTypeFilter;
   page?: number;
   /** ISO 3166-1 alpha-2. With no query this switches the request into browse mode. */
   country?: string;
+  genre?: string;
 }
 
 interface SearchResponse {
@@ -38,6 +41,8 @@ interface SearchResponse {
   page: number;
   hasNextPage: boolean;
   partial: boolean;
+  country_filter_limited?: boolean;
+  genre_filter_limited?: boolean;
 }
 
 interface SearchJob {
@@ -53,6 +58,7 @@ const corsHeaders = {
 const SEARCH_CACHE_VERSION = "ko-v13-season-expansion";
 
 Deno.serve(async (req: Request) => {
+  const requestDeadline = Date.now() + 8_500;
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -93,16 +99,32 @@ Deno.serve(async (req: Request) => {
   if (!body.ok) return jsonError(400, "INVALID_REQUEST", body.message);
 
   const query = body.value.query?.trim() ?? "";
-  const mediaType = body.value.media_type ?? body.value.category ?? "all";
+  let mediaType = body.value.media_type ?? body.value.category ?? "all";
   const page = Math.max(1, Math.floor(body.value.page ?? 1));
 
-  const country = normalizeCountry(body.value.country);
-  if (body.value.country !== undefined && country === null) {
+  if (body.value.country !== undefined && (typeof body.value.country !== "string" ||
+      (body.value.country.trim().toLowerCase() !== "all" && normalizeCountry(body.value.country) === null))) {
     return jsonError(400, "INVALID_REQUEST", "country must be an ISO 3166-1 alpha-2 code");
   }
+  if (body.value.genre !== undefined && (typeof body.value.genre !== "string" || body.value.genre.length > 60)) {
+    return jsonError(400, "INVALID_REQUEST", "genre must be a string up to 60 characters");
+  }
+  for (const [name, values, max] of [
+    ["genres", body.value.genres, 30], ["countries", body.value.countries, 10], ["mediaTypes", body.value.mediaTypes, 3]
+  ] as const) {
+    if (values !== undefined && (!Array.isArray(values) || values.length > max || values.some((value) =>
+      typeof value !== "string" || value.length > 60 ||
+      (name === "countries" && !normalizeCountry(value)) ||
+      (name === "mediaTypes" && !["anime", "drama", "movie"].includes(value))))) {
+      return jsonError(400, "INVALID_REQUEST", `invalid ${name}`);
+    }
+  }
+  const filters = normalizeDiscoveryFilters(body.value);
+  if (body.value.mediaTypes !== undefined) mediaType = filters.mediaTypes.length === 1 ? filters.mediaTypes[0]! : "all";
+  const country = filters.countries.join("|");
 
-  // Browse mode: a country stands in for the query, so an empty query is allowed.
-  const isBrowse = query.length === 0 && country !== null;
+  // Legacy browse endpoint; the app uses personalized recommendations when blank.
+  const isBrowse = query.length === 0 && filters.countries.length > 0;
 
   if (!isBrowse && (query.length < 1 || query.length > 100)) {
     return jsonError(400, "INVALID_REQUEST", "query must be between 1 and 100 characters");
@@ -113,12 +135,14 @@ Deno.serve(async (req: Request) => {
   }
 
   if (isBrowse && country) {
-    return await respondWithCountryBrowse(adminClient, country, mediaType, page);
+    return await respondWithCountryBrowse(adminClient, country, mediaType, page, filters, requestDeadline, req.signal);
   }
 
   const normalizedQuery = query.replace(/\s+/g, " ").trim();
   const queryVariants = createSearchQueryVariants(normalizedQuery);
-  const targetSources = getTargetSources(mediaType);
+  const targetSources = getTargetSources(mediaType).filter((source) => filters.mediaTypes.length === 0 ||
+    source === "tmdb" || ((source === "anilist" || source === "kitsu") && filters.mediaTypes.includes("anime")) ||
+    (source === "tvmaze" && filters.mediaTypes.includes("drama")));
   const cachedResults: SearchResult[] = [];
   const cachedTotals: number[] = [];
   const cachedHasNextPages: boolean[] = [];
@@ -192,7 +216,14 @@ Deno.serve(async (req: Request) => {
   }
 
   const freshResults = freshResponses.flatMap((response) => response.results);
-  const results = compactResults([...cachedResults, ...freshResults]);
+  const unfilteredResults = compactResults([...cachedResults, ...freshResults]);
+  // Keep the provider page cache independent of the viewer's selected filters.
+  // Only the small, reusable production-country evidence is cached separately.
+  const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
+  const filtered = await filterSearchResultsByDiscovery(unfilteredResults, filters, {
+    cache: countryCache, deadlineMs: requestDeadline, signal: req.signal
+  });
+  const results = filtered.results;
   const successfulSources = [
     ...sourcesFromCache,
     ...freshResponses.map((response) => response.source)
@@ -210,14 +241,34 @@ Deno.serve(async (req: Request) => {
     cached: missedSearches.length === 0,
     query,
     normalizedQuery,
-    total: Math.max(results.length, ...cachedTotals, ...freshResponses.map((item) => item.total)),
+    total: Math.max(results.length, ...cachedTotals, ...freshResponses.map((item) => item.total ?? item.results.length)),
     page,
     hasNextPage: cachedHasNextPages.some(Boolean) || freshResponses.some((item) => item.hasNextPage),
-    partial: failedSources.length > 0
+    partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
+    country_filter_limited: filtered.countryFilterLimited,
+    genre_filter_limited: filtered.genreFilterLimited
   };
 
   return json(response);
 });
+
+function createSearchMetadataCache(adminClient: SupabaseClient, requestDeadline: number) {
+  return createPersistentRecommendationCache({
+    async read(key, source) {
+      const { data, error } = await adminClient.from("external_search_cache")
+        .select("response_json,expires_at").eq("query_hash", key).eq("source", source)
+        .gt("expires_at", new Date().toISOString()).maybeSingle();
+      if (error) throw error;
+      return data ? { value: data.response_json, expiresAt: data.expires_at } : null;
+    },
+    async write(key, source, value, expiresAt) {
+      const { error } = await adminClient.from("external_search_cache").upsert({
+        query_hash: key, query_text: key, source, response_json: value, expires_at: expiresAt
+      }, { onConflict: "query_hash,source" });
+      if (error) throw error;
+    }
+  }, Date.now, 500, requestDeadline);
+}
 
 async function callAdapter(
   source: ExternalSource,
@@ -274,10 +325,11 @@ function normalizeCountry(value: unknown): string | null {
 async function createCountryBrowseHash(
   country: string,
   mediaType: MediaTypeFilter,
-  page: number
+  page: number,
+  signature = "[[],[],[]]"
 ): Promise<string> {
   const encoded = new TextEncoder().encode(
-    `${SEARCH_CACHE_VERSION}:browse:tmdb:${mediaType}:${page}:${country}`
+    `${SEARCH_CACHE_VERSION}:browse:tmdb:${mediaType}:${page}:${country}:${signature}`
   );
   const digest = await crypto.subtle.digest("SHA-256", encoded);
   return Array.from(new Uint8Array(digest))
@@ -286,12 +338,15 @@ async function createCountryBrowseHash(
 }
 
 async function respondWithCountryBrowse(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: SupabaseClient,
   country: string,
   mediaType: MediaTypeFilter,
-  page: number
+  page: number,
+  filters: DiscoveryFilters,
+  requestDeadline: number,
+  signal: AbortSignal
 ): Promise<Response> {
-  const queryHash = await createCountryBrowseHash(country, mediaType, page);
+  const queryHash = await createCountryBrowseHash(country, mediaType, page, discoveryFilterKey(filters));
   const { data: cacheRow } = await adminClient
     .from("external_search_cache")
     .select("response_json")
@@ -300,16 +355,18 @@ async function respondWithCountryBrowse(
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
 
-  const cached = cacheRow ? normalizeSearchCachePayload(cacheRow.response_json) : null;
+  const cached = cacheRow ? normalizeSearchCachePayload<SearchResult>(cacheRow.response_json) : null;
+  const metadataOptions = { cache: createSearchMetadataCache(adminClient, requestDeadline), deadlineMs: requestDeadline, signal };
   if (cached) {
-    return browseResponse(compactResults(cached.results), country, page, cached.total, cached.hasNextPage, true, []);
+    const filtered = await filterSearchResultsByDiscovery(compactResults(cached.results), filters, metadataOptions);
+    return browseResponse(filtered.results, country, page, cached.total, cached.hasNextPage, true, [], filtered);
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const response = await discoverTmdb({ country, mediaType, page, signal: controller.signal });
+    const response = await discoverTmdb({ ...filters, mediaType, page, signal: controller.signal });
     await adminClient.from("external_search_cache").upsert(
       {
         query_hash: queryHash,
@@ -325,14 +382,16 @@ async function respondWithCountryBrowse(
       { onConflict: "query_hash,source" }
     );
 
+    const filtered = await filterSearchResultsByDiscovery(compactResults(response.results), filters, metadataOptions);
     return browseResponse(
-      compactResults(response.results),
+      filtered.results,
       country,
       page,
       response.total ?? response.results.length,
       Boolean(response.hasNextPage),
       false,
-      []
+      [],
+      filtered
     );
   } catch (error) {
     console.error("country browse failed:", error);
@@ -349,7 +408,8 @@ function browseResponse(
   total: number,
   hasNextPage: boolean,
   cached: boolean,
-  failedSources: ExternalSource[]
+  failedSources: ExternalSource[],
+  limited?: { countryFilterLimited: boolean; genreFilterLimited: boolean }
 ): Response {
   const payload: SearchResponse = {
     results,
@@ -361,7 +421,9 @@ function browseResponse(
     total,
     page,
     hasNextPage,
-    partial: failedSources.length > 0
+    partial: failedSources.length > 0 || Boolean(limited?.countryFilterLimited || limited?.genreFilterLimited),
+    country_filter_limited: Boolean(limited?.countryFilterLimited),
+    genre_filter_limited: Boolean(limited?.genreFilterLimited)
   };
 
   return new Response(JSON.stringify(payload), {

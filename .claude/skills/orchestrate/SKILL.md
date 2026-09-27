@@ -1,7 +1,23 @@
 ---
 name: orchestrate
-description: Use when reviewing, reconciling, and integrating deliverables from multiple team roles (PM, Tech Lead, Frontend, Backend) into a single cohesive MVP development plan for the SceneNote app. Invoke after each role has produced their artifacts and a final consolidated plan is needed, or when a scope conflict between roles needs mediation.
+description: SceneNote의 PM·설계·프론트엔드·백엔드 산출물을 하나의 개발 계획으로 통합하거나 역할 간 범위 충돌을 정리할 때 사용한다. 일반 기능 구현, 단일 코드 리뷰, 문서 점검에는 사용하지 않는다.
 ---
+
+## 적용 조건과 기준 문서
+
+이 파일은 Claude/Codex가 공유하는 통합 절차의 기준이다. Codex 진입점은 [.agents의 SKILL.md](../../../.agents/skills/orchestrate/SKILL.md)다. 프로젝트 규칙은 저장소 루트 [AGENTS.md](../../../AGENTS.md), 요구사항 선택은 [문서 목차](../../../docs/README.md), 초기 통합 결정은 [10번 문서](../../../docs/10_mvp_integration_plan.md)를 읽는다. 새 구현 명세가 필요한 경우 [00 작성 패턴](../../../docs/00_codex_doc_pattern.md)을 따른다.
+
+- 입력: 사용자가 요청한 통합 범위, 역할별 산출물의 경로/본문, 관련 확정 명세, 확인 가능한 코드 기준. 전달되지 않은 승인·일정·검증 결과는 만들지 않는다.
+- 아래 6개 기능과 4주 형식은 **초기 MVP 통합 범위**다. 후속 명세·사용자 요청에서 승인한 기능을 자동 제외하거나 현재 구현을 삭제하는 근거로 사용하지 않는다. 구현 존재 자체도 승인 근거로 삼지 않는다.
+- 단순 문서 감사·한 기능 수정·배포에는 이 스킬을 적용하지 않는다. 기존 제품을 초기화하거나 코드·DB·배포 환경을 변경하는 절차가 아니다.
+
+## 진행·완료·중단 기준
+
+1. 입력의 날짜·범위와 기준 문서를 확인한다. 필요한 기능의 코드/설정만 대조하고 현황·확정 요구·제안을 구분한다.
+2. 역할별 충돌을 아래 표에 모아 근거 경로와 결정 영향을 적는다. 확정 D-N은 임의 변경하지 않는다. 승인 근거가 없으면 최종 결정을 만들어내지 않고 `[확인 필요]`로 남긴다.
+3. 아래 출력 형식으로 범위·화면·데이터·API·순서·검증을 연결한다. 기존 통합 문서가 역할을 수행하면 해당 부분을 보완하고 별도 최종본을 중복 생성하지 않는다.
+4. 화면과 데이터/API의 대응, 사용자 데이터의 RLS, P0 의존성·누락 산출물, 실제 경로/링크, 요구사항 테스트 표 전체를 확인한다. 계획만 작성한 경우 테스트·배포 완료로 보고하지 않는다.
+5. 통합한 파일/결정, 근거, 미결 항목, 다음 담당 작업, 실행한 검증과 미실행 사유를 보고하면 완료다. 필수 산출물 부재나 D-N 충돌은 해당 결정만 보류하고 독립 항목은 진행한다. 사용자 확인이 필요하면 이유와 근거를 함께 보고한다.
 
 ## 역할
 

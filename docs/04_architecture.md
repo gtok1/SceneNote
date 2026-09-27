@@ -6,6 +6,46 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 01_product_requirements.md, 02_user_stories.md, 03_screen_flow.md, 09_timeline_pin_ux.md
 
+> **문서 해석:** 아래 번호 절은 2026-05-02 초기 설계와 예제를 보존한 것이다. `확정`은 설계 상태이며 구현 완료를 뜻하지 않는다. 현재 화면 요구사항은 [화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 후속 명세를 먼저 확인한다. 코드가 다르다는 이유로 확정 요구사항을 완화하지 않는다.
+
+## 현재 구현 탐색 가이드
+
+2026-09-26 저장소 소스를 정적으로 확인했다. 원격 DB 적용, Edge Function 배포 및 기기별 동작은 이 확인 범위에 포함하지 않는다. 실행·검증 명령은 [README](../README.md), 실제 프론트엔드 경로와 캐시 동작은 [프론트엔드 아키텍처의 현황](08_frontend_architecture.md#현재-구현과-설계-예제의-구분)을 참고한다.
+
+### 실제 구성과 책임
+
+| 영역 | 코드에서 확인한 위치·심볼 | 수정 시 함께 확인할 영역 |
+|---|---|---|
+| 앱 진입·인증 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`; `src/providers/AppProviders.tsx`: `AppProviders` | 인증 링크 처리 `src/utils/authLinks.ts`, 세션 초기화, 비밀번호 재설정·공유 경로의 리다이렉트 예외 |
+| 화면·공통 UI | `app/`, `src/components/`; 실제 검색 본체는 `app/search.tsx`: `SearchScreen` | `(tabs)` 화면, 상세/핀 라우트, 공통 디자인 값 `src/constants/theme.ts` |
+| 서버 상태·요청 | `src/hooks/` → `src/services/` → `src/lib/supabase.ts`; `src/lib/query.ts`: `queryClient`, `queryKeys` | 캐시 키와 mutation 후 갱신, 사용자 전환 시 캐시 정리, 서버 응답 타입 `src/types/` |
+| UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. `watchProvidersAtom`의 서버 응답 저장은 서버 상태 분리 원칙과 다른 현황이며 일반 규칙으로 확대하지 않는다. |
+| 외부 콘텐츠 호출 | `supabase/functions/*/index.ts`; `_shared/externalContent.ts`; `search-content/adapters/` | `search-content/adapters/types.ts`, `_shared/types.ts`, 클라이언트 `src/types/content.ts` 및 응답 변환 서비스 |
+| DB·권한 | `supabase/migrations/`의 순서별 SQL, `src/types/database.ts` | 후속 migration까지 읽어 최종 제약 확인. 로컬 파일 존재만으로 원격 적용을 단정하지 않는다. |
+
+### 기능별 호출 흐름
+
+| 작업 | 추적 순서 | 함께 읽을 요구사항 |
+|---|---|---|
+| 검색·시즌 결과 | `app/search.tsx` → `src/hooks/useContentSearch.ts`: `useContentSearch` → `src/services/contentSearch.ts`: `searchContent` → `supabase/functions/search-content/index.ts` → `adapters/` | [시즌 검색](15_season_search_spec.md), [시즌 등록](17_season_library_tracking_spec.md), [시즌 조회 폴백](26_recommendation_and_season_lookup_fixes_spec.md) |
+| 라이브러리 등록 | `src/hooks/useLibrary.ts`: `useAddToLibrary` → `src/services/library.ts`: `addContentToLibrary` → `supabase/functions/add-to-library/index.ts` | 시즌 식별자는 `season_number`, 상세 진입은 `libraryItemId`/`season`도 전달한다. [17 명세 D-1~D-3](17_season_library_tracking_spec.md#4-설계-결정)와 `0021_user_library_season_number.sql`이 초기 `(user_id, content_id)` 단일 UNIQUE 설명을 보완한다. |
+| 회차·진행 위치 | `app/content/[id]/episodes.tsx`, `src/components/content/EpisodeProgressCard.tsx` → `src/hooks/useLibrary.ts` → `src/services/library.ts`: `getEpisodes`, `toggleEpisodeProgress`, `updateLibraryManualProgress` | [진행 위치](12_episode_progress_spec.md), [후속 수정](14_codex_prompt_episode_progress_fixes.md). 회차 메타데이터는 `fetch-episodes`, 수동 위치는 `0020_user_library_manual_episode_progress.sql` 확인 |
+| 핀 CRUD·태그 | `app/pins/new.tsx`, `app/pins/[id].tsx` → `src/components/pins/PinComposer.tsx` → `src/hooks/useTimelinePins.ts` → `src/services/pins.ts`, `src/services/tags.ts` | [화면 구현](11_screen_implementation_spec.md), [사용성 결함](31_usability_review_fixes_spec.md). 핀/태그 저장은 여러 클라이언트 요청이며 단일 원자적 RPC로 구현된 것은 아니다. |
+| 추천·제외·유사 작품 | `app/search.tsx` → `usePersonalizedRecommendations`, `useRecommendationPreferences`, `useSimilarContent` (`src/hooks/`) → 동명 기능의 `src/services/` → `personalized-recommendations`, `similar-content` Edge Function | [26](26_recommendation_and_season_lookup_fixes_spec.md)·[27](27_excluded_relationship_themes_spec.md)·[28](28_recommendation_scroll_pagination_fixes_spec.md)·[30](30_recommendation_fill_and_action_consistency_fixes_spec.md); 서버 `_shared/recommendation*.ts`와 클라이언트 `src/utils/recommendation*.ts` 양쪽 확인 |
+| 시청처·계정 | `src/hooks/useWatchProviders.ts` → `src/services/watchProviders.ts` → `get-watch-providers`; `src/hooks/useAuth.ts` → `src/services/account.ts` → `delete-account` | 외부 API 키와 관리자 키는 Edge 환경에만 둔다. `delete-account`의 로컬 구현과 실제 배포 성공은 별도 확인 대상이다. |
+
+개인화 추천의 공개 공급자 페이지·키워드·한국어 제목 보강은 `_shared/recommendationCache.ts`를 통해 기존 `external_search_cache`에 재사용된다. 계정 필터는 조회 요청과 최종 판정에 적용하며, 개인별 라이브러리·피드백·순위는 공유 캐시에 넣지 않는다. 미확인 후보가 남은 공급자 페이지는 카탈로그의 `verificationPass` 커서로 이어 확인한다([30 후속 요청](30_recommendation_fill_and_action_consistency_fixes_spec.md#6-2026-09-26-후속-요청-조회-전-필터와-재사용)).
+
+적용한 검색 조건은 `useSearchFilterPreferences` → `searchFilterPreferences` 서비스 → 본인 RLS가 적용된 `profiles.search_filters`에 저장한다. 검색과 개인화 추천의 원하는 유형·장르·제작 국가는 `mediaTypes`/`genres`/`countries` 배열로 Edge에 전달되며 `_shared/discoveryFilters.ts`로 정규화·검증한다. 추천 공급자 조회와 공개 페이지 캐시에 포함 조건을 넣고 cursor도 같은 조건에 묶는다. 제목 검색은 공용 원시 검색 캐시를 재사용한 다음 조건을 적용하며, 국가/TV 장르 확인에 필요한 공개 메타데이터만 제한된 예산으로 보강한다. 추천 제외는 추천 경로에만 별도로 우선 적용한다([22 후속 요청](22_search_recommendations_restore_spec.md#8-2026-09-27-후속-요청--다중-선택과-계정별-저장)).
+
+### 현황·계획·해결 과제 구분
+
+- **코드 존재와 MVP 제공 범위는 다르다.** 리뷰·인물·가져오기·공유 구현이 저장소에 있으나 `src/constants/features.ts`의 `EXTENDED_FEATURES_ENABLED = false`가 여러 진입점을 제한한다. 검색 추천은 `SEARCH_RECOMMENDATIONS_ENABLED = true`로 별도 제어된다. 단일 플래그만 보고 모든 확장 라우트/API가 차단되었다고 판단하지 않는다.
+- **보안 설계와 구현 충돌 — 판단 필요:** §1.2·§4의 사용자 기록에 대한 RLS 경유 원칙과 달리 `add-to-library/index.ts`는 `requireUser`로 사용자 인증 후 `createAdminClient`로 `user_library_items`를 조회·삽입한다. `_shared/supabase.ts`의 `createUserClient`/`createAdminClient` 경계를 검토해야 하며, 이를 승인된 RLS 우회 예외로 간주하지 않는다.
+- **초기 lazy load 설명과 다른 현황:** `add-to-library/index.ts`의 `prefetchFirstSeasonEpisodes` 및 `get-content-detail/index.ts`의 `upsertSeasonsAndPrefetchFirstSeason`이 회차를 선조회한다. §5.2의 “에피소드 화면 진입 시에만”은 현재 호출 동작 설명으로 사용하지 않는다. 기존 콘텐츠 상세 조회에도 메타데이터 갱신이 있으므로 읽기처럼 보이는 Edge 호출의 부작용을 확인한다.
+- **자동 병합 요구와 구현 충돌 — 판단 필요:** §7의 출처별 사용자 선택 원칙과 달리 `app/search.tsx`의 `mergeSearchResults`/`isSameWorkResult`는 제목·종류·연도·시즌을 비교해 표시 결과를 병합한다. DB의 canonical 통합과는 다른 처리지만 출처별 후보 유지 요구 충족 여부를 검토해야 한다.
+- **명세 존재는 수정 완료가 아니다.** `src/services/pins.ts`의 `PIN_SELECT`는 시즌을 포함하지 않고 `getPinsByContent`는 초→생성일로 정렬한다. [31 명세 U-3](31_usability_review_fixes_spec.md)의 시즌·회차·장면 순 요구를 충족했다고 기록하지 않는다. 다른 U 항목도 해당 코드와 검증 결과로 각각 판단한다.
+
 ---
 
 ## 1. 시스템 아키텍처 개요

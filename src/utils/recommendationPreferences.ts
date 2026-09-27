@@ -16,6 +16,19 @@ export function normalizeRecommendationPreferenceKey(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
+/** Stable across ordering/case so equivalent account filters reuse their feed. */
+export function recommendationExclusionSignature(preferences?: {
+  excludedThemeKeys: readonly string[];
+  excludedGenres: readonly string[];
+}): string {
+  const normalize = (keys: readonly string[]) =>
+    [...new Set(keys.map(normalizeRecommendationPreferenceKey).filter(Boolean))].sort();
+  return JSON.stringify([
+    normalize(preferences?.excludedThemeKeys ?? []),
+    normalize(preferences?.excludedGenres ?? [])
+  ]);
+}
+
 export function recommendationExclusionTargetKey(
   targetType: RecommendationExclusionTargetType,
   key: string

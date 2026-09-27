@@ -1,6 +1,28 @@
 import type { MediaTypeFilter } from "../types/content";
 import type { LibraryStatusFilter } from "../types/library";
 import type { DateSortOrder } from "./contentSort";
-export interface SearchFilterDraft { mediaType: MediaTypeFilter; countryFilter: string; genreFilter: string; statusFilter: LibraryStatusFilter; year: string; sortOrder: DateSortOrder }
-export function createSearchFilterDraft(filters: SearchFilterDraft): SearchFilterDraft { return { ...filters }; }
-export const emptySearchFilters: SearchFilterDraft = { mediaType: "all", countryFilter: "all", genreFilter: "all", statusFilter: "all", year: "", sortOrder: "latest" };
+export type SelectedSearchMediaType = Exclude<MediaTypeFilter, "all">;
+
+export interface SearchFilterDraft {
+  mediaTypes: SelectedSearchMediaType[];
+  genreFilters: string[];
+  countryFilters: string[];
+  statusFilter: LibraryStatusFilter;
+  year: string;
+  sortOrder: DateSortOrder;
+}
+
+/** Draft arrays never share references with the applied or default values. */
+export function createSearchFilterDraft(filters: SearchFilterDraft): SearchFilterDraft {
+  return {
+    ...filters,
+    mediaTypes: [...filters.mediaTypes],
+    genreFilters: [...filters.genreFilters],
+    countryFilters: [...filters.countryFilters]
+  };
+}
+
+export const emptySearchFilters: SearchFilterDraft = {
+  mediaTypes: [], genreFilters: [], countryFilters: [],
+  statusFilter: "all", year: "", sortOrder: "latest"
+};

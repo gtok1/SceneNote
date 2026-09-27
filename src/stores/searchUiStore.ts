@@ -3,30 +3,21 @@ import { Platform } from "react-native";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { MediaTypeFilter } from "@/types/content";
-import type { LibraryStatusFilter } from "@/types/library";
-import type { DateSortOrder } from "@/utils/contentSort";
-import { ALL_COUNTRY_FILTER } from "@/utils/countryFilter";
-import { ALL_GENRE_FILTER } from "@/utils/genre";
+import { useAuthStore } from "@/stores/authStore";
+import { createSearchFilterDraft, emptySearchFilters, type SearchFilterDraft } from "@/utils/searchFilterDraft";
+import { getSearchAccountTransition } from "@/utils/searchFilterPreferences";
 
 export type SearchViewMode = "detail" | "gallery";
 
-interface SearchUiState {
+interface SearchUiState extends SearchFilterDraft {
   query: string;
-  mediaType: MediaTypeFilter;
-  statusFilter: LibraryStatusFilter;
-  genreFilter: string;
-  countryFilter: string;
-  year: string;
-  sortOrder: DateSortOrder;
+  accountUserId: string | null;
+  accountRevision: number;
+  filterUserId: string | null;
   viewMode: SearchViewMode;
   setQuery: (query: string) => void;
-  setMediaType: (mediaType: MediaTypeFilter) => void;
-  setStatusFilter: (statusFilter: LibraryStatusFilter) => void;
-  setGenreFilter: (genreFilter: string) => void;
-  setCountryFilter: (countryFilter: string) => void;
-  setYear: (year: string) => void;
-  setSortOrder: (sortOrder: DateSortOrder) => void;
+  beginAccount: (userId: string | null) => void;
+  hydrateFilters: (userId: string, filters: SearchFilterDraft) => void;
   setViewMode: (viewMode: SearchViewMode) => void;
   reset: () => void;
 }
@@ -40,32 +31,26 @@ const noopStorage = {
 
 export const useSearchUiStore = create<SearchUiState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
+      ...createSearchFilterDraft(emptySearchFilters),
       query: "",
-      mediaType: "all",
-      statusFilter: "all",
-      genreFilter: ALL_GENRE_FILTER,
-      countryFilter: ALL_COUNTRY_FILTER,
-      year: "",
-      sortOrder: "latest",
+      accountUserId: useAuthStore.getState().user?.id ?? null,
+      accountRevision: 0,
+      filterUserId: null,
       viewMode: "detail",
       setQuery: (query) => set({ query }),
-      setMediaType: (mediaType) => set({ mediaType }),
-      setStatusFilter: (statusFilter) => set({ statusFilter }),
-      setGenreFilter: (genreFilter) => set({ genreFilter }),
-      setCountryFilter: (countryFilter) => set({ countryFilter }),
-      setYear: (year) => set({ year: year.replace(/\D/g, "").slice(0, 4) }),
-      setSortOrder: (sortOrder) => set({ sortOrder }),
+      beginAccount: (userId) => {
+        const transition = getSearchAccountTransition(get(), userId);
+        if (transition) set(transition);
+      },
+      hydrateFilters: (userId, filters) => {
+        if (useAuthStore.getState().user?.id !== userId || get().accountUserId !== userId) return;
+        set({ ...createSearchFilterDraft(filters), filterUserId: userId });
+      },
       setViewMode: (viewMode) => set({ viewMode }),
       reset: () =>
         set({
-          query: "",
-          mediaType: "all",
-          statusFilter: "all",
-          genreFilter: ALL_GENRE_FILTER,
-          countryFilter: ALL_COUNTRY_FILTER,
-          year: "",
-          sortOrder: "latest"
+          ...createSearchFilterDraft(emptySearchFilters), query: "", filterUserId: null
         })
     }),
     {
@@ -75,3 +60,9 @@ export const useSearchUiStore = create<SearchUiState>()(
     }
   )
 );
+
+// Keep account ownership correct even when the search screen is not mounted.
+useAuthStore.subscribe((state, previous) => {
+  const userId = state.user?.id ?? null;
+  if (userId !== (previous.user?.id ?? null)) useSearchUiStore.getState().beginAccount(userId);
+});

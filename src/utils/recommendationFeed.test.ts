@@ -5,6 +5,7 @@ import {
   appendRecommendationFeed,
   createRecommendationFeedKey,
   createRecommendationFeedState,
+  getRecommendationRetryAction,
   decideEmptyRecommendationContinuation,
   advanceRecommendationNoProgressStreak,
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
@@ -323,9 +324,43 @@ describe("recommendation feed state", () => {
     const dramaKey = createRecommendationFeedKey("user-1", "drama");
     const animeKey = createRecommendationFeedKey("user-1", "anime");
 
-    assert.deepEqual(dramaKey, ["recommendations", "user-1", "personalized", "drama"]);
-    assert.deepEqual(animeKey, ["recommendations", "user-1", "personalized", "anime"]);
+    assert.deepEqual(dramaKey, ["recommendations", "user-1", "personalized", "drama", "[[],[]]", '[[],[],[]]']);
+    assert.deepEqual(animeKey, ["recommendations", "user-1", "personalized", "anime", "[[],[]]", '[[],[],[]]']);
     assert.notDeepEqual(dramaKey, animeKey);
+  });
+
+  it("separates account filters without changing the account invalidation prefix", () => {
+    const unrestricted = createRecommendationFeedKey("user-1", "all");
+    const filtered = createRecommendationFeedKey("user-1", "all", '[["boys-love"],[]]');
+    const otherUser = createRecommendationFeedKey("user-2", "all", '[["boys-love"],[]]');
+    assert.notDeepEqual(unrestricted, filtered);
+    assert.notDeepEqual(filtered, otherUser);
+    assert.deepEqual(filtered.slice(0, 2), ["recommendations", "user-1"]);
+  });
+
+  it("keeps positive genre/country feeds and their scan cursors separate", () => {
+    const krComedy = createRecommendationFeedKey("user-1", "all", "[[],[]]", '["comedy","KR"]');
+    const jpComedy = createRecommendationFeedKey("user-1", "all", "[[],[]]", '["comedy","JP"]');
+    const krDrama = createRecommendationFeedKey("user-1", "all", "[[],[]]", '["drama","KR"]');
+    assert.notDeepEqual(krComedy, jpComedy);
+    assert.notDeepEqual(krComedy, krDrama);
+    assert.deepEqual(krComedy.slice(0, 2), ["recommendations", "user-1"]);
+  });
+
+  it("retries a zero-visible response from its saved continuation instead of page one", () => {
+    assert.equal(getRecommendationRetryAction(undefined), "initial");
+    assert.equal(getRecommendationRetryAction({ has_more: true, next_cursor: "older-month", is_exhausted: false }), "continue");
+  });
+
+  it("does not restart a completed scan when retry is repeated", () => {
+    for (const page of [
+      { has_more: false, next_cursor: "stale-cursor", is_exhausted: false },
+      { has_more: true, next_cursor: null, is_exhausted: false },
+      { has_more: true, next_cursor: "old-cursor", is_exhausted: true }
+    ]) {
+      assert.equal(getRecommendationRetryAction(page), "complete");
+      assert.equal(getRecommendationRetryAction(page), "complete");
+    }
   });
 });
 

@@ -6,6 +6,53 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 01_product_requirements.md, 03_screen_flow.md, 04_architecture.md, 07_edge_functions.md, 09_timeline_pin_ux.md
 
+> **문서 해석:** 번호 절의 라우트·코드 블록은 초기 설계와 구현 예제다. 실제 파일명·API·완료 여부를 보장하지 않는다. 확정 요구사항은 유지하며, 화면 변경 전 [11 화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 명세를 읽는다. 아래 현황은 2026-09-26 정적 코드 확인이며 UI 동작 검증 결과가 아니다.
+
+## 현재 구현과 설계 예제의 구분
+
+### 실제 라우트와 탐색 출발점
+
+| 기능 | 실제 파일·심볼 | 초기 설계와의 차이·확인 조건 |
+|---|---|---|
+| 공통 레이아웃·인증 경계 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`, `GlobalBottomNav`; `src/providers/AppProviders.tsx`: `AppProviders` | Provider가 QueryClient와 Supabase 세션을 연결한다. `(tabs)/_layout.tsx`의 기본 탭 바는 숨기며 하단 메뉴 5개는 `GlobalBottomNav`에 있다. |
+| 이메일 인증 | `app/(auth)/onboarding.tsx`, `sign-in.tsx`, `sign-up.tsx`, `forgot-password.tsx`, `reset-password.tsx`; `src/hooks/useAuth.ts`: `useAuth` | 설계의 `login.tsx`는 없다. 소셜 로그인은 아래 우선순위 표에 있는 계획이며 현재 hook은 이메일 인증·비밀번호 재설정·로그아웃·탈퇴를 구현한다. |
+| 홈·라이브러리 | `app/(tabs)/index.tsx`, `app/(tabs)/library.tsx`; `src/hooks/useLibrary.ts`: `useLibrary` | 홈과 라이브러리가 별도 화면이다. `src/stores/libraryUiStore.ts`와 `src/utils/libraryRouteParams.ts`에서 필터·복귀 파라미터 확인 |
+| 검색·추천 | `app/search.tsx`: `SearchScreen`; `app/(tabs)/search.tsx`는 이를 재노출 | 검색 UI 수정 본체는 `app/search.tsx`. 일반 검색은 `useContentSearch`, 추천은 `usePersonalizedRecommendations`, 유사 검색은 `useSimilarContent`이며 각각 다른 캐시/추가 로딩 흐름을 갖는다. |
+| 작품 상세·회차·작품 핀 | `app/content/[id].tsx`, `app/content/[id]/episodes.tsx`, `app/content/[id]/pins.tsx` | 설계의 `app/content/[id]/index.tsx`는 없다. 상세는 내부 id와 검색의 `source`/`externalId` 진입을 모두 처리하고 `libraryItemId`/`season`으로 시즌 등록 항목을 구분한다. |
+| 전체 핀·작성·상세/편집 | `app/(tabs)/pins.tsx`, `app/pins/new.tsx`, `app/pins/[id].tsx`; `src/components/pins/PinComposer.tsx` | 태그 필터는 기존 핀 화면에서 처리하며 `app/tags/[tagId].tsx`는 없다. `contentId`는 작성 필수, `episodeId` 생략은 null로 전달하되 영화/회차 유효성은 `getPinContext`와 폼 저장 검증까지 확인한다. |
+| 프로필·추천 제외 | `app/(tabs)/profile.tsx`, `app/settings/excluded-recommendations.tsx` | 프로필 갱신은 `src/services/profile.ts`, 제외 상태는 `src/hooks/useRecommendationPreferences.ts`에서 추적 |
+| 보존된 확장 라우트 | `app/(tabs)/people.tsx`, `app/people/[id].tsx`, `app/library/import.tsx`, `app/library/photo-import.tsx`, `app/share/index.tsx`, `app/share/[id].tsx` | `src/constants/features.ts`의 플래그와 각 파일의 분기를 확인한다. `app/share/[id].tsx`에는 동일한 플래그 guard가 없으므로 전체 확장 경로가 차단됐다고 단정하지 않는다. |
+
+검색의 `ContentSearchBar` 필터 시트는 상단과 추천 헤더에서 공통으로 연다. 유형·장르·제작 국가를 텍스트 칩으로 여러 개 켜고 끄며, 배경·테두리·글자색으로 선택을 구분한다. 시각적인 체크 아이콘은 생략하고 접근성 `checked`는 유지한다. `useSearchFilterPreferences`가 현재 계정의 `profiles.search_filters` 저장에 성공한 뒤 `searchUiStore`에 반영한다. 서버 설정은 계정별 TanStack Query가 소유하고 시트의 미적용 선택은 로컬 draft다. 최초 설정 복원 전에는 제목 검색·추천을 막으며, 계정 전환과 늦은 응답을 구분한다. 선택 조건은 제목 검색과 빈 검색어 추천에 적용하고 유사 검색은 별도 조건을 유지한다. Query key·추천 요청 수명·FlashList key에는 정규화한 배열을 포함해 이전 조건의 페이지와 스크롤 위치를 섞지 않는다. 최근 검색어는 기기 저장소에서 계정별로 분리한다.
+
+### 실제 상태 소유권
+
+| 상태 | 현재 소유 위치 | 변경 시 주의사항 |
+|---|---|---|
+| 서버 응답·query key | `src/lib/query.ts`: `queryClient`, `queryKeys`; `src/hooks/` | 설계의 `lib/queryKeys.ts`, `hooks/queries/`, `hooks/mutations/` 구조는 현재 없다. 일부 key는 hook/화면에 직접 선언되므로 키 변경 전 사용처도 검색한다. |
+| 인증·전역 UI | `src/stores/authStore.ts`: `useAuthStore`; `src/stores/appUIStore.ts`: `useAppUIStore` | `AppProviders`의 세션 초기화와 `useAuth`의 로그아웃/탈퇴 성공 시 `queryClient.clear()`를 함께 검토한다. |
+| 검색·라이브러리·추천 UI | `src/stores/searchUiStore.ts`, `searchHistoryStore.ts`, `libraryUiStore.ts`, `recommendationUiStore.ts` | 서버 응답을 새로운 UI store에 복제하지 않는다. 필터/정렬/검색 기록과 응답 캐시를 구분한다. |
+| 핀 작성 | `src/atoms/pinFormAtom.ts`: `pinFormDraftAtom`; `PinComposer`의 로컬 상태·`createPinSchema` | 현재 PinComposer는 Jotai draft + Zod 검증을 사용한다. 아래 RHF 예제는 이 컴포넌트의 실제 구현이 아니다. |
+| 스포일러 | `src/atoms/spoilerAtom.ts`: `revealedSpoilerPinIdsAtom`; 핀 상세는 `isSpoilerRevealed` 로컬 상태 | 전체 핀/작품 핀/홈과 상세의 초기화 범위가 다르므로 사용자 전환·화면 이탈 시 실제 초기화 코드를 확인한다. |
+| 시청처 캐시 | `src/atoms/watchProvidersAtom.ts`: `watchProvidersAtom`; `src/hooks/useWatchProviders.ts` | 서버 응답·loading·error를 Jotai에 저장하는 현행 예외다. TanStack Query 일원화 요구와의 차이를 보존해 기록하며 신규 기능의 표준으로 삼지 않는다. |
+| 정의만 남은 상태 | `src/stores/pinComposerStore.ts`, `episodeSelectionStore.ts`, `src/atoms/tagFilterAtom.ts` | 점검 시 `app/`·`src/` 사용처 검색에서 import를 찾지 못했다. 실제 작성 폼·회차 선택의 상태 원천으로 오인하지 말고, 제거/재사용은 별도 변경으로 검토한다. |
+
+### 캐시와 mutation의 현재 동작
+
+`src/lib/query.ts`의 기본값은 query `retry: 1`, `staleTime: 30_000`, `gcTime: 5 * 60_000`, mutation `retry: 0`이다. `networkMode` 및 영속 query cache는 이 파일에서 설정하지 않는다. 아래 §9.3의 `offlineFirst` 예제를 현재 오프라인 지원 증거로 사용하지 않는다.
+
+| 변경 | 현재 캐시 처리 | 회귀 범위 |
+|---|---|---|
+| 라이브러리 추가 | `useLibrary.ts`의 `useAddToLibrary`가 사용자 `library.all` prefix 무효화 | 검색 카드·시즌 상세·라이브러리 목록 |
+| 상태·횟수·수동 위치·삭제 | `useLibrary.ts`의 각 mutation이 목록 snapshot을 저장하고 낙관적 갱신, 오류 시 복구; 성공 시 주로 `refetchType: "inactive"` | 필터별 목록 갱신·롤백 및 시즌별 항목 선택. 회차 체크는 `useToggleEpisodeProgress`의 별도 progress/library 무효화 확인 |
+| 핀 생성·수정 | `useTimelinePins.ts`가 사용자 `pins.all` 및 작품/회차/태그를 무효화하고 수정은 단건도 무효화 | `pins.all` prefix는 사용자 핀 하위 key를 포함한다. 생성/수정에는 library/profile stats 무효화가 없으므로 관련 집계 갱신 요구를 별도 검토 |
+| 핀 삭제 | `useDeletePin`이 `["pins"]` 전체 취소·snapshot 후 `src/utils/pinCache.ts`: `removePinFromCachedValue`로 낙관적 삭제, 실패 시 복구, 종료 시 핀·태그·통계·라이브러리 무효화 | 단건이 null이 되면 상세가 폼을 언마운트할 수 있다. [31 명세 U-4](31_usability_review_fixes_spec.md)의 삭제 후 이동 결함을 해결 완료로 간주하지 않는다. |
+| 추천 제외·피드 | `useRecommendationPreferences.ts`가 선호 캐시와 `["recommendations", userId]`를 무효화; `usePersonalizedRecommendations.ts`가 취소·보충·피드 상태 관리 | [28 스크롤 추가 로딩](28_recommendation_scroll_pagination_fixes_spec.md), [30 보충·카드 행동](30_recommendation_fill_and_action_consistency_fixes_spec.md), query identity에 영향을 주는 필터·사용자 변경 |
+
+개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 원시 응답 수가 아니라 등록·제외·중복을 뺀 실제 표시 가능한 작품으로 빈자리 보충 성공 여부를 판단한다.
+
+일반 검색은 `useInfiniteQuery`와 `src/utils/searchPagination.ts`: `mergeSearchPages`를 사용한다. 핀 목록 조회는 현재 `useQuery`이며 cursor 기반 페이지네이션 구현 완료로 표시하지 않는다. 공유 타입·정렬·시간값 처리 수정 시 `src/types/pins.ts`, `src/utils/timecode.ts`, `src/utils/validation.ts`, `src/components/pins/`, 핀 서비스와 관련 순수 함수 테스트까지 영향 범위를 추적한다.
+
 ---
 
 ## 목차
@@ -29,6 +76,8 @@
 ## 1. Expo Router 화면 구조
 
 ### 1.1 전체 라우트 트리
+
+초기 화면 설계 트리다. 실제 파일을 찾을 때는 위 현황 표를 사용하며, 이 트리에 없는 파일을 새로 만들거나 기존 라우트를 이동하는 근거로 사용하지 않는다.
 
 ```
 app/
@@ -192,7 +241,7 @@ app/
 
 #### Query Key 컨벤션
 
-04_architecture.md에서 확정된 구조를 그대로 사용한다.
+초기 설계의 key 예제다. 현재 구현은 `src/lib/query.ts`와 위 캐시 표를 기준으로 추적하되, 변경하려는 동작이 후속 화면 명세를 충족하는지 별도로 확인한다.
 
 ```typescript
 // lib/queryKeys.ts
@@ -2179,6 +2228,8 @@ export const tokens = {
 ---
 
 ## 13. 개발 우선순위 (P0~P3)
+
+아래 표는 초기 계획이며 완료 체크리스트가 아니다. 현재 제공 범위는 `src/constants/features.ts`, 각 화면 분기 및 후속 기능 명세로 확인한다. 미사용 라우트·소셜 로그인·cursor 페이지네이션 등을 이 표만으로 구현 완료라 기록하지 않는다.
 
 ### P0 — 앱이 존재하기 위한 최소 조건
 

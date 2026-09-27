@@ -1,8 +1,9 @@
 /**
  * Country filter for the search screen.
  *
- * Selecting a country without typing anything switches the screen into browse mode,
- * where the backend lists titles from that country instead of searching by title.
+ * The search screen applies this production-country choice to title search and
+ * personal recommendations. Empty input still shows personal recommendations.
+ * The browse helpers are retained for the search service's explicit browse API.
  */
 
 export const ALL_COUNTRY_FILTER = "all";
@@ -19,6 +20,12 @@ export const COUNTRY_FILTER_OPTIONS: CountryFilterOption[] = [
   { code: "US", label: "미국" },
   { code: "CN", label: "중국" }
 ];
+
+export function getCountryFilterLabel(countryFilter: string): string {
+  if (countryFilter === ALL_COUNTRY_FILTER) return "모든 제작 국가";
+  const code = countryFilter.trim().toUpperCase();
+  return COUNTRY_FILTER_OPTIONS.find((option) => option.code === code)?.label ?? code;
+}
 
 export function matchesCountryFilter(
   originCountry: readonly string[] | null | undefined,

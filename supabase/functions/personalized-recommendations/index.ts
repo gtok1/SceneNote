@@ -18,9 +18,10 @@ import {
 } from "../_shared/recommendationImpressions.ts";
 import {
   enrichTmdbRecommendationCandidates,
-  fetchRecommendationProviderPage,
-  TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT
+  fetchRecommendationProviderPage
 } from "../_shared/recommendationProviders.ts";
+import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
+import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../_shared/discoveryFilters.ts";
 import {
   filterRecommendationsForUser,
   isRecommendationExcludedForUser,
@@ -28,12 +29,17 @@ import {
 } from "../_shared/recommendationUserFilters.ts";
 import { mergeLibraryRowsByContent } from "./libraryRowMerge.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
-import { createUserClient, requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, createUserClient, requireUser } from "../_shared/supabase.ts";
 
 interface PersonalizedRecommendationRequest {
   action?: "recommend" | "record_impressions" | "record_feedback";
   limit?: number;
   media_type?: RecommendationMediaType;
+  genre?: string;
+  country?: string;
+  genres?: string[];
+  countries?: string[];
+  mediaTypes?: ("anime" | "drama" | "movie")[];
   exclude_ids?: string[];
   cursor?: string | null;
   impressions?: RecommendationCandidate[];
@@ -94,6 +100,7 @@ interface ValidatedRecommendationRequest {
   action: "recommend";
   limit: number;
   mediaType: RecommendationMediaType;
+  discoveryFilters: DiscoveryFilterInput;
   excludeIds: string[];
   cursor: string | null;
 }
@@ -115,6 +122,7 @@ const MAX_IMPRESSIONS_PER_REQUEST = 12;
 const MAX_FEEDBACK_PER_REQUEST = 4;
 
 Deno.serve(async (req: Request) => {
+  const requestDeadline = Date.now() + 8_500;
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonError(405, "METHOD_NOT_ALLOWED", "POST method required");
 
@@ -195,40 +203,72 @@ Deno.serve(async (req: Request) => {
           .flatMap((item) => [item.target_key, item.source_content_id ?? ""])
       ].map(normalizeRecommendationIdentityKey).filter(Boolean)
     );
+    // Cache only public provider metadata. Account filters and ranking are
+    // applied below on every request; user records still use the RLS client.
+    const cacheClient = createAdminClient();
+    const providerCache = createPersistentRecommendationCache({
+      async read(key, source) {
+        const { data, error } = await cacheClient.from("external_search_cache")
+          .select("response_json,expires_at")
+          .eq("query_hash", key).eq("source", source)
+          .gt("expires_at", new Date().toISOString()).maybeSingle();
+        if (error) throw error;
+        return data ? { value: data.response_json, expiresAt: data.expires_at } : null;
+      },
+      async write(key, source, value, expiresAt) {
+        const { error } = await cacheClient.from("external_search_cache").upsert({
+          query_hash: key, query_text: key, source,
+          response_json: value, expires_at: expiresAt
+        }, { onConflict: "query_hash,source" });
+        if (error) throw error;
+      }
+    }, Date.now, 800, requestDeadline);
     let keywordLookupLimited = false;
-    const providerFetcher = filters.excludedThemeKeys.length > 0
-      ? async (request: Parameters<typeof fetchRecommendationProviderPage>[0]) => {
-          const page = await fetchRecommendationProviderPage(request);
-          const visibleGenres = filterRecommendationsForUser(page.items, {
-            excludedThemeKeys: [],
-            excludedGenres: filters.excludedGenres
-          });
-          const needsKeywordLookup = (candidate: RecommendationCandidate) =>
-            createRecommendationIdentityAliases(candidate)
-              .every((identity) => !keywordLookupExclusions.has(normalizeRecommendationIdentityKey(identity)));
-          const enriched = await enrichTmdbRecommendationCandidates(
-            visibleGenres,
-            needsKeywordLookup
-          );
-          if (visibleGenres.filter((candidate) => candidate.external_source === "tmdb" && needsKeywordLookup(candidate)).length >
-            TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT ||
-            enriched.some((candidate) => candidate.external_source === "tmdb" &&
-              needsKeywordLookup(candidate) && !candidate.keywords?.length)) {
-            keywordLookupLimited = true;
-          }
-          return { ...page, items: enriched };
+    const keywordLookupBudget = { remaining: 16 };
+    const scanStartedAt = Date.now();
+    const discoveryFilters = validated.value.discoveryFilters;
+    const providerFetcher = async (request: Parameters<typeof fetchRecommendationProviderPage>[0]) => {
+      const rawPage = await fetchRecommendationProviderPage(request, { filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline });
+      const page = { ...rawPage, items: rawPage.items.filter((candidate) => matchesDiscoveryFilters(candidate, discoveryFilters)) };
+      if (filters.excludedThemeKeys.length === 0) return page;
+      const visibleGenres = filterRecommendationsForUser(page.items, {
+        excludedThemeKeys: [],
+        excludedGenres: filters.excludedGenres
+      }).filter(hasKoreanDisplayTitle);
+      const needsKeywordLookup = (candidate: RecommendationCandidate) =>
+        createRecommendationIdentityAliases(candidate)
+          .every((identity) => !keywordLookupExclusions.has(normalizeRecommendationIdentityKey(identity)));
+      let pendingVerification = false;
+      const enriched = await enrichTmdbRecommendationCandidates(
+        visibleGenres,
+        needsKeywordLookup,
+        {
+          cache: providerCache,
+          deadlineMs: requestDeadline,
+          lookupBudget: keywordLookupBudget,
+          onDeferred: () => { pendingVerification = true; }
         }
-      : fetchRecommendationProviderPage;
+      );
+      if (pendingVerification || enriched.some((candidate) => candidate.external_source === "tmdb" &&
+          needsKeywordLookup(candidate) && !candidate.keywords?.length)) {
+        keywordLookupLimited = true;
+      }
+      return { ...page, items: enriched, pendingVerification };
+    };
     const result = await scanRecommendationCatalog(providerFetcher, {
       limit: validated.value.limit,
       mediaType: validated.value.mediaType,
+      discoveryFilters,
       cursor: validated.value.cursor,
       excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
       candidateFilter: (candidate) =>
-        hasKoreanDisplayTitle(candidate) && !isRecommendationExcludedForUser(candidate, filters),
-      maxMonthsPerRequest: 1,
-      maxProviderRoundsPerRequest: 1,
+        hasKoreanDisplayTitle(candidate) && matchesDiscoveryFilters(candidate, discoveryFilters) && !isRecommendationExcludedForUser(candidate, filters),
+      maxMonthsPerRequest: 3,
+      maxProviderRoundsPerRequest: 3,
+      // Fast cache hits may fill the batch in this call. Reserve the full
+      // provider/keyword timeout before starting any further cold round.
+      canContinue: () => Date.now() - scanStartedAt < 1_000 && keywordLookupBudget.remaining > 0,
       feedback
     });
 
@@ -240,9 +280,9 @@ Deno.serve(async (req: Request) => {
     const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
     return json({
       items: result.items.map((item) => {
-        if (includeDebug) return item;
+        if (includeDebug) return { ...item, origin_country: item.countries ?? [] };
         const { candidate_score: _candidateScore, ...publicItem } = item;
-        return publicItem;
+        return { ...publicItem, origin_country: item.countries ?? [] };
       }),
       next_cursor: result.nextCursor,
       has_more: result.hasMore,
@@ -308,6 +348,23 @@ function validateRequest(
   if (!["all", "drama", "anime", "movie"].includes(mediaType)) {
     return { ok: false, message: "media_type must be all, drama, anime, or movie" };
   }
+  if (value.genre !== undefined && (typeof value.genre !== "string" || value.genre.length > 80)) {
+    return { ok: false, message: "genre must be a string of at most 80 characters" };
+  }
+  if (value.country !== undefined && (typeof value.country !== "string" || !/^(?:all|[a-z]{2})$/i.test(value.country.trim()))) {
+    return { ok: false, message: "country must be all or an ISO 3166-1 alpha-2 code" };
+  }
+  if (value.genres !== undefined && (!Array.isArray(value.genres) || value.genres.length > 40 || !value.genres.every((genre) => typeof genre === "string" && genre.length <= 80))) {
+    return { ok: false, message: "genres must contain at most 40 genre strings" };
+  }
+  if (value.countries !== undefined && (!Array.isArray(value.countries) || value.countries.length > 20 || !value.countries.every((country) => typeof country === "string" && /^(?:all|[a-z]{2})$/i.test(country.trim())))) {
+    return { ok: false, message: "countries must contain at most 20 ISO country codes" };
+  }
+  if (value.mediaTypes !== undefined && (!Array.isArray(value.mediaTypes) || value.mediaTypes.length > 3 || !value.mediaTypes.every((type) => ["anime", "drama", "movie"].includes(type)))) {
+    return { ok: false, message: "mediaTypes must contain anime, drama, or movie" };
+  }
+  const discoveryFilters = normalizeDiscoveryFilters(value);
+  if (discoveryFilterKey(discoveryFilters).length > 1000) return { ok: false, message: "discovery filters are too long" };
   const excludeIds = validateIdArray(value.exclude_ids);
   if (!excludeIds.ok) return excludeIds;
   if (value.cursor !== undefined && value.cursor !== null && typeof value.cursor !== "string") {
@@ -323,6 +380,11 @@ function validateRequest(
       action,
       limit,
       mediaType,
+      discoveryFilters: {
+        genres: discoveryFilters.genres,
+        countries: discoveryFilters.countries,
+        ...(value.mediaTypes !== undefined ? { mediaTypes: discoveryFilters.mediaTypes } : {})
+      },
       excludeIds: excludeIds.value,
       cursor: value.cursor?.trim() || null
     }

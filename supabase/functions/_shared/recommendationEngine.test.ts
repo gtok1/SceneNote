@@ -559,3 +559,14 @@ describe("window expansion, diversity, and refill behavior", () => {
     assert.equal(batch.next_cursor, null);
   });
 });
+
+it("ranks provider-confirmed international TV as drama without treating unknown media as drama", () => {
+  const works = [
+    candidate("international", { content_type: "other", category: "drama", has_seasons: true, countries: ["US"] }),
+    candidate("unknown", { content_type: "other" }),
+    candidate("not-tv", { content_type: "other", category: "drama", has_seasons: false })
+  ];
+  for (const mediaType of ["all", "drama"] as const) {
+    assert.deepEqual(rankCandidates(buildPreferenceProfile([]), works, { mediaType }).map((item) => item.external_id), ["international"]);
+  }
+});

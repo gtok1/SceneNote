@@ -1,3 +1,4 @@
+import { normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 import { recommendationProviderError } from "@/utils/searchRecommendationPolicy";
 import { supabase } from "@/lib/supabase";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
@@ -68,7 +69,7 @@ export interface PersonalizedRecommendationsResponse {
   warnings: string[];
 }
 
-export interface PersonalizedRecommendationsRequest {
+export interface PersonalizedRecommendationsRequest extends DiscoveryFilterInput {
   userId: string;
   limit: number;
   mediaType: MediaTypeFilter;
@@ -123,6 +124,7 @@ export async function getPersonalizedRecommendations(
       const page = await fetchPersonalizedRecommendationPage({
         limit: continuation.limit,
         mediaType: request.mediaType,
+        ...normalizeDiscoveryFilters(request),
         excludeIds: continuation.excludeIds,
         cursor: continuation.cursor,
         ...(request.signal ? { signal: request.signal } : {})
@@ -183,7 +185,7 @@ export async function recordPersonalizedRecommendationImpressions(
   }
 }
 
-async function fetchPersonalizedRecommendationPage(input: {
+async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput & {
   limit: number;
   mediaType: MediaTypeFilter;
   excludeIds: readonly string[];
@@ -195,6 +197,7 @@ async function fetchPersonalizedRecommendationPage(input: {
     action: "recommend",
     limit: Math.min(12, Math.max(1, Math.floor(input.limit))),
     media_type: input.mediaType,
+    ...normalizeDiscoveryFilters(input),
     exclude_ids: Array.from(new Set(input.excludeIds))
   };
   if (input.cursor) body.cursor = input.cursor;

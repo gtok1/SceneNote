@@ -220,6 +220,130 @@ describe("provider page continuation", () => {
   });
 });
 
+describe("bounded keyword verification continuation", () => {
+  it("keeps a twenty-item provider page until candidates beyond the first eight are verified", async () => {
+    const works = Array.from({ length: 20 }, (_, index) => candidate(`verification-${index}`, "2026-07-01", 100 - index));
+    const calls: number[] = [];
+    let verifiedCount = 0;
+    const provider: RecommendationProviderFetcher = async ({ page }) => {
+      calls.push(page);
+      verifiedCount = Math.min(works.length, verifiedCount + 8);
+      return {
+        items: works.map((work, index) => ({
+          ...work,
+          keywords: index < verifiedCount ? [index < 8 ? "excluded" : "allowed"] : []
+        })),
+        hasMore: false,
+        pendingVerification: verifiedCount < works.length
+      };
+    };
+    const first = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, minimumMonth: "2026-07", maxProviderRoundsPerRequest: 1,
+      candidateFilter: (work) => work.keywords?.includes("allowed") ?? false
+    });
+    const firstCursor = decodeRecommendationCursor(first.nextCursor, "anime", NOW);
+    assert.deepEqual(first.items, []);
+    assert.equal(firstCursor.providers.anilist.page, 1);
+    assert.equal(firstCursor.providers.anilist.done, false);
+    assert.equal(firstCursor.providers.anilist.verificationPass, 1);
+    const next = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, minimumMonth: "2026-07", cursor: first.nextCursor,
+      candidateFilter: (work) => work.keywords?.includes("allowed") ?? false
+    });
+    assert.deepEqual(calls, [1, 1, 1]);
+    assert.deepEqual(next.items.map((item) => item.external_id), works.slice(8).map((item) => item.external_id));
+    assert.equal(new Set(next.items.map((item) => item.external_id)).size, 12);
+    assert.equal(next.exhausted, true);
+  });
+
+  it("rescans the changing ranked pool from zero without skipping newly verified higher-ranked works", async () => {
+    const works = Array.from({ length: 4 }, (_, index) => candidate(`rank-${index}`, "2026-07-01", 100 - index));
+    let call = 0;
+    const provider: RecommendationProviderFetcher = async () => ({
+      items: ++call === 1 ? works.slice(2) : works,
+      hasMore: false,
+      pendingVerification: call === 1
+    });
+    const first = await scanRecommendationCatalog(provider, { mediaType: "anime", now: NOW, limit: 1 });
+    const firstCursor = decodeRecommendationCursor(first.nextCursor, "anime", NOW);
+    assert.equal(firstCursor.offset, 0);
+    assert.equal(firstCursor.providers.anilist.verificationPass, 1);
+    const second = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, limit: 1, cursor: first.nextCursor,
+      excludeIds: first.items.flatMap(createRecommendationIdentityAliases)
+    });
+    assert.equal(second.items[0]?.external_id, "rank-0");
+    const third = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, cursor: second.nextCursor, minimumMonth: "2026-07",
+      excludeIds: [...first.items, ...second.items].flatMap(createRecommendationIdentityAliases)
+    });
+    assert.deepEqual(third.items.map((item) => item.external_id), ["rank-1", "rank-3"]);
+    assert.equal(third.exhausted, true);
+  });
+
+  it("bounds repeated pending pages by the round budget and advances only the verification marker", async () => {
+    const calls: number[] = [];
+    const provider: RecommendationProviderFetcher = async ({ page }) => {
+      calls.push(page);
+      return { items: [], hasMore: true, pendingVerification: true };
+    };
+    const first = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, maxProviderRoundsPerRequest: 3
+    });
+    const firstCursor = decodeRecommendationCursor(first.nextCursor, "anime", NOW);
+    const second = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, cursor: first.nextCursor, maxProviderRoundsPerRequest: 2
+    });
+    const secondCursor = decodeRecommendationCursor(second.nextCursor, "anime", NOW);
+    assert.deepEqual(calls, [1, 1, 1, 1, 1]);
+    assert.equal(first.scanBudgetReached, true);
+    assert.equal(second.scanBudgetReached, true);
+    assert.equal(firstCursor.providers.anilist.verificationPass, 3);
+    assert.equal(secondCursor.providers.anilist.verificationPass, 5);
+    assert.notEqual(first.nextCursor, second.nextCursor);
+  });
+
+  it("finishes verification before advancing to the next provider page", async () => {
+    const calls: number[] = [];
+    const provider: RecommendationProviderFetcher = async ({ page }) => {
+      calls.push(page);
+      return {
+        items: page === 2 ? [candidate("page-two", "2026-07-01")] : [],
+        hasMore: page === 1,
+        pendingVerification: page === 1 && calls.length === 1
+      };
+    };
+    const result = await scanRecommendationCatalog(provider, { mediaType: "anime", now: NOW, limit: 1 });
+    assert.deepEqual(calls, [1, 1, 2]);
+    assert.equal(result.items[0]?.external_id, "page-two");
+  });
+
+  it("honors a shared request deadline before another provider round while keeping safe results", async () => {
+    let calls = 0;
+    const provider: RecommendationProviderFetcher = async () => {
+      calls += 1;
+      return { items: [candidate("safe", "2026-07-01")], hasMore: true, pendingVerification: true };
+    };
+    const result = await scanRecommendationCatalog(provider, {
+      mediaType: "anime", now: NOW, canContinue: () => false
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.items[0]?.external_id, "safe");
+    assert.equal(result.scanBudgetReached, true);
+    assert.equal(decodeRecommendationCursor(result.nextCursor, "anime", NOW).providers.anilist.page, 1);
+  });
+
+  it("accepts existing v2 cursors without a verification marker and rejects invalid markers", () => {
+    const state = decodeRecommendationCursor(null, "anime", NOW);
+    for (const provider of Object.values(state.providers)) delete provider.verificationPass;
+    assert.equal(decodeRecommendationCursor(encodeRecommendationCursor(state), "anime", NOW).providers.anilist.verificationPass, 0);
+    for (const invalid of [-1, 0.5, 101, Number.POSITIVE_INFINITY]) {
+      state.providers.anilist.verificationPass = invalid;
+      assert.throws(() => decodeRecommendationCursor(encodeRecommendationCursor(state), "anime", NOW), /INVALID_RECOMMENDATION_CURSOR/);
+    }
+  });
+});
+
 describe("ranking, exclusions, and stream continuity", () => {
   it("does not let popularity overwrite a stronger preference match within the same month", async () => {
     const library = preferenceLibrary();
@@ -352,6 +476,75 @@ describe("ranking, exclusions, and stream continuity", () => {
 });
 
 describe("provider failure semantics", () => {
+  it("rescans the expanded ranked pool after blocked providers recover with an outstanding offset", async () => {
+    const korean = Array.from({ length: 5 }, (_, index) => candidate(`recovered-korean-${index}`, "2026-07-01", 100 - index, {
+      external_source: "tmdb", content_type: "kdrama"
+    }));
+    const japanese = Array.from({ length: 5 }, (_, index) => candidate(`recovered-japanese-${index}`, "2026-07-01", 90 - index, {
+      external_source: "tmdb", content_type: "jdrama"
+    }));
+    const anime = Array.from({ length: 5 }, (_, index) => candidate(`recovered-anime-${index}`, "2026-07-01", 80 - index));
+    const failures = new Set(["tmdb_kr:2026-07:1"]);
+    const provider = fetcher({
+      tmdb_kr: { "2026-07": [korean] },
+      tmdb_jp: { "2026-07": [japanese] },
+      anilist: { "2026-07": [anime] }
+    }, failures);
+    const first = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, minimumMonth: "2026-07", limit: 6
+    });
+    assert.equal(first.items.length, 6);
+    assert.equal(decodeRecommendationCursor(first.nextCursor, "all", NOW).offset, 6);
+    failures.add("tmdb_jp:2026-07:1");
+    failures.add("anilist:2026-07:1");
+    const blocked = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, minimumMonth: "2026-07", cursor: first.nextCursor,
+      excludeIds: first.items.flatMap(createRecommendationIdentityAliases)
+    });
+    assert.equal(blocked.allProvidersFailed, true);
+    failures.clear();
+    const recovered = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, minimumMonth: "2026-07", cursor: blocked.nextCursor,
+      excludeIds: first.items.flatMap(createRecommendationIdentityAliases)
+    });
+    assert.deepEqual(recovered.items.map((item) => item.external_id), [
+      ...korean.map((item) => item.external_id),
+      ...anime.slice(1).map((item) => item.external_id)
+    ]);
+    assert.equal(recovered.items.length, 9);
+    assert.equal(recovered.exhausted, true);
+    assert.deepEqual(recovered.failedProviders, []);
+  });
+
+  it("rescans the healthy ranked pool when a failed provider removes entries before the saved offset", async () => {
+    const korean = Array.from({ length: 5 }, (_, index) => candidate(`korean-${index}`, "2026-07-01", 100 - index, {
+      external_source: "tmdb", content_type: "kdrama"
+    }));
+    const japanese = Array.from({ length: 5 }, (_, index) => candidate(`japanese-${index}`, "2026-07-01", 90 - index, {
+      external_source: "tmdb", content_type: "jdrama"
+    }));
+    const anime = Array.from({ length: 5 }, (_, index) => candidate(`anime-${index}`, "2026-07-01", 80 - index));
+    const failures = new Set<string>();
+    const provider = fetcher({
+      tmdb_kr: { "2026-07": [korean] },
+      tmdb_jp: { "2026-07": [japanese] },
+      anilist: { "2026-07": [anime] }
+    }, failures);
+    const first = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, minimumMonth: "2026-07"
+    });
+    assert.equal(first.items.length, 12);
+    assert.equal(decodeRecommendationCursor(first.nextCursor, "all", NOW).offset, 12);
+    failures.add("tmdb_kr:2026-07:1");
+    const next = await scanRecommendationCatalog(provider, {
+      mediaType: "all", now: NOW, minimumMonth: "2026-07", cursor: first.nextCursor,
+      excludeIds: first.items.flatMap(createRecommendationIdentityAliases)
+    });
+    assert.deepEqual(next.items.map((item) => item.external_id), anime.slice(2).map((item) => item.external_id));
+    assert.equal(next.allProvidersFailed, false);
+    assert.equal(next.providersBlocked, true);
+  });
+
   it("keeps AniList results when TMDB fails", async () => {
     const anime = Array.from({ length: 12 }, (_, index) => candidate(`anime-${index}`, "2026-07-01"));
     const failures = new Set(["tmdb_kr:2026-07:1", "tmdb_jp:2026-07:1"]);
@@ -595,3 +788,85 @@ function preferenceLibrary(): RecommendationLibraryItem[] {
     status: "completed"
   }));
 }
+
+describe("positive catalog filters", () => {
+  it("fills twelve matching international dramas and resumes a filter-bound cursor without skipped works", async () => {
+    const works = Array.from({ length: 15 }, (_, index) => candidate(`us-${index}`, "2026-07-01", 100 - index, {
+      external_source: "tmdb", content_type: "other", category: "drama", has_seasons: true,
+      countries: ["US"], genres: ["Drama", "Crime"]
+    }));
+    const calls: string[] = [];
+    const getPage = fetcher({ tmdb_kr: { "2026-07": [[
+      candidate("wrong-country", "2026-07-01", 200, { content_type: "kdrama", countries: ["KR"], genres: ["Crime"] }),
+      ...works
+    ]] } }, new Set(), calls);
+    const discoveryFilters = { genre: "crime", country: "US" };
+    const first = await scanRecommendationCatalog(getPage, { mediaType: "drama", now: NOW, discoveryFilters });
+    assert.equal(first.items.length, 12);
+    assert(first.items.every((item) => item.countries?.includes("US") && item.content_type === "other"));
+    assert(calls.every((key) => key.startsWith("tmdb_kr:")));
+    const second = await scanRecommendationCatalog(getPage, {
+      mediaType: "drama", now: NOW, discoveryFilters, cursor: first.nextCursor,
+      excludeIds: first.items.flatMap(createRecommendationIdentityAliases), minimumMonth: "2026-07"
+    });
+    assert.deepEqual(second.items.map((item) => item.external_id), works.slice(12).map((item) => item.external_id));
+    assert.throws(() => decodeRecommendationCursor(first.nextCursor, "drama", NOW, { genre: "crime", country: "CN" }), /INVALID_RECOMMENDATION_CURSOR/);
+    assert.throws(() => decodeRecommendationCursor(first.nextCursor, "drama", NOW), /INVALID_RECOMMENDATION_CURSOR/);
+    const oldCursor = encodeRecommendationCursor(decodeRecommendationCursor(null, "drama", NOW));
+    assert.doesNotThrow(() => decodeRecommendationCursor(oldCursor, "drama", NOW));
+    assert.throws(() => decodeRecommendationCursor(oldCursor, "drama", NOW, discoveryFilters), /INVALID_RECOMMENDATION_CURSOR/);
+  });
+
+  it("returns exhausted without provider calls for an unsupported media and genre combination", async () => {
+    let calls = 0;
+    const result = await scanRecommendationCatalog(async () => { calls += 1; return { items: [], hasMore: false }; }, {
+      mediaType: "anime", now: NOW, discoveryFilters: { genre: "crime", country: "all" }
+    });
+    assert.equal(calls, 0);
+    assert.equal(result.exhausted, true);
+    assert.equal(result.hasMore, false);
+  });
+});
+
+describe("multiselect catalog boundaries", () => {
+  it("stops without requests when all selected genres are excluded for the account", async () => {
+    let calls = 0;
+    const result = await scanRecommendationCatalog(async () => { calls += 1; return { items: [], hasMore: false }; }, {
+      mediaType: "all", now: NOW,
+      discoveryFilters: { genres: ["romance", "comedy"], mediaTypes: [] },
+      feedback: [
+        { target_type: "genre", target_key: "romance", action: "exclude" },
+        { target_type: "genre", target_key: "comedy", action: "exclude" }
+      ]
+    });
+    assert.equal(calls, 0);
+    assert.equal(result.exhausted, true);
+  });
+  it("selects a provider union for multiple types and treats explicit all identically to all three boxes", async () => {
+    const calls: string[] = [];
+    const works = Array.from({ length: 13 }, (_, index) => candidate(`mixed-${index}`, "2026-07-01", 100 - index));
+    const getPage = fetcher({ anilist: { "2026-07": [works] } }, new Set(), calls);
+    const first = await scanRecommendationCatalog(getPage, { mediaType: "drama", now: NOW, discoveryFilters: { mediaTypes: ["anime", "movie"] } });
+    assert.equal(first.items.length, 12);
+    assert(calls.some((value) => value.startsWith("tmdb_movie:")));
+    assert(calls.some((value) => value.startsWith("anilist:")));
+    assert(calls.every((value) => !value.startsWith("tmdb_kr:") && !value.startsWith("tmdb_jp:")));
+    assert.doesNotThrow(() => decodeRecommendationCursor(first.nextCursor, "drama", NOW, { mediaTypes: ["movie", "anime"] }));
+    assert.throws(() => decodeRecommendationCursor(first.nextCursor, "drama", NOW, { mediaTypes: ["anime"] }), /INVALID_RECOMMENDATION_CURSOR/);
+    calls.length = 0;
+    const all = await scanRecommendationCatalog(getPage, { mediaType: "all", now: NOW, discoveryFilters: { mediaTypes: [] } });
+    assert.equal(calls.length, 4);
+    assert.doesNotThrow(() => decodeRecommendationCursor(all.nextCursor, "all", NOW, { mediaTypes: ["drama", "anime", "movie"] }));
+    assert.throws(() => decodeRecommendationCursor(all.nextCursor, "all", NOW), /INVALID_RECOMMENDATION_CURSOR/);
+  });
+
+  it("accepts deployed single-filter cursors for legacy scalar callers but resets changed multiselects", () => {
+    const state = decodeRecommendationCursor(null, "drama", NOW, { genre: "crime", country: "US" });
+    const legacy = encodeRecommendationCursor({ ...state, discoveryFilterKey: JSON.stringify(["crime", "US"]) });
+    assert.doesNotThrow(() => decodeRecommendationCursor(legacy, "drama", NOW, { genre: "Crime", country: "us" }));
+    assert.throws(() => decodeRecommendationCursor(legacy, "drama", NOW, { genres: ["crime", "comedy"], countries: ["US"] }), /INVALID_RECOMMENDATION_CURSOR/);
+    const unicode = { genres: ["crime", "미등록 장르"], countries: ["US"] };
+    const unicodeCursor = encodeRecommendationCursor(decodeRecommendationCursor(null, "drama", NOW, unicode));
+    assert.doesNotThrow(() => decodeRecommendationCursor(unicodeCursor, "drama", NOW, unicode));
+  });
+});

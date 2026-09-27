@@ -6,6 +6,8 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 04_architecture.md
 
+2026-09-27 검색 필터 저장 추가: `0022_profile_search_filters.sql`은 `profiles.search_filters`에 기본값 `{}`인 JSONB object를 추가한다. 적용한 유형·장르·제작 국가 배열과 목록 상태·연도·정렬만 저장하며, 검색어와 추천 제외 설정을 섞지 않는다. `profiles`의 기존 `auth.uid() = id` SELECT/INSERT/UPDATE 정책을 그대로 사용한다. API 저장은 로그인한 클라이언트의 프로필 upsert이며 service role 경유가 아니다. 원격 적용·실행 검증 상태는 [다음 작업 기록](development_next_steps.md)을 확인한다.
+
 ---
 
 ## 1. ERD (Entity Relationship Diagram)

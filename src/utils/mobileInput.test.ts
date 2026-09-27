@@ -55,13 +55,14 @@ test("MU-13/15 context distinguishes missing runtime from invalid episode owners
   assert.throws(() => resolvePinContext({...content,content_type:"movie"},"e",episode));
 });
 test("MU-22 draft change/reset does not mutate committed filters; apply copies all fields together", () => {
-  const applied = {...emptySearchFilters, countryFilter:"JP",year:"2026"};
+  const applied = {...emptySearchFilters, countryFilters:["JP"],year:"2026"};
   let draft = createSearchFilterDraft(applied);
-  draft.mediaType = "anime";
-  assert.equal(applied.mediaType,"all");
+  draft.mediaTypes.push("anime");
+  draft.countryFilters.push("KR");
+  assert.deepEqual(applied.mediaTypes,[]);
   assert.deepEqual(createSearchFilterDraft(applied),applied); // cancel and reopen
   draft = createSearchFilterDraft(emptySearchFilters);
-  assert.equal(applied.countryFilter,"JP"); // reset is draft-only
+  assert.deepEqual(applied.countryFilters,["JP"]); // reset is draft-only
   assert.deepEqual(createSearchFilterDraft(draft),emptySearchFilters);
 });
 test("MU-26 breakpoint and narrow content fallback", () => {

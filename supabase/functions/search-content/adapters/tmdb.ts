@@ -1,5 +1,9 @@
 import { cleanText, parseSeasonQuery, yearFromDate } from "./normalize.ts";
 import { hasTmdbAnimationGenreIds } from "../../_shared/tmdbClassification.ts";
+import { matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../_shared/discoveryFilters.ts";
+import type { RecommendationCache } from "../../_shared/recommendationCache.ts";
+import { enrichTmdbRecommendationCandidates, resolveTmdbDiscoveryGenreKeyword } from "../../_shared/recommendationProviders.ts";
+import { tmdbIncludedGenreId, TMDB_TV_KEYWORD_GENRES } from "../../_shared/recommendationProviderFilters.ts";
 import type { AdapterSearchParams, AdapterSearchResponse, ContentType, SearchResult } from "./types.ts";
 
 const TMDB_LANGUAGE = "ko-KR";
@@ -37,6 +41,158 @@ const TMDB_GENRE_NAMES = new Map<number, string>([
 const TMDB_ANIMATION_GENRE_ID = 16;
 // News, Reality, Talk
 const TMDB_NON_SCRIPTED_GENRE_IDS = [10763, 10764, 10767];
+const MOVIE_COUNTRY_CACHE_VERSION = "search-movie-production-countries-v1";
+const MOVIE_COUNTRY_TTL_MS = 24 * 60 * 60_000;
+const MOVIE_COUNTRY_FAILURE_TTL_MS = 60_000;
+const MOVIE_COUNTRY_MAX_LOOKUPS = 8;
+const MOVIE_COUNTRY_CONCURRENCY = 4;
+
+interface MovieCountryMetadata {
+  countries: string[];
+  failed: boolean;
+}
+
+/** Filter the reusable, unfiltered search page without changing its cached contents.
+ * TMDB search/movie has no production-country filter or country evidence. Only
+ * country-filtered movie candidates need a bounded, cached /movie/{id} lookup.
+ * Do not infer a film's country from its original language or release region.
+ */
+export async function filterSearchResultsByDiscovery(
+  candidates: readonly SearchResult[],
+  input: DiscoveryFilterInput,
+  options: { cache?: RecommendationCache; signal?: AbortSignal; deadlineMs?: number } = {}
+): Promise<{ results: SearchResult[]; countryFilterLimited: boolean; genreFilterLimited: boolean }> {
+  const filters = normalizeDiscoveryFilters(input);
+  const deadlineMs = Math.min(options.deadlineMs ?? Infinity, Date.now() + 3_000);
+  const lookupBudget = { remaining: MOVIE_COUNTRY_MAX_LOOKUPS };
+  let genreFilterLimited = false;
+  let withGenreEvidence: readonly SearchResult[] = candidates;
+  const keywordGenres = filters.genres.filter((genre) => TMDB_TV_KEYWORD_GENRES.has(genre));
+  if (keywordGenres.length > 0) {
+    const unresolved = candidates.filter((candidate) => candidate.external_source === "tmdb" &&
+      candidate.content_type !== "movie" &&
+      !matchesDiscoveryFilters(candidate, { ...filters, countries: [] }) &&
+      matchesDiscoveryFilters(candidate, { ...filters, genres: [] }));
+    let enriched: (SearchResult & { keywords?: readonly string[] | null })[] = [];
+    try {
+      if (options.signal?.aborted) throw new Error("SEARCH_CANCELLED");
+      enriched = await enrichTmdbRecommendationCandidates(unresolved, () => true, {
+        ...(options.cache ? { cache: options.cache } : {}), deadlineMs, lookupBudget,
+        onDeferred: () => { genreFilterLimited = true; }
+      });
+    } catch { genreFilterLimited = unresolved.length > 0; }
+    const proved = new Map(enriched.map((candidate) => {
+      if (!candidate.keywords) genreFilterLimited = true;
+      const matching = keywordGenres.filter((genre) => candidate.keywords?.some((keyword) =>
+        keyword.normalize("NFKC").trim().toLowerCase() === genre));
+      return [candidate.external_id, matching];
+    }));
+    withGenreEvidence = candidates.map((candidate) => candidate.external_source === "tmdb" &&
+      candidate.content_type !== "movie" && proved.get(candidate.external_id)?.length
+      ? { ...candidate, genres: [...(candidate.genres ?? []), ...proved.get(candidate.external_id)!] } : candidate);
+  }
+  const genreMatches = withGenreEvidence.filter((candidate) => matchesDiscoveryFilters(candidate, { ...filters, countries: [] }));
+  if (filters.countries.length === 0) return { results: genreMatches, countryFilterLimited: false, genreFilterLimited };
+
+  const unknownMovies = genreMatches.filter((candidate) => candidate.external_source === "tmdb" &&
+    candidate.content_type === "movie" && !candidate.origin_country?.length);
+  const ids = [...new Set(unknownMovies.map((candidate) => candidate.external_id))];
+  const metadata = new Map<string, MovieCountryMetadata>();
+  let limited = false;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  const remainingMs = Math.max(0, deadlineMs - Date.now());
+  const timeout = setTimeout(abort, remainingMs);
+  if (remainingMs <= 0) controller.abort();
+
+  try {
+    // Cache hits are free and are checked for all candidates before the new-call
+    // budget is consumed, allowing a retry to continue with the next missing ID.
+    await Promise.all(ids.map(async (id) => {
+      if (controller.signal.aborted) return;
+      try {
+        const cached = await withCountryDeadline(
+          options.cache?.get<MovieCountryMetadata>(movieCountryCacheKey(id), "tmdb") ?? Promise.resolve(null),
+          controller.signal
+        );
+        if (cached && Array.isArray(cached.countries) && typeof cached.failed === "boolean") {
+          metadata.set(id, { ...cached, countries: normalizeCountryCodes(cached.countries) });
+        }
+      } catch { /* A cache outage must not prevent a bounded provider lookup. */ }
+    }));
+
+    const missing = ids.filter((id) => !metadata.has(id));
+    const allowed = missing.slice(0, lookupBudget.remaining);
+    limited = missing.length > allowed.length;
+    let position = 0;
+    const apiKey = allowed.length > 0 && !controller.signal.aborted ? Deno.env.get("TMDB_API_KEY") : undefined;
+    await Promise.all(Array.from({ length: Math.min(MOVIE_COUNTRY_CONCURRENCY, allowed.length) }, async () => {
+      while (position < allowed.length && !controller.signal.aborted) {
+        const id = allowed[position++];
+        if (!id) break;
+        let value: MovieCountryMetadata;
+        try {
+          if (!apiKey) throw new Error("TMDB unavailable");
+          const url = new URL(`https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}`);
+          const response = await withCountryDeadline(fetch(url, {
+            headers: applyTmdbAuth(url, apiKey), signal: controller.signal
+          }), controller.signal);
+          if (!response.ok) throw new Error("Movie country lookup failed");
+          const payload = await withCountryDeadline(response.json(), controller.signal) as {
+            production_countries?: { iso_3166_1?: unknown }[];
+          };
+          value = {
+            countries: normalizeCountryCodes((payload.production_countries ?? []).map((entry) => entry.iso_3166_1)),
+            failed: false
+          };
+        } catch {
+          if (controller.signal.aborted) break; // Never persist a request-deadline cancellation as provider failure.
+          value = { countries: [], failed: true };
+        }
+        metadata.set(id, value);
+        try {
+          await withCountryDeadline(options.cache?.set(
+            movieCountryCacheKey(id), "tmdb", value,
+            value.failed ? MOVIE_COUNTRY_FAILURE_TTL_MS : MOVIE_COUNTRY_TTL_MS
+          ) ?? Promise.resolve(), controller.signal);
+        } catch { /* Public metadata cache writes are best effort. */ }
+      }
+    }));
+    for (const id of ids) {
+      if (!metadata.has(id) || metadata.get(id)?.failed) limited = true;
+    }
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abort);
+  }
+
+  const results = genreMatches.map((candidate) => {
+    if (candidate.external_source !== "tmdb" || candidate.content_type !== "movie" || candidate.origin_country?.length) return candidate;
+    const value = metadata.get(candidate.external_id);
+    return value && !value.failed ? { ...candidate, origin_country: value.countries } : candidate;
+  }).filter((candidate) => matchesDiscoveryFilters(candidate, filters));
+  return { results, countryFilterLimited: limited, genreFilterLimited };
+}
+
+function movieCountryCacheKey(id: string): string {
+  return `${MOVIE_COUNTRY_CACHE_VERSION}:${id}`;
+}
+
+function normalizeCountryCodes(values: readonly unknown[]): string[] {
+  return [...new Set(values.flatMap((value) => typeof value === "string" && /^[a-z]{2}$/i.test(value.trim())
+    ? [value.trim().toUpperCase()] : []))];
+}
+
+function withCountryDeadline<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error("MOVIE_COUNTRY_DEADLINE"));
+    if (signal.aborted) { void promise.catch(() => undefined); abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
 
 interface TmdbSearchItem {
   id: number;
@@ -142,27 +298,24 @@ export async function searchTmdb({
  * Browse mode: no title to search, so list a country's titles with TMDB discover.
  * `search/*` cannot filter by country, only `discover/*` can.
  */
-export async function discoverTmdb({
-  country,
-  mediaType,
-  page,
-  signal
-}: {
-  country: string;
+export async function discoverTmdb(input: DiscoveryFilterInput & {
   mediaType: AdapterSearchParams["mediaType"];
   page: number;
   signal: AbortSignal;
 }): Promise<AdapterSearchResponse> {
+  const { mediaType, page, signal } = input;
+  const filters = normalizeDiscoveryFilters(input);
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) {
     throw new Error("TMDB_API_KEY is not configured");
   }
 
-  const endpoints: ("tv" | "movie")[] =
-    mediaType === "movie" ? ["movie"] : mediaType === "all" ? ["tv", "movie"] : ["tv"];
+  const selectedTypes = input.mediaTypes !== undefined ? filters.mediaTypes : mediaType === "all" ? [] : [mediaType];
+  const endpoints: ("tv" | "movie")[] = selectedTypes.length === 0 ? ["tv", "movie"]
+    : [...(selectedTypes.some((type) => type !== "movie") ? ["tv" as const] : []), ...(selectedTypes.includes("movie") ? ["movie" as const] : [])];
 
   const pages = await Promise.all(
-    endpoints.map((endpoint) => fetchTmdbDiscoverPage(endpoint, country, mediaType, page, apiKey, signal))
+    endpoints.map((endpoint) => fetchTmdbDiscoverPage(endpoint, filters, mediaType, page, apiKey, signal))
   );
 
   const results = pages.flatMap((entry) => entry.results);
@@ -177,22 +330,40 @@ export async function discoverTmdb({
 
 async function fetchTmdbDiscoverPage(
   endpoint: "tv" | "movie",
-  country: string,
+  filters: ReturnType<typeof normalizeDiscoveryFilters>,
   mediaType: AdapterSearchParams["mediaType"],
   page: number,
   apiKey: string,
   signal: AbortSignal
 ): Promise<{ results: SearchResult[]; total: number; hasNextPage: boolean }> {
   const url = new URL(`https://api.themoviedb.org/3/discover/${endpoint}`);
-  url.searchParams.set("with_origin_country", country);
+  if (filters.countries.length) url.searchParams.set("with_origin_country", filters.countries.join("|"));
   url.searchParams.set("language", TMDB_LANGUAGE);
   url.searchParams.set("sort_by", "popularity.desc");
   url.searchParams.set("page", String(page));
   url.searchParams.set("include_adult", "false");
+  const keywordGenres = endpoint === "tv" ? filters.genres.filter((genre) => TMDB_TV_KEYWORD_GENRES.has(genre)) : [];
+  const genreIds = [...new Set(filters.genres.map((genre) => tmdbIncludedGenreId(genre, endpoint))
+    .filter((id): id is number => typeof id === "number"))];
+  const keywordOnly = keywordGenres.length > 0 && genreIds.length === 0;
+  if (keywordOnly) {
+    const ids = await Promise.all(keywordGenres.map((genre) => resolveTmdbDiscoveryGenreKeyword(genre, undefined, Date.now() + 2_500)));
+    if (ids.some((id) => !id)) throw new Error("Genre keyword metadata unavailable");
+    url.searchParams.set("with_keywords", ids.join("|"));
+  }
+  if (filters.genres.length > 0 && !keywordGenres.length && genreIds.length === 0) {
+    return { results: [], total: 0, hasNextPage: false };
+  }
+  // TMDB cannot express (native genre OR keyword) in a single query. The
+  // bounded, cached metadata filter below verifies that mixed case instead.
+  if (filters.genres.length > 0 && !keywordGenres.length) url.searchParams.set("with_genres", genreIds.join("|"));
 
   if (endpoint === "tv") {
     if (mediaType === "anime") {
-      url.searchParams.set("with_genres", String(TMDB_ANIMATION_GENRE_ID));
+      // Keep animation mandatory while allowing the selected genre aliases.
+      url.searchParams.set("with_genres", filters.genres.length === 0 || keywordGenres.length > 0
+        ? String(TMDB_ANIMATION_GENRE_ID)
+        : `${TMDB_ANIMATION_GENRE_ID},${genreIds.join("|")}`);
     } else if (mediaType === "drama") {
       // Country browse otherwise floods with variety and talk shows.
       url.searchParams.set("without_genres", TMDB_NON_SCRIPTED_GENRE_IDS.join(","));
@@ -209,7 +380,17 @@ async function fetchTmdbDiscoverPage(
     .map((item) => normalizeTmdbItem({ ...item, media_type: endpoint }, mediaType))
     .filter((result): result is SearchResult => result !== null)
     // discover/movie omits origin_country, but the query already constrained it.
-    .map((result) => ({ ...result, origin_country: [country] }));
+    .map((result) => ({ ...result,
+      ...(keywordOnly && keywordGenres.length === 1 ? { genres: [...(result.genres ?? []), ...keywordGenres] } : {}),
+      origin_country: result.origin_country?.length ? result.origin_country : filters.countries.length === 1 ? filters.countries : []
+    }))
+    .filter((result) => matchesDiscoveryFilters(result, {
+      ...filters,
+      // Unknown movie countries and keyword alternatives are verified by the
+      // shared bounded enrichment before either fresh or cached browse responds.
+      countries: result.content_type === "movie" && !result.origin_country.length ? [] : filters.countries,
+      genres: keywordGenres.length > 0 ? [] : filters.genres
+    }));
 
   return {
     results,

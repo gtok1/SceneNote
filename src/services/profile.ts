@@ -1,7 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/types/database";
 
-export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+export type Profile = Pick<Database["public"]["Tables"]["profiles"]["Row"],
+  "id" | "display_name" | "avatar_url" | "created_at" | "updated_at">;
 
 const MAX_DISPLAY_NAME_LENGTH = 24;
 

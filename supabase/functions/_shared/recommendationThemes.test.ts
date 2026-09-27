@@ -29,4 +29,11 @@ describe("excluded relationship themes", () => {
   for (const { id, input, excludedKeys, expected } of cases) {
     it(id, () => assert.equal(hasExcludedTheme(input, excludedKeys ?? EXCLUDED_THEME_KEYS), expected));
   }
+
+  it("recognizes AniList LGBTQ+ Themes at low rank only for that account's queer exclusion", () => {
+    const input = { source_tags: [{ name: "LGBTQ+ Themes", source: "anilist", rank: 1 }] };
+    assert.equal(hasExcludedTheme(input, ["queer-romance"]), true);
+    assert.equal(hasExcludedTheme(input, ["boys-love"]), false);
+    assert.equal(hasExcludedTheme(input, []), false);
+  });
 });

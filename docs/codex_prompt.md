@@ -1,5 +1,8 @@
 # SceneNote MVP — Codex Implementation Prompt
 
+> **과거 실행 프롬프트 — 참고 전용.** 아래 초기화·설치·결함 목록·경로·완료 주장은 당시 작업 기준이다. 현재 저장소에서 통째로 재실행하지 않는다. 작업 전 [AGENTS.md](../AGENTS.md), [문서 목차](README.md)의 해당 기능 후속 명세, 실제 코드를 대조한다. 특히 현재 핀 정렬 요구사항은 [31번 명세](31_usability_review_fixes_spec.md)를 함께 읽는다. 원문은 설계·작업 이력 보존을 위해 유지한다.
+
+
 아래 프롬프트를 Codex에 그대로 붙여넣어 사용하세요.
 
 ---

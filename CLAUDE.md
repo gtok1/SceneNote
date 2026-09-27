@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+공통 개발·보안·검증 규칙은 [AGENTS.md](AGENTS.md)를 먼저 읽고 적용한다. 이 파일은 Claude 도구별 안내를 보완한다. 현재 실행 방법은 [README](README.md), 기능별 문서는 [문서 목차](docs/README.md), 작업 재개와 미검증 상태는 [development_next_steps](docs/development_next_steps.md)를 따른다. 과거 프롬프트와 agent-memory를 현재 작업 지시로 자동 실행하지 않는다.
+
 ## Project Overview
 
 **SceneNote** — 애니, 한국 드라마, 일본 드라마, 영화 감상 기록 모바일 앱.
@@ -27,42 +29,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Common Commands
 
-프로젝트가 초기화된 후 사용할 명령어:
+저장소 루트에서 `package.json`에 정의된 명령을 사용한다. 설치·환경 선행조건은 [README](README.md)에 있다.
 
 ```bash
-npx expo start          # 개발 서버 시작
-npx expo start --ios    # iOS 시뮬레이터
-npx expo start --android # Android 에뮬레이터
-npx tsc --noEmit        # 타입 체크
-npx eslint .            # 린트
-npx expo export         # 프로덕션 빌드
-
-# Supabase
-npx supabase start      # 로컬 Supabase 시작
-npx supabase db push    # 마이그레이션 적용
-npx supabase functions serve # Edge Functions 로컬 실행
+npm run web -- --port 8081 --localhost --clear
+npm test
+npm run typecheck
+npm run lint
+npm run build
 ```
+
+웹은 8081만 사용한다. 기존 서버 상태를 확인하고 재시작 여부를 결정한다. `build`는 웹 export이며, 타입/린트는 Edge Functions를 제외한다. 배포·DB 적용·smoke·import는 부작용이 있으므로 [검증 가이드](docs/development_next_steps.md)에서 목적과 조건을 먼저 확인한다.
 
 ## Architecture
 
 ### Screen Routes (Expo Router)
 
-```
-app/
-  (tabs)/
-    index       — 홈 / 라이브러리
-    search      — 검색
-    profile     — 프로필
-  content/
-    [id]/
-      index     — 콘텐츠 상세
-      episodes  — 에피소드 목록
-      pins      — 콘텐츠별 핀 타임라인
-  pins/
-    [id]        — 핀 상세 / 편집
-  search        — 검색 화면
-  profile       — 프로필 화면
-```
+실제 라우트와 상태 소유권은 [08. 프론트엔드 아키텍처](docs/08_frontend_architecture.md)의 현재 구현 안내를 기준으로 찾는다.
+
+- 앱 진입: `app/_layout.tsx` → `src/providers/AppProviders.tsx`.
+- 탭: `app/(tabs)/_layout.tsx`; 검색 구현 본체는 `app/search.tsx`.
+- 작품 상세: `app/content/[id].tsx`; 회차/핀 목록은 같은 경로의 `episodes.tsx`, `pins.tsx`.
+- 핀 생성: `app/pins/new.tsx`; 조회/편집: `app/pins/[id].tsx`; 공통 폼: `src/components/pins/PinComposer.tsx`.
+- 기능 노출은 `src/constants/features.ts`도 확인한다. 파일 존재만으로 현재 노출·검증 완료를 뜻하지 않는다.
 
 ### Data Architecture — 핵심 분리 원칙
 
@@ -109,25 +98,12 @@ Expo App
 
 ## 문서 작성 규칙 — Codex 복붙 프롬프트 필수
 
-> **명세를 쓰기 전에 `docs/00_codex_doc_pattern.md`를 먼저 읽는다.**
-> 명세서 스켈레톤과 프롬프트 스켈레톤, 프로젝트 고정 사항(검증 명령·테스트 제약), 실제로 겪은 함정 목록, 마무리 체크리스트가 거기 있다. 아래는 그 요약이다.
+작성 방식의 단일 기준은 [docs/00_codex_doc_pattern.md](docs/00_codex_doc_pattern.md)다. 구현 명세·작업 지시를 쓰기 전에 읽고 마지막 체크리스트까지 적용한다.
 
-구현 명세서나 작업 지시 문서를 작성할 때는 **항상 두 개를 짝으로** 만든다. 실제 구현은 Codex 에이전트가 수행하므로, 사람이 읽는 명세서만으로는 부족하다.
-
-| 산출물 | 대상 | 어디에 |
-|--------|------|--------|
-| `docs/NN_<기능>_spec.md` | 사람 | **파일.** 문제 정의, 설계 결정과 기각한 대안, 데이터 모델, 화면 명세, 엣지 케이스, 테스트 표 |
-| Codex 프롬프트 | Codex | **대화 응답 본문에 직접 출력한다.** 사용자가 바로 복사해 Codex 첫 메시지로 붙여넣는다. 파일로 만들지 않는다 |
-
-**프롬프트는 파일이 아니라 채팅으로 전달한다.** 파일에 써두면 사용자가 다시 열어서 복사해야 한다. 응답에 4중 백틱(````) 펜스로 감싸 통째로 출력하고, 그 안에서만 3중 백틱을 쓴다.
-
-**Codex 프롬프트 작성 규칙**
-
-- 펜스 안은 전부 프롬프트다. 사용자용 메타 설명("이 프롬프트는 ~를 위한 것입니다" 같은 말)을 중간에 섞지 않는다. 설명이 필요하면 펜스 바깥에 쓴다.
-- 반드시 포함: ROLE & GOAL · READ FIRST(문서 경로) · 바꾸면 안 되는 설계 결정 · STEP별 작업 순서 · 검증 명령(`npm test`, `npm run typecheck`, `npm run lint`) · DEFINITION OF DONE · 변경 파일 목록 · 보고 항목 · 금지사항.
-- 상세는 명세서를 경로로 참조하되, **프롬프트만 읽고도 잘못 구현할 수 없을 만큼의 계약**(타입 시그니처, 판정 순서, 테스트 표, SQL 전문)은 프롬프트 안에 직접 넣는다.
-- 새 명세서를 만들면 `AGENTS.md`의 "작업 지시 문서 — 항상 먼저 읽기" 표에 한 줄 추가한다. Codex는 `AGENTS.md`를 항상 읽으므로 이 표가 상시 로딩 경로다.
-- 작성을 마치면 `docs/00_codex_doc_pattern.md` 7장의 체크리스트로 자기 점검한다.
+- 사람용 명세 파일과 Codex 실행 프롬프트를 짝으로 만든다. 새 프롬프트는 파일 대신 **응답 본문에 4중 백틱 펜스**로 제공한다.
+- 기존 `codex_prompt_*.md`는 보존하며 후속 명세·현재 코드와 대조한 뒤 사용한다.
+- 새 명세는 `AGENTS.md`의 해당 작업 표와 [문서 목차](docs/README.md)에 연결한다.
+- 설계 결정(D-N), 테스트 표 전체, 보안 조건을 임의로 줄이지 않는다. 계약·근거가 충돌하면 그 부분은 판단 보류로 보고한다.
 
 ## Specialized Agents & Skills
 
@@ -142,4 +118,6 @@ Expo App
 
 - **orchestrate**: 여러 역할(PM, Tech Lead, FE, BE) 산출물을 검토·조율하여 최종 MVP 통합 계획 수렴
 
-새 기능을 시작하거나 설계 결정이 필요할 때는 범용 응답 대신 해당 에이전트를 사용한다. 산출물 통합이 필요할 때는 `/orchestrate` 스킬을 호출한다.
+새 기능을 시작하거나 설계 결정이 필요할 때는 해당 에이전트를 사용한다. 역할 산출물 통합이 필요할 때만 `/orchestrate` 스킬을 호출한다. Codex 진입점은 `.agents/skills/orchestrate/SKILL.md`이며 공통 절차는 `.claude/skills/orchestrate/SKILL.md`에 있다.
+
+`.claude/agent-memory/`는 이전 작업의 참고 기록이다. 현재 코드·후속 명세·사용자 요청과 대조하며, 거기에 적힌 미구현/검증 완료 상태나 과거 범위가 현재 상태를 덮어쓰지 않는다. 에이전트 frontmatter의 모델 별칭은 Claude 전용 설정으로, 저장소 공통 모델 선택 규칙이 아니다.

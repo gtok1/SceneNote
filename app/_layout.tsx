@@ -15,7 +15,7 @@ import {
   PinQuoteIcon,
   UserSettingsIcon
 } from "@/components/icons/FooterIcons";
-import { colors } from "@/constants/theme";
+import { colors, elevation, radius, typography } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
 import { useAuthStore } from "@/stores/authStore";
@@ -165,32 +165,35 @@ function GlobalBottomNav() {
 
   return (
     <View style={[styles.bottomNav, { paddingBottom: insets.bottom, paddingLeft: Math.max(4, insets.left), paddingRight: Math.max(4, insets.right) }]}>
-      {navItems.map((item) => {
-        const active = item.href === activeHref;
-        const Icon = item.icon;
+      <View style={styles.navRow}>
+        {navItems.map((item) => {
+          const active = item.href === activeHref;
+          const Icon = item.icon;
 
-        return (
-          <Pressable
-            accessibilityLabel={item.ariaLabel}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            aria-current={active ? "page" : undefined}
-            key={item.href}
-            onBlur={() => setFocusedHref(null)}
-            onFocus={() => setFocusedHref(item.href)}
-            onPress={() => router.replace(item.href)}
-            style={({ hovered }) => [
-              styles.navItem,
-              hovered ? styles.navItemHovered : null,
-              focusedHref === item.href ? styles.navItemFocused : null
-            ]}
-          >
-            {active ? <View style={styles.navActiveIndicator} /> : null}
-            <Icon active={active} color={active ? colors.primary : "#64748B"} size={24} />
-            <Text style={[styles.navLabel, active ? styles.navLabelActive : null]}>{item.label}</Text>
-          </Pressable>
-        );
-      })}
+          return (
+            <Pressable
+              accessibilityLabel={item.ariaLabel}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              aria-current={active ? "page" : undefined}
+              key={item.href}
+              onBlur={() => setFocusedHref(null)}
+              onFocus={() => setFocusedHref(item.href)}
+              onPress={() => router.replace(item.href)}
+              style={({ hovered }) => [
+                styles.navItem,
+                hovered ? styles.navItemHovered : null,
+                focusedHref === item.href ? styles.navItemFocused : null
+              ]}
+            >
+              <View style={[styles.navIcon, active ? styles.navIconActive : null]}>
+                <Icon active={active} color={active ? colors.primary : colors.textMuted} size={24} />
+              </View>
+              <Text style={[styles.navLabel, active ? styles.navLabelActive : null]}>{item.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -231,22 +234,29 @@ const styles = StyleSheet.create({
     zIndex: 2000
   },
   bottomNav: {
+    ...elevation.bar,
     alignItems: "stretch",
-    backgroundColor: "#FFFFFF",
-    borderTopColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
+    flexDirection: "column",
     flexShrink: 0,
-    paddingTop: 8
+    paddingTop: 6
+  },
+  navRow: {
+    flexDirection: "row",
+    width: "100%",
+    maxWidth: 640,
+    alignSelf: "center"
   },
   navItem: {
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: radius.md,
     flex: 1,
     minWidth: 0,
-    gap: 4,
+    gap: 2,
     minHeight: 56,
-    paddingVertical: 8,
+    paddingVertical: 4,
     justifyContent: "center",
     position: "relative"
   },
@@ -259,20 +269,20 @@ const styles = StyleSheet.create({
     outlineStyle: "solid",
     outlineWidth: 2
   },
-  navActiveIndicator: {
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    height: 3,
-    bottom: 0,
-    position: "absolute",
-    width: 24
+  navIcon: {
+    width: 56,
+    height: 32,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  navIconActive: {
+    backgroundColor: colors.primarySoft
   },
   navLabel: {
-    color: "#64748B",
-    fontSize: 12,
-    fontWeight: "500",
-    textAlign: "center",
-    lineHeight: 16
+    ...typography.micro,
+    color: colors.textMuted,
+    textAlign: "center"
   },
   navLabelActive: {
     color: colors.primary,

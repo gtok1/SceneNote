@@ -22,16 +22,16 @@ export const queryKeys = {
     session: ["auth", "session"] as const
   },
   search: {
-    results: (query: string, mediaType: MediaTypeFilter, page: number, country = "all") =>
-      ["search", query, mediaType, page, country] as const,
+    results: (query: string, mediaType: MediaTypeFilter, page: number, discoverySignature = "[[],[],[]]") =>
+      ["search", query, mediaType, page, discoverySignature] as const,
     similar: (anchorKey: string, focus: string, mediaType: MediaTypeFilter, sort: string, filters: string) =>
       ["search", "similar", "hybrid-v1-no-embeddings", anchorKey, focus, mediaType, sort, filters] as const
   },
   recommendations: {
     popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
-    personalized: (userId: string, mediaType: MediaTypeFilter) =>
+    personalized: (userId: string, mediaType: MediaTypeFilter, exclusionSignature = "[[],[]]", discoverySignature = "[[],[],[]]") =>
       [
-        ...createRecommendationFeedKey(userId, mediaType),
+        ...createRecommendationFeedKey(userId, mediaType, exclusionSignature, discoverySignature),
         "ko-metadata-v2",
         "recent-impressions-v1"
       ] as const

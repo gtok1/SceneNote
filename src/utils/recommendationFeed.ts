@@ -263,9 +263,23 @@ export function advanceRecommendationNoProgressStreak(
 
 export function createRecommendationFeedKey<TMediaType extends string>(
   userId: string,
-  mediaType: TMediaType
+  mediaType: TMediaType,
+  exclusionSignature = "[[],[]]",
+  discoverySignature = '[[],[],[]]'
 ) {
-  return ["recommendations", userId, "personalized", mediaType] as const;
+  return ["recommendations", userId, "personalized", mediaType, exclusionSignature, discoverySignature] as const;
+}
+
+/** A retry resumes the saved scan; only an explicit refresh may restart it. */
+export function getRecommendationRetryAction(page: {
+  has_more: boolean;
+  next_cursor: string | null;
+  is_exhausted: boolean;
+} | undefined): "initial" | "continue" | "complete" {
+  if (!page) return "initial";
+  return page.has_more && page.next_cursor?.trim() && !page.is_exhausted
+    ? "continue"
+    : "complete";
 }
 
 function insertRecommendationFeedItem<T>(

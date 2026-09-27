@@ -21,6 +21,7 @@ import {
   appendRecommendationFeed,
   createRecommendationFeedState,
   decideEmptyRecommendationContinuation,
+  getRecommendationRetryAction,
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS,
   PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
@@ -39,7 +40,9 @@ import {
   type RecommendationFeedback
 } from "../../supabase/functions/_shared/recommendationEngine";
 import { isUserActionableTheme } from "../../supabase/functions/_shared/recommendationThemes";
-import { countVisibleRecommendationCandidates } from "@/utils/recommendationVisibility";
+import { countVisibleRecommendationCandidates, findVisibleRecommendationReplacement } from "@/utils/recommendationVisibility";
+import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
+import { recommendationExclusionSignature } from "@/utils/recommendationPreferences";
 
 type RecommendationQueryKey = ReturnType<typeof queryKeys.recommendations.personalized>;
 
@@ -49,27 +52,26 @@ interface RecommendationMutationVariables {
   request: PersonalizedRecommendationsRequest;
 }
 
-export type RecommendationRefillResult = "refilled" | "exhausted" | "failed";
+export type RecommendationRefillResult = "refilled" | "pending" | "exhausted" | "failed";
 
 const INITIAL_LOADING_DEADLINE_MS = 12_000;
 const MUTATION_LOADING_DEADLINE_MS = 12_000;
 export function usePersonalizedRecommendations(
   mediaType: MediaTypeFilter,
   libraryItems: readonly LibraryListItem[],
-  options: { enabled?: boolean; exclusions?: RecommendationExclusions } = {}
+  options: DiscoveryFilterInput & { enabled?: boolean; exclusions?: RecommendationExclusions } = {}
 ) {
   const user = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
-  const cacheKey = useMemo(
-    () => queryKeys.recommendations.personalized(user?.id ?? "anonymous", mediaType),
-    [mediaType, user?.id]
-  );
   const exclusions = options.exclusions;
-  const exclusionIdentity = JSON.stringify([
-    [...(exclusions?.excludedThemeKeys ?? [])].sort(),
-    [...(exclusions?.excludedGenres ?? [])].sort()
-  ]);
-  const cacheIdentity = `${cacheKey.join(":")}:${exclusionIdentity}`;
+  const exclusionIdentity = recommendationExclusionSignature(exclusions);
+  const discoveryFilters = useMemo(() => normalizeDiscoveryFilters({ genre: options.genre, country: options.country, genres: options.genres, countries: options.countries, mediaTypes: options.mediaTypes }), [options.genre, options.country, options.genres, options.countries, options.mediaTypes]);
+  const discoveryIdentity = discoveryFilterKey(discoveryFilters);
+  const cacheKey = useMemo(
+    () => queryKeys.recommendations.personalized(user?.id ?? "anonymous", mediaType, exclusionIdentity, discoveryIdentity),
+    [exclusionIdentity, discoveryIdentity, mediaType, user?.id]
+  );
+  const cacheIdentity = JSON.stringify(cacheKey);
   const enabled = Boolean(user && (options.enabled ?? true));
   // Each user/filter/activation receives a distinct request lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,6 +95,7 @@ export function usePersonalizedRecommendations(
   const refreshInFlight = useRef(false);
   const refillInFlight = useRef(false);
   const loadMoreInFlight = useRef(false);
+  const [requestSettlementRevision, setRequestSettlementRevision] = useState(0);
   const impressionBatchesInFlight = useRef(new Set<string>());
   const recordedImpressionBatches = useRef(new Set<string>());
   const emptyContinuationAttempts = useRef(0);
@@ -111,6 +114,7 @@ export function usePersonalizedRecommendations(
     queryFn: ({ signal }) =>
       getPersonalizedRecommendations(
         createRequest({
+          ...discoveryFilters,
           userId: user?.id ?? "anonymous",
           cursor: null,
           excludeIds: [],
@@ -121,7 +125,12 @@ export function usePersonalizedRecommendations(
       ),
     enabled,
     retry: 0,
-    staleTime: 10 * 60_000
+    staleTime: 10 * 60_000,
+    // Cached pages include the scan cursor. Lifecycle refetches must not start
+    // over at page one and repeat provider work; refresh is an explicit action.
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   });
 
   const refreshMutation = useMutation({
@@ -159,7 +168,7 @@ export function usePersonalizedRecommendations(
   useEffect(() => {
     if (!enabled || !user || !recommendationQuery.data?.items.length) return;
     const items = recommendationQuery.data.items.filter((item) =>
-      !exclusions || !isExcludedRecommendation(item, exclusions)
+      (!exclusions || !isExcludedRecommendation(item, exclusions)) && matchesDiscoveryFilters(item, discoveryFilters)
     );
     rememberRecommendationSessionSeenIds(
       user.id,
@@ -186,7 +195,7 @@ export function usePersonalizedRecommendations(
       unseen.forEach(item => impressionBatchesInFlight.current.delete(identity(item)));
       scope.release(controller);
     });
-  }, [enabled, scope, mediaType, recommendationQuery.data?.items, libraryIdentityKeys, user, exclusions]);
+  }, [enabled, scope, mediaType, recommendationQuery.data?.items, libraryIdentityKeys, user, exclusions, discoveryFilters]);
 
   const refresh = async (): Promise<boolean> => {
     if (
@@ -224,6 +233,7 @@ export function usePersonalizedRecommendations(
 
       const controller = scope.controller();
       const request = createRequest({
+        ...discoveryFilters,
         userId: user.id,
         cursor: current.next_cursor,
         excludeIds: collectRecommendationSessionSeenIds(current.items),
@@ -261,6 +271,7 @@ export function usePersonalizedRecommendations(
       }
     } finally {
       refreshInFlight.current = false;
+      setRequestSettlementRevision((revision) => revision + 1);
     }
   };
 
@@ -334,6 +345,7 @@ export function usePersonalizedRecommendations(
       if (!isCurrent()) return "failed";
       const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
       if (!current) return "failed";
+      if (getRecommendationRetryAction(current) === "complete") return "exhausted";
 
       const removedIds = collectRecommendationSessionSeenIds([removed.item]);
       rememberRecommendationSessionSeenIds(user.id, [
@@ -343,6 +355,7 @@ export function usePersonalizedRecommendations(
 
       const controller = scope.controller();
       const request = createRequest({
+        ...discoveryFilters,
         userId: user.id,
         cursor: current.next_cursor,
         excludeIds: [
@@ -367,12 +380,22 @@ export function usePersonalizedRecommendations(
         );
         scope.release(controller);
         if (!isCurrent()) return "failed";
-        const replacement = next.items[0];
+        const replacement = findVisibleRecommendationReplacement(
+          next.items, [...current.items, removed.item], libraryItems, exclusions ?? null, discoveryFilters
+        );
 
         if (!replacement) {
+          const appended = appendRecommendationFeed(
+            createRecommendationFeedState({ items: current.items }),
+            { items: next.items },
+            (item) => item.canonical_id,
+            createRecommendationIdentityAliases
+          );
           queryClient.setQueryData<PersonalizedRecommendationsResponse>(cacheKey, {
             ...current,
+            items: appended.items,
             next_cursor: next.next_cursor,
+            has_more: next.has_more,
             is_exhausted: next.is_exhausted,
             broadened: next.broadened,
             partial: current.partial || next.partial,
@@ -380,7 +403,9 @@ export function usePersonalizedRecommendations(
             failed_sources: Array.from(new Set([...current.failed_sources, ...next.failed_sources]))
           });
           lastFailedRefills.current.delete(mediaType);
-          return "exhausted";
+          // The normal, bounded fill effect continues from this cursor. A raw
+          // item hidden by account filters is never reported as a filled slot.
+          return getRecommendationRetryAction(next) === "continue" ? "pending" : "exhausted";
         }
 
         const refilled = refillRecommendationFeedItem(
@@ -397,6 +422,7 @@ export function usePersonalizedRecommendations(
           ...current,
           items: refilled.items,
           next_cursor: next.next_cursor,
+          has_more: next.has_more,
           is_exhausted: next.is_exhausted,
           broadened: next.broadened,
           profile_mode: next.profile_mode,
@@ -419,6 +445,7 @@ export function usePersonalizedRecommendations(
       }
     } finally {
       refillInFlight.current = false;
+      setRequestSettlementRevision((revision) => revision + 1);
     }
   };
 
@@ -450,7 +477,7 @@ export function usePersonalizedRecommendations(
       await queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
       if (!isCurrent()) return false;
       const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
-      if (!current || current.is_exhausted || !current.next_cursor) return false;
+      if (getRecommendationRetryAction(current) !== "continue" || !current) return false;
 
       const deadlineMs = getLoadMoreDeadlineMs();
       if (deadlineMs < MUTATION_LOADING_DEADLINE_MS) {
@@ -460,6 +487,7 @@ export function usePersonalizedRecommendations(
       const controller = scope.controller();
       requestController = controller;
       const request = createRequest({
+        ...discoveryFilters,
         userId: user.id,
         cursor: current.next_cursor,
         excludeIds: collectRecommendationSessionSeenIds(current.items),
@@ -477,7 +505,7 @@ export function usePersonalizedRecommendations(
       );
       if (!isCurrent()) return false;
       let appendedItemCount = 0;
-      let previousVisibleCount = countVisibleRecommendationCandidates(current.items, libraryItems, exclusions ?? null);
+      let previousVisibleCount = countVisibleRecommendationCandidates(current.items, libraryItems, exclusions ?? null, discoveryFilters);
       let nextVisibleCount = previousVisibleCount;
       queryClient.setQueryData<PersonalizedRecommendationsResponse>(cacheKey, (latest) => {
         const base = latest ?? current;
@@ -498,8 +526,8 @@ export function usePersonalizedRecommendations(
           createRecommendationIdentityAliases
         );
         appendedItemCount = appended.items.length - base.items.length;
-        previousVisibleCount = countVisibleRecommendationCandidates(base.items, libraryItems, exclusions ?? null);
-        nextVisibleCount = countVisibleRecommendationCandidates(appended.items, libraryItems, exclusions ?? null);
+        previousVisibleCount = countVisibleRecommendationCandidates(base.items, libraryItems, exclusions ?? null, discoveryFilters);
+        nextVisibleCount = countVisibleRecommendationCandidates(appended.items, libraryItems, exclusions ?? null, discoveryFilters);
         return {
           ...base,
           ...next,
@@ -520,7 +548,7 @@ export function usePersonalizedRecommendations(
       );
       rememberRecommendationSessionSeenIds(user.id, collectRecommendationSessionSeenIds(next.items));
 
-      if (appendedItemCount === 0 && !next.is_exhausted && next.next_cursor === current.next_cursor) {
+      if (next.has_more && !next.is_exhausted && next.next_cursor === current.next_cursor) {
         setLoadMoreError(mediaType, "다음 추천으로 이동하지 못했습니다. 다시 시도해 주세요.");
       } else if (appendedItemCount === 0 && visibleRecommendationCount >= PERSONALIZED_RECOMMENDATION_BATCH_SIZE && !next.is_exhausted) {
         setLoadMoreError(mediaType, "이번 범위에서는 새 추천을 찾지 못했습니다. 다시 시도해 주세요.");
@@ -534,6 +562,7 @@ export function usePersonalizedRecommendations(
     } finally {
       if (requestController) scope.release(requestController);
       loadMoreInFlight.current = false;
+      setRequestSettlementRevision((revision) => revision + 1);
     }
   };
 
@@ -543,7 +572,8 @@ export function usePersonalizedRecommendations(
   const visibleRecommendationCount = countVisibleRecommendationCandidates(
     recommendationQuery.data?.items ?? [],
     libraryItems,
-    exclusions ?? null
+    exclusions ?? null,
+    discoveryFilters
   );
   const emptyContinuationDecision = decideEmptyRecommendationContinuation({
     hasData: Boolean(recommendationQuery.data),
@@ -594,7 +624,10 @@ export function usePersonalizedRecommendations(
     emptyContinuationAttempts.current += 1;
     setEmptyContinuationStopped(false);
     void loadMoreRef.current(PERSONALIZED_RECOMMENDATION_BATCH_SIZE - visibleRecommendationCount);
-  }, [enabled, emptyContinuationDecision, visibleRecommendationCount]);
+    // Mutation observers/cache updates may render before the async finally
+    // releases its ref lock. Re-evaluate after settlement even when visible
+    // count and decision are unchanged, so a short page cannot remain stuck.
+  }, [enabled, emptyContinuationDecision, visibleRecommendationCount, requestSettlementRevision]);
 
   const feedbackInFlight = useRef(false);
   const submitFeedback = async (
@@ -644,6 +677,11 @@ export function usePersonalizedRecommendations(
 
   const retryInitial = async () => {
     if (!isCurrent()) return { data: undefined };
+    const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
+    if (current) {
+      if (getRecommendationRetryAction(current) === "continue") await retryEmptyContinuation();
+      return { data: queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey) };
+    }
     setTimedOutCacheIdentity(null);
     setEmptyContinuationStopped(false);
     emptyContinuationAttempts.current = 0;
@@ -653,12 +691,15 @@ export function usePersonalizedRecommendations(
   };
 
   const retryEmptyContinuation = async (): Promise<boolean> => {
+    if (!isCurrent()) return false;
+    const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
+    const action = getRecommendationRetryAction(current);
+    if (action === "complete") return false;
     setEmptyContinuationStopped(false);
     emptyContinuationAttempts.current = 1;
     emptyContinuationStartedAt.current = Date.now();
     emptyContinuationNoProgressStreak.current = 0;
-    const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
-    if (current?.has_more && current.next_cursor && !current.is_exhausted) {
+    if (action === "continue") {
       return loadMore();
     }
     const result = await retryInitial();
@@ -673,11 +714,11 @@ export function usePersonalizedRecommendations(
     recommendations: recommendationQuery.data?.items ?? [],
     isInitialLoading: recommendationQuery.isLoading && !initialLoadingTimedOut,
     isRefreshing:
-      refreshMutation.isPending && refreshVariables?.mediaType === mediaType,
+      refreshMutation.isPending && JSON.stringify(refreshVariables?.cacheKey) === cacheIdentity,
     isRefilling:
-      refillMutation.isPending && refillVariables?.mediaType === mediaType,
+      refillMutation.isPending && JSON.stringify(refillVariables?.cacheKey) === cacheIdentity,
     isLoadingMore:
-      loadMoreMutation.isPending && loadMoreVariables?.mediaType === mediaType,
+      loadMoreMutation.isPending && JSON.stringify(loadMoreVariables?.cacheKey) === cacheIdentity,
     refreshError: refreshErrors[mediaType] ?? null,
     refillError: refillErrors[mediaType] ?? null,
     loadMoreError: loadMoreErrors[mediaType] ?? null,
@@ -685,7 +726,7 @@ export function usePersonalizedRecommendations(
     currentRecommendationIds:
       collectRecommendationSessionSeenIds(recommendationQuery.data?.items ?? []),
     recommendationCursor: recommendationQuery.data?.next_cursor ?? null,
-    isExhausted: recommendationQuery.data?.is_exhausted ?? false,
+    isExhausted: getRecommendationRetryAction(recommendationQuery.data) === "complete",
     refresh,
     removeOptimistically,
     restore,

@@ -1,11 +1,38 @@
 import type {
-  RecommendationProviderFetcher,
   RecommendationProviderPage,
   RecommendationProviderRequest
 } from "./recommendationCatalog.ts";
 import type { RecommendationCandidate } from "./recommendationEngine.ts";
 import { inferTmdbTvContentType } from "./tmdbClassification.ts";
 import { normalizeContentThemes, type ContentTheme } from "./recommendationThemes.ts";
+import type { RecommendationCache } from "./recommendationCache.ts";
+import type { UserRecommendationFilters } from "./recommendationUserFilters.ts";
+import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, normalizeDiscoveryGenre, type DiscoveryFilterInput } from "./discoveryFilters.ts";
+import {
+  aniListIncludedGenre,
+  aniListExcludedFilters,
+  canFetchRecommendationProvider,
+  recommendationProviderFilterKey,
+  tmdbExcludedGenreIds,
+  tmdbExcludedKeywordIds,
+  tmdbIncludedGenreId,
+  TMDB_TV_KEYWORD_GENRES,
+  TMDB_RECOMMENDATION_GENRES
+} from "./recommendationProviderFilters.ts";
+
+export interface RecommendationProviderOptions {
+  filters?: UserRecommendationFilters;
+  discoveryFilters?: DiscoveryFilterInput;
+  cache?: RecommendationCache;
+  deadlineMs?: number;
+}
+
+export interface RecommendationKeywordOptions<T> {
+  cache?: RecommendationCache;
+  onDeferred?: (candidate: T) => void;
+  deadlineMs?: number;
+  lookupBudget?: { remaining: number };
+}
 
 export interface CatalogRecommendationCandidate extends RecommendationCandidate {
   title_original: string | null;
@@ -108,6 +135,11 @@ const ANILIST_PAGE_SIZE = 50;
 const TMDB_MAX_PAGE = 500;
 const TMDB_ANIME_LOCALIZATION_PAGES = 3;
 const PROVIDER_CACHE_TTL_MS = 10 * 60_000;
+const PROVIDER_FAILURE_TTL_MS = 60_000;
+const PROVIDER_CACHE_VERSION = "recommendation-provider-v3";
+const ANILIST_PROVIDER_CACHE_VERSION = "recommendation-provider-anilist-v4";
+const KEYWORD_CACHE_VERSION = "recommendation-keywords-v1";
+const LOCALIZATION_CACHE_VERSION = "recommendation-anime-ko-v2";
 const PROVIDER_CACHE_MAX_ENTRIES = 300;
 const TMDB_KEYWORD_CACHE_TTL_MS = 24 * 60 * 60_000;
 const TMDB_KEYWORD_FAILURE_TTL_MS = 60_000;
@@ -146,18 +178,52 @@ export interface TmdbKeywordCandidate {
 // personalized and popular requests without adding latency for other accounts.
 export async function enrichTmdbRecommendationCandidates<T extends TmdbKeywordCandidate>(
   candidates: readonly T[],
-  shouldLookup: (candidate: T) => boolean = () => true
-): Promise<T[]> {
-  let lookupCount = 0;
-  return Promise.all(candidates.map(async (candidate) => {
-    if (candidate.external_source !== "tmdb" || !/^\d+$/u.test(candidate.external_id)) return candidate;
-    // Already-seen/library candidates are excluded by the catalog scanner. Do
-    // not spend the bounded keyword budget on them before it reaches new works.
-    if (!shouldLookup(candidate)) return candidate;
-    if (lookupCount >= TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT) return candidate;
-    lookupCount += 1;
+  shouldLookup: (candidate: T) => boolean = () => true,
+  options: RecommendationKeywordOptions<T> = {}
+): Promise<(T & TmdbKeywordCandidate)[]> {
+  // Check the entire page's reusable metadata first. Cached (including empty or
+  // failed) results and already enriched candidates do not spend API requests.
+  const cachedCandidates = await Promise.all(candidates.map(async (candidate) => {
+    if (candidate.external_source !== "tmdb" || !/^\d+$/u.test(candidate.external_id) ||
+      Array.isArray(candidate.keywords)) return null;
     const kind = candidate.content_type === "movie" ? "movie" : "tv";
-    const keywords = await getCachedTmdbKeywords(kind, candidate.external_id);
+    const cached = await readCachedTmdbKeywords(kind, candidate.external_id, options.cache, options.deadlineMs);
+    return { kind, cached } as const;
+  }));
+  let lookupCount = 0;
+  return Promise.all(candidates.map(async (candidate, index) => {
+    const context = cachedCandidates[index];
+    if (!context) return candidate;
+    const { kind, cached } = context;
+    let keywords: string[] | null;
+    if (cached) {
+      keywords = cached.keywords;
+    } else {
+      // A duplicate or concurrent caller may already have started this lookup.
+      const inFlight = getMemoryTmdbKeywords(kind, candidate.external_id);
+      try {
+        if (inFlight) {
+          keywords = await withinDeadline(() => inFlight.promise, options.deadlineMs);
+        } else {
+          // Exclusion suppresses new provider work, not reusable metadata. The
+          // catalog's offset still needs the same verified pool on later pages.
+          if (!shouldLookup(candidate)) return candidate;
+          if (remainingTime(options.deadlineMs) < 500 ||
+            lookupCount >= TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT ||
+            (options.lookupBudget && options.lookupBudget.remaining <= 0)) {
+            options.onDeferred?.(candidate);
+            return candidate;
+          }
+          lookupCount += 1;
+          if (options.lookupBudget) options.lookupBudget.remaining -= 1;
+          keywords = await fetchCachedTmdbKeywords(kind, candidate.external_id, options.cache, options.deadlineMs);
+        }
+      } catch (error) {
+        if (!isDeadlineError(error)) throw error;
+        options.onDeferred?.(candidate);
+        return candidate;
+      }
+    }
     if (keywords === null) return candidate;
     return {
       ...candidate,
@@ -167,35 +233,108 @@ export async function enrichTmdbRecommendationCandidates<T extends TmdbKeywordCa
   }));
 }
 
-async function getCachedTmdbKeywords(kind: "tv" | "movie", id: string): Promise<string[] | null> {
-  const key = `${kind}:${id}`;
-  const now = Date.now();
+interface CachedKeywords {
+  keywords: string[] | null;
+  expiresAt: number;
+}
+
+function tmdbKeywordKey(kind: "tv" | "movie", id: string): string {
+  return `${KEYWORD_CACHE_VERSION}:${kind}:${id}`;
+}
+
+function getMemoryTmdbKeywords(kind: "tv" | "movie", id: string) {
+  const key = tmdbKeywordKey(kind, id);
   const cached = tmdbKeywordCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-  const promise = withTmdbKeywordSlot(() => fetchTmdbKeywords(kind, id));
+  if (cached && cached.expiresAt > Date.now()) return cached;
+  if (cached) tmdbKeywordCache.delete(key);
+  return null;
+}
+
+async function readCachedTmdbKeywords(
+  kind: "tv" | "movie",
+  id: string,
+  cache?: RecommendationCache,
+  deadlineMs?: number
+): Promise<CachedKeywords | null> {
+  const memory = getMemoryTmdbKeywords(kind, id);
+  if (memory) {
+    try {
+      return { keywords: await withinDeadline(() => memory.promise, deadlineMs), expiresAt: memory.expiresAt };
+    } catch (error) {
+      if (isDeadlineError(error)) return null;
+      throw error;
+    }
+  }
+  const key = tmdbKeywordKey(kind, id);
+  const persisted = await readPersisted<CachedKeywords>(cache, key, "tmdb", deadlineMs);
+  if (!persisted || persisted.expiresAt <= Date.now() ||
+    !(persisted.keywords === null || (Array.isArray(persisted.keywords) &&
+      persisted.keywords.every((keyword) => typeof keyword === "string")))) return null;
+  tmdbKeywordCache.set(key, {
+    expiresAt: persisted.expiresAt,
+    promise: Promise.resolve(persisted.keywords)
+  });
+  trimKeywordCache();
+  return persisted;
+}
+
+async function fetchCachedTmdbKeywords(
+  kind: "tv" | "movie",
+  id: string,
+  cache?: RecommendationCache,
+  deadlineMs?: number
+): Promise<string[] | null> {
+  const key = tmdbKeywordKey(kind, id);
+  const now = Date.now();
+  const promise = (async () => {
+    const keywords = await withTmdbKeywordSlot(() => fetchTmdbKeywords(kind, id, deadlineMs), deadlineMs);
+    const ttlMs = keywords === null ? TMDB_KEYWORD_FAILURE_TTL_MS : TMDB_KEYWORD_CACHE_TTL_MS;
+    const result = { keywords, expiresAt: Date.now() + ttlMs };
+    await writePersisted(cache, key, "tmdb", result, ttlMs, deadlineMs);
+    const current = tmdbKeywordCache.get(key);
+    if (current) current.expiresAt = result.expiresAt;
+    return keywords;
+  })().catch((error: unknown) => {
+    // A work item whose request budget expired remains eligible for a later pass.
+    tmdbKeywordCache.delete(key);
+    throw error;
+  });
   tmdbKeywordCache.set(key, { expiresAt: now + TMDB_KEYWORD_CACHE_TTL_MS, promise });
+  trimKeywordCache();
+  return promise;
+}
+
+function trimKeywordCache(): void {
   while (tmdbKeywordCache.size > TMDB_KEYWORD_CACHE_MAX_ENTRIES) {
     const oldest = tmdbKeywordCache.keys().next().value;
     if (!oldest) break;
     tmdbKeywordCache.delete(oldest);
   }
-  const result = await promise;
-  if (result === null) {
-    tmdbKeywordCache.set(key, {
-      expiresAt: Date.now() + TMDB_KEYWORD_FAILURE_TTL_MS,
-      promise: Promise.resolve(null)
-    });
-  }
-  return result;
 }
 
-async function withTmdbKeywordSlot<T>(task: () => Promise<T>): Promise<T> {
+async function withTmdbKeywordSlot<T>(task: () => Promise<T>, deadlineMs?: number): Promise<T> {
+  if (remainingTime(deadlineMs) <= 0) throw deadlineError();
   if (activeTmdbKeywordRequests >= TMDB_KEYWORD_CONCURRENCY) {
-    await new Promise<void>((resolve) => tmdbKeywordWaiters.push(resolve));
+    await new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const waiter = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        resolve();
+      };
+      tmdbKeywordWaiters.push(waiter);
+      if (Number.isFinite(deadlineMs)) {
+        timer = setTimeout(() => {
+          const index = tmdbKeywordWaiters.indexOf(waiter);
+          if (index >= 0) tmdbKeywordWaiters.splice(index, 1);
+          reject(deadlineError());
+        }, remainingTime(deadlineMs));
+      }
+    });
   } else {
     activeTmdbKeywordRequests += 1;
   }
   try {
+    if (remainingTime(deadlineMs) <= 0) throw deadlineError();
     return await task();
   } finally {
     const next = tmdbKeywordWaiters.shift();
@@ -204,42 +343,22 @@ async function withTmdbKeywordSlot<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
-async function fetchTmdbKeywords(kind: "tv" | "movie", id: string): Promise<string[] | null> {
+async function fetchTmdbKeywords(kind: "tv" | "movie", id: string, deadlineMs?: number): Promise<string[] | null> {
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) return null;
   const url = new URL(`https://api.themoviedb.org/3/${kind}/${id}/keywords`);
   const headers = applyTmdbAuth(url, apiKey);
   try {
-    const payload = await fetchJson<TmdbKeywordPayload>(url.toString(), { headers }, 2_500);
+    const payload = await fetchJson<TmdbKeywordPayload>(url.toString(), { headers }, 2_500, deadlineMs);
     const tags = kind === "movie" ? payload.keywords : payload.results;
     if (!Array.isArray(tags)) return null;
     return [...new Set(tags.map((entry) => entry.name?.trim()).filter((name): name is string => Boolean(name)))];
   } catch (error) {
+    if (isDeadlineError(error)) throw error;
     console.warn(`TMDB ${kind} keyword lookup failed for ${id}:`, error);
     return null;
   }
 }
-
-const TMDB_GENRE_NAMES = new Map<number, string>([
-  [12, "Adventure"],
-  [14, "Fantasy"],
-  [16, "Animation"],
-  [18, "Drama"],
-  [27, "Horror"],
-  [28, "Action"],
-  [35, "Comedy"],
-  [36, "History"],
-  [53, "Thriller"],
-  [80, "Crime"],
-  [878, "Science Fiction"],
-  [9648, "Mystery"],
-  [10749, "Romance"],
-  [10751, "Family"],
-  [10759, "Action & Adventure"],
-  [10765, "Sci-Fi & Fantasy"],
-  [10766, "Soap"],
-  [10768, "War & Politics"]
-]);
 
 const ANILIST_MONTH_QUERY = `
   query RecommendationAnimeMonth(
@@ -247,6 +366,11 @@ const ANILIST_MONTH_QUERY = `
     $perPage: Int!
     $startDateGreater: FuzzyDateInt!
     $startDateLesser: FuzzyDateInt!
+    $excludedGenres: [String]
+    $excludedTags: [String]
+    $includedGenre: String
+    $country: CountryCode
+    $countries: [CountryCode]
   ) {
     Page(page: $page, perPage: $perPage) {
       pageInfo { hasNextPage }
@@ -256,6 +380,12 @@ const ANILIST_MONTH_QUERY = `
         isAdult: false
         startDate_greater: $startDateGreater
         startDate_lesser: $startDateLesser
+        genre_not_in: $excludedGenres
+        tag_not_in: $excludedTags
+        genre: $includedGenre
+        countryOfOrigin: $country
+        countryOfOrigin_in: $countries
+        minimumTagRank: 0
       ) {
         id
         title { romaji english native }
@@ -280,114 +410,199 @@ const ANILIST_MONTH_QUERY = `
   }
 `;
 
-export const fetchRecommendationProviderPage: RecommendationProviderFetcher<CatalogRecommendationCandidate> = (
-  request
-) => getCachedProviderPage(request);
+export function fetchRecommendationProviderPage(
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions = {}
+): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+  if (!canFetchRecommendationProvider(request.provider, options.discoveryFilters, options.filters)) {
+    return Promise.resolve({ items: [], hasMore: false });
+  }
+  return getCachedProviderPage(request, options);
+}
+
+interface PersistedProviderPage {
+  page: RecommendationProviderPage<CatalogRecommendationCandidate> | null;
+  expiresAt: number;
+}
 
 async function getCachedProviderPage(
-  request: RecommendationProviderRequest
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
-  const key = `${request.provider}:${request.month}:${request.page}:${request.asOfDate}`;
+  const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
+  const discoveryKey = !discovery.genres.length && !discovery.countries.length && !discovery.mediaTypes.length ? "" : `:${discoveryFilterKey(discovery)}`;
+  const cacheVersion = request.provider === "anilist" ? ANILIST_PROVIDER_CACHE_VERSION : PROVIDER_CACHE_VERSION;
+  const key = `${cacheVersion}:${request.provider}:${request.month}:${request.page}:${request.asOfDate}:${recommendationProviderFilterKey(options.filters)}${discoveryKey}`;
+  const source = request.provider === "anilist" ? "anilist" : "tmdb";
   const now = Date.now();
   for (const [cacheKey, entry] of providerPageCache) {
     if (entry.expiresAt <= now) providerPageCache.delete(cacheKey);
   }
   const cached = providerPageCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
+  if (cached && cached.expiresAt > now) return withinDeadline(() => cached.promise, options.deadlineMs);
 
-  const promise = fetchUncachedProviderPage(request);
+  const promise = (async () => {
+    const persisted = await readPersisted<PersistedProviderPage>(options.cache, key, source, options.deadlineMs);
+    if (persisted && persisted.expiresAt > Date.now()) {
+      if (!persisted.page) throw new Error("RECOMMENDATION_PROVIDER_RECENTLY_UNAVAILABLE");
+      if (Array.isArray(persisted.page.items) && typeof persisted.page.hasMore === "boolean") {
+        const entry = providerPageCache.get(key);
+        if (entry) entry.expiresAt = persisted.expiresAt;
+        return persisted.page;
+      }
+    }
+    try {
+      const page = await fetchUncachedProviderPage(request, options);
+      await writePersisted(options.cache, key, source, {
+        page, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS
+      }, PROVIDER_CACHE_TTL_MS, options.deadlineMs);
+      return page;
+    } catch (error) {
+      if (isDeadlineError(error)) throw error;
+      await writePersisted(options.cache, key, source, {
+        page: null, expiresAt: Date.now() + PROVIDER_FAILURE_TTL_MS
+      }, PROVIDER_FAILURE_TTL_MS, options.deadlineMs);
+      throw error;
+    }
+  })();
   providerPageCache.set(key, { expiresAt: now + PROVIDER_CACHE_TTL_MS, promise });
   trimProviderCache();
   try {
     return await promise;
   } catch (error) {
-    providerPageCache.delete(key);
+    const entry = providerPageCache.get(key);
+    if (isDeadlineError(error)) providerPageCache.delete(key);
+    else if (entry) entry.expiresAt = Date.now() + PROVIDER_FAILURE_TTL_MS;
     throw error;
   }
 }
 
 async function fetchUncachedProviderPage(
-  request: RecommendationProviderRequest
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
-  if (request.provider === "anilist") return fetchAniListMonth(request);
-  if (request.provider === "tmdb_movie") return fetchTmdbMovieMonth(request);
-  return fetchTmdbDramaMonth(request);
+  if (request.provider === "anilist") return fetchAniListMonth(request, options);
+  if (request.provider === "tmdb_movie") return fetchTmdbMovieMonth(request, options);
+  return fetchTmdbDramaMonth(request, options);
 }
 
 async function fetchTmdbDramaMonth(
-  request: RecommendationProviderRequest
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
   const apiKey = requireTmdbApiKey();
   const bounds = getMonthBounds(request.month, request.asOfDate);
-  const country = request.provider === "tmdb_jp" ? "JP" : "KR";
-  const url = new URL("https://api.themoviedb.org/3/discover/tv");
-  setCommonTmdbParams(url, request.page);
-  url.searchParams.set("first_air_date.gte", bounds.startDate);
-  url.searchParams.set("first_air_date.lte", bounds.endDate);
-  url.searchParams.set("include_null_first_air_dates", "false");
-  url.searchParams.set("sort_by", "popularity.desc");
-  url.searchParams.set("watch_region", TMDB_REGION);
-  url.searchParams.set("with_genres", "18");
-  url.searchParams.set("with_origin_country", country);
-  url.searchParams.set("without_genres", "16");
+  const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
+  const countries = discovery.countries.length ? discovery.countries : [request.provider === "tmdb_jp" ? "JP" : "KR"];
+  const genres = eligibleDiscoveryGenres(discovery.genres, options.filters);
+  const nativeIds = [...new Set(genres.map((genre) => tmdbIncludedGenreId(genre, "tv")).filter((id): id is number => typeof id === "number" && id !== 16))];
+  const keywordGenres = genres.filter((genre) => TMDB_TV_KEYWORD_GENRES.has(genre));
+  const keywordEntries = await Promise.all(keywordGenres.map(async (genre) => ({ genre, id: await resolveTmdbDiscoveryGenreKeyword(genre, options.cache, options.deadlineMs) })));
+  const verified = keywordEntries.filter((entry): entry is { genre: string; id: number } => entry.id !== null);
+  // Genre-ID and keyword predicates cannot express OR across TMDB parameters.
+  // At most two discover lanes provide that union without a country/genre cross product.
+  const lanes: { genreIds: number[]; keywords: typeof verified }[] = [];
+  if (!discovery.genres.length || nativeIds.length) lanes.push({ genreIds: nativeIds.length ? nativeIds : [18], keywords: [] });
+  if (verified.length) lanes.push({ genreIds: [18], keywords: verified });
+  if (!lanes.length) return { items: [], hasMore: false };
+  const pages = await Promise.all(lanes.map(async (lane) => {
+    const url = new URL("https://api.themoviedb.org/3/discover/tv");
+    setCommonTmdbParams(url, request.page);
+    url.searchParams.set("first_air_date.gte", bounds.startDate);
+    url.searchParams.set("first_air_date.lte", bounds.endDate);
+    url.searchParams.set("include_null_first_air_dates", "false");
+    url.searchParams.set("sort_by", "popularity.desc");
+    url.searchParams.set("watch_region", TMDB_REGION);
+    url.searchParams.set("with_genres", lane.genreIds.join("|"));
+    url.searchParams.set("with_origin_country", countries.join("|"));
+    if (lane.keywords.length) url.searchParams.set("with_keywords", lane.keywords.map((entry) => entry.id).join("|"));
+    url.searchParams.set("without_genres", [...new Set([16, ...tmdbExcludedGenreIds(options.filters)])].join(","));
+    setTmdbKeywordExclusions(url, options.filters);
+    const headers = applyTmdbAuth(url, apiKey);
+    const payload = await fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers }, 5_000, options.deadlineMs);
+    const items = (payload.results ?? [])
+      .map((item, index) => normalizeTmdbDrama(item, request, index, discovery.countries.length > 0, discovery.genres.length > 0))
+      .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
+      .map((item) => lane.keywords.length === 1
+        ? { ...item, genres: [...new Set([...item.genres, lane.keywords[0]!.genre])] }
+        : lane.keywords.length ? { ...item, matched_genres: lane.keywords.map((entry) => entry.genre) } : item)
+      .filter((item) => matchesDiscoveryFilters(item, discovery));
+    return { items, hasMore: request.page < Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0)) };
+  }));
+  return { items: pages.flatMap((page) => page.items), hasMore: pages.some((page) => page.hasMore) };
+}
 
-  // V3 authentication mutates the query string, so it must precede URL serialization.
-  const headers = applyTmdbAuth(url, apiKey);
-  const payload = await fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers });
-  const items = (payload.results ?? [])
-    .map((item, index) => normalizeTmdbDrama(item, request, index))
-    .filter((item): item is CatalogRecommendationCandidate => Boolean(item));
-  const totalPages = Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0));
-  return { items, hasMore: request.page < totalPages };
+function eligibleDiscoveryGenres(genres: readonly string[], exclusions?: UserRecommendationFilters): string[] {
+  return genres.filter((genre) => !exclusions?.excludedGenres.some((excluded) => normalizeDiscoveryGenre(excluded) === genre));
 }
 
 async function fetchTmdbMovieMonth(
-  request: RecommendationProviderRequest
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
   const apiKey = requireTmdbApiKey();
   const bounds = getMonthBounds(request.month, request.asOfDate);
+  const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
   const url = new URL("https://api.themoviedb.org/3/discover/movie");
   setCommonTmdbParams(url, request.page);
   url.searchParams.set("primary_release_date.gte", bounds.startDate);
   url.searchParams.set("primary_release_date.lte", bounds.endDate);
   url.searchParams.set("sort_by", "popularity.desc");
   url.searchParams.set("watch_region", TMDB_REGION);
+  if (discovery.countries.length) url.searchParams.set("with_origin_country", discovery.countries.join("|"));
+  const includedIds = [...new Set(eligibleDiscoveryGenres(discovery.genres, options.filters).map((genre) => tmdbIncludedGenreId(genre, "movie")).filter((id): id is number => typeof id === "number"))];
+  if (includedIds.length) url.searchParams.set("with_genres", includedIds.join("|"));
+  const excludedGenres = tmdbExcludedGenreIds(options.filters);
+  if (excludedGenres.length > 0) url.searchParams.set("without_genres", excludedGenres.join(","));
+  setTmdbKeywordExclusions(url, options.filters);
 
   const headers = applyTmdbAuth(url, apiKey);
-  const payload = await fetchJson<TmdbPage<TmdbMovieItem>>(url.toString(), { headers });
+  const payload = await fetchJson<TmdbPage<TmdbMovieItem>>(url.toString(), { headers }, 5_000, options.deadlineMs);
   const items = (payload.results ?? [])
-    .map((item, index) => normalizeTmdbMovie(item, request, index))
-    .filter((item): item is CatalogRecommendationCandidate => Boolean(item));
+    .map((item, index) => normalizeTmdbMovie(item, request, index, discovery.countries))
+    .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
+    .filter((item) => matchesDiscoveryFilters(item, discovery));
   const totalPages = Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0));
   return { items, hasMore: request.page < totalPages };
 }
 
 async function fetchAniListMonth(
-  request: RecommendationProviderRequest
+  request: RecommendationProviderRequest,
+  options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
   const bounds = getMonthBounds(request.month, request.asOfDate);
   const endpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
+  const excluded = aniListExcludedFilters(options.filters);
+  const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
+  const selectedGenres = eligibleDiscoveryGenres(discovery.genres, options.filters);
+  const genreLanes = selectedGenres.includes("animation") ? [] : [...new Set(selectedGenres.map(aniListIncludedGenre).filter((genre): genre is string => typeof genre === "string"))];
+  const optionalVariables = {
+    ...(excluded.genres.length ? { excludedGenres: excluded.genres } : {}),
+    ...(excluded.tags.length ? { excludedTags: excluded.tags } : {}),
+    ...(genreLanes.length === 1 ? { includedGenre: genreLanes[0] } : {}),
+    ...(discovery.countries.length === 1 ? { country: discovery.countries[0] } : {}),
+    ...(discovery.countries.length > 1 ? { countries: discovery.countries } : {})
+  };
   const [payload, koreanAnimeItems] = await Promise.all([
-    fetchJson<AniListPage>(endpoint, {
+    fetchJson<{ data?: Record<string, NonNullable<AniListPage["data"]>["Page"]>; errors?: { message?: string }[] }>(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        query: ANILIST_MONTH_QUERY,
+        query: buildAniListMonthQuery(genreLanes, optionalVariables),
         variables: {
           page: request.page,
-          perPage: ANILIST_PAGE_SIZE,
+          perPage: Math.max(1, Math.floor(ANILIST_PAGE_SIZE / Math.max(1, genreLanes.length))),
           startDateGreater: toAniListDate(previousDate(bounds.startDate)),
-          startDateLesser: toAniListDate(nextDate(bounds.endDate))
+          startDateLesser: toAniListDate(nextDate(bounds.endDate)),
+          ...optionalVariables
         }
       })
-    }),
-    getCachedKoreanAnimeItems(request)
+    }, 5_000, options.deadlineMs),
+    getCachedKoreanAnimeItems(request, options.cache, options.deadlineMs, discovery.countries.length ? discovery.countries.join("|") : "JP")
   ]);
-  if (payload.errors?.length) {
-    throw new Error(payload.errors[0]?.message ?? "AniList GraphQL request failed");
-  }
-
-  const page = payload.data?.Page;
+  if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList GraphQL request failed");
+  const pages = Object.values(payload.data ?? {}).filter((page) => page !== undefined && page !== null);
+  const page = { media: pages.flatMap((entry) => entry.media ?? []), pageInfo: { hasNextPage: pages.some((entry) => entry.pageInfo?.hasNextPage) } };
   const items = (page?.media ?? [])
     .map((item, index) =>
       normalizeAniListAnime(
@@ -397,58 +612,130 @@ async function fetchAniListMonth(
         findTmdbKoreanAnimeLocalization(item, koreanAnimeItems)
       )
     )
-    .filter((item): item is CatalogRecommendationCandidate => Boolean(item));
+    .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
+    .filter((item) => matchesDiscoveryFilters(item, discovery));
   return { items, hasMore: Boolean(page?.pageInfo?.hasNextPage) };
 }
 
-async function getCachedKoreanAnimeItems(request: RecommendationProviderRequest): Promise<TmdbTvItem[]> {
-  const key = `${request.month}:${request.asOfDate}`;
+function buildAniListMonthQuery(genres: readonly string[], optionalVariables: Record<string, unknown>): string {
+  let query = genres.length > 1 ? buildAniListGenreUnionQuery(genres) : ANILIST_MONTH_QUERY;
+  // AniList's nullable schema does not imply null-safe resolvers: explicitly
+  // passing countryOfOrigin_in: null returns HTTP 500. Omit absent arguments and
+  // their declarations, including every aliased Page in a genre union.
+  for (const [variable, type, argument] of [
+    ["excludedGenres", "[String]", "genre_not_in"],
+    ["excludedTags", "[String]", "tag_not_in"],
+    ["includedGenre", "String", "genre"],
+    ["country", "CountryCode", "countryOfOrigin"],
+    ["countries", "[CountryCode]", "countryOfOrigin_in"]
+  ] as const) {
+    if (Object.hasOwn(optionalVariables, variable)) continue;
+    query = query
+      .replace(`    $${variable}: ${type}\n`, "")
+      .replaceAll(`        ${argument}: $${variable}\n`, "");
+  }
+  return query;
+}
+
+/** One HTTP request and at most 50 candidates in total, with true OR semantics. */
+function buildAniListGenreUnionQuery(genres: readonly string[]): string {
+  const bodyStart = ANILIST_MONTH_QUERY.indexOf("    Page(");
+  const header = ANILIST_MONTH_QUERY.slice(0, bodyStart).replace("    $includedGenre: String\n", "");
+  const pageBody = ANILIST_MONTH_QUERY.slice(bodyStart, ANILIST_MONTH_QUERY.lastIndexOf("\n  }"));
+  return header + genres.map((genre, index) => pageBody
+    .replace("    Page(", `    genre${index}: Page(`)
+    .replace("genre: $includedGenre", `genre: ${JSON.stringify(genre)}`)).join("\n") + "\n  }\n";
+}
+
+interface PersistedAnimeLocalization {
+  items: TmdbTvItem[] | null;
+  expiresAt: number;
+}
+
+async function getCachedKoreanAnimeItems(
+  request: RecommendationProviderRequest,
+  cache?: RecommendationCache,
+  deadlineMs?: number,
+  country = "JP"
+): Promise<TmdbTvItem[]> {
+  // Localization is shared raw metadata; no user's exclusions are applied here.
+  const key = `${LOCALIZATION_CACHE_VERSION}:${request.month}:${request.asOfDate}${country === "JP" ? "" : `:${country}`}`;
   const now = Date.now();
   const cached = animeLocalizationCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
+  if (cached && cached.expiresAt > now) return withinDeadline(() => cached.promise, deadlineMs);
 
-  const promise = fetchTmdbKoreanAnimeMonth(request);
+  const promise = (async () => {
+    const persisted = await readPersisted<PersistedAnimeLocalization>(cache, key, "tmdb", deadlineMs);
+    if (persisted && persisted.expiresAt > Date.now()) {
+      if (!persisted.items) throw new Error("RECOMMENDATION_LOCALIZATION_RECENTLY_UNAVAILABLE");
+      if (Array.isArray(persisted.items)) {
+        const entry = animeLocalizationCache.get(key);
+        if (entry) entry.expiresAt = persisted.expiresAt;
+        return persisted.items;
+      }
+    }
+    try {
+      const items = await fetchTmdbKoreanAnimeMonth(request, deadlineMs, country);
+      await writePersisted(cache, key, "tmdb", {
+        items, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS
+      }, PROVIDER_CACHE_TTL_MS, deadlineMs);
+      return items;
+    } catch (error) {
+      if (isDeadlineError(error)) throw error;
+      await writePersisted(cache, key, "tmdb", {
+        items: null, expiresAt: Date.now() + PROVIDER_FAILURE_TTL_MS
+      }, PROVIDER_FAILURE_TTL_MS, deadlineMs);
+      throw error;
+    }
+  })();
   animeLocalizationCache.set(key, { expiresAt: now + PROVIDER_CACHE_TTL_MS, promise });
   try {
     return await promise;
   } catch (error) {
-    animeLocalizationCache.delete(key);
+    const entry = animeLocalizationCache.get(key);
+    if (isDeadlineError(error)) animeLocalizationCache.delete(key);
+    else if (entry) entry.expiresAt = Date.now() + PROVIDER_FAILURE_TTL_MS;
     throw error;
   }
 }
 
-async function fetchTmdbKoreanAnimeMonth(request: RecommendationProviderRequest): Promise<TmdbTvItem[]> {
+async function fetchTmdbKoreanAnimeMonth(request: RecommendationProviderRequest, deadlineMs?: number, country = "JP"): Promise<TmdbTvItem[]> {
   const apiKey = requireTmdbApiKey();
   const bounds = getMonthBounds(request.month, request.asOfDate);
-  const pages = await Promise.all(
-    Array.from({ length: TMDB_ANIME_LOCALIZATION_PAGES }, (_, index) => {
+  const fetchPage = (page: number) => {
       const url = new URL("https://api.themoviedb.org/3/discover/tv");
-      setCommonTmdbParams(url, index + 1);
+      setCommonTmdbParams(url, page);
       url.searchParams.set("first_air_date.gte", bounds.startDate);
       url.searchParams.set("first_air_date.lte", bounds.endDate);
       url.searchParams.set("include_null_first_air_dates", "false");
       url.searchParams.set("sort_by", "popularity.desc");
       url.searchParams.set("watch_region", TMDB_REGION);
-      url.searchParams.set("with_origin_country", "JP");
+      url.searchParams.set("with_origin_country", country);
       url.searchParams.set("with_genres", "16");
       const headers = applyTmdbAuth(url, apiKey);
-      return fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers });
-    })
+      return fetchJson<TmdbPage<TmdbTvItem>>(url.toString(), { headers }, 5_000, deadlineMs);
+  };
+  const firstPage = await fetchPage(1);
+  const pageCount = Math.min(TMDB_ANIME_LOCALIZATION_PAGES, Math.max(1, firstPage.total_pages ?? 1));
+  const laterPages = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) => fetchPage(index + 2))
   );
-  return pages.flatMap((page) => page.results ?? []);
+  return [firstPage, ...laterPages].flatMap((page) => page.results ?? []);
 }
 
 function normalizeTmdbDrama(
   item: TmdbTvItem,
   request: RecommendationProviderRequest,
-  index: number
+  index: number,
+  allowInternational = false,
+  selectedGenre = false
 ): CatalogRecommendationCandidate | null {
-  if (!item.id || !item.name?.trim() || item.genre_ids?.includes(16) || !item.genre_ids?.includes(18)) return null;
+  if (!item.id || !item.name?.trim() || item.genre_ids?.includes(16) || (!selectedGenre && !item.genre_ids?.includes(18))) return null;
   const contentType = inferTmdbTvContentType({
-    originCountry: item.origin_country,
+    originCountry: item.origin_country ?? null,
     genreIds: item.genre_ids
   });
-  if (contentType !== "kdrama" && contentType !== "jdrama") return null;
+  if (contentType !== "kdrama" && contentType !== "jdrama" && !(allowInternational && contentType === "other")) return null;
   const providerRank = (request.page - 1) * TMDB_PAGE_SIZE + index + 1;
   return {
     external_source: "tmdb",
@@ -481,7 +768,8 @@ function normalizeTmdbDrama(
 function normalizeTmdbMovie(
   item: TmdbMovieItem,
   request: RecommendationProviderRequest,
-  index: number
+  index: number,
+  countries: readonly string[] = []
 ): CatalogRecommendationCandidate | null {
   if (!item.id || !item.title?.trim()) return null;
   const providerRank = (request.page - 1) * TMDB_PAGE_SIZE + index + 1;
@@ -505,6 +793,10 @@ function normalizeTmdbMovie(
     popularity: normalizedProviderPopularity(providerRank, item.popularity),
     vote_count: finiteOr(item.vote_count, 0),
     languages: item.original_language ? [item.original_language] : [],
+    // TMDB movie discovery omits country metadata. A single-country query is
+    // reliable inclusion evidence; language alone is never used as nationality.
+    countries: countries.length === 1 ? [...countries] : [],
+    ...(countries.length > 1 ? { matched_countries: [...countries] } : {}),
     rating_score: positiveFiniteOrNull(item.vote_average),
     rating_scale: 10,
     rating_count: positiveFiniteOrNull(item.vote_count),
@@ -525,7 +817,7 @@ function normalizeAniListAnime(
   const sourceTags = (item.tags ?? [])
     // Even low-ranked provider tags are decisive for a user's hard exclusions.
     .filter((tag) => !tag.isGeneralSpoiler && !tag.isMediaSpoiler)
-    .map((tag) => ({ name: tag.name?.trim() ?? "", source: "anilist", rank: tag.rank }))
+    .map((tag) => ({ name: tag.name?.trim() ?? "", source: "anilist", rank: tag.rank ?? null }))
     .filter((tag) => Boolean(tag.name));
   return {
     external_source: "anilist",
@@ -647,6 +939,93 @@ function setCommonTmdbParams(url: URL, page: number): void {
   url.searchParams.set("include_adult", "false");
 }
 
+function setTmdbKeywordExclusions(url: URL, filters?: UserRecommendationFilters): void {
+  const keywords = tmdbExcludedKeywordIds(filters);
+  if (keywords.length > 0) url.searchParams.set("without_keywords", keywords.join(","));
+}
+
+const discoveryKeywordCache = new Map<string, { expiresAt: number; promise: Promise<number | null> }>();
+
+/** Resolve provider-owned IDs once instead of guessing keyword IDs or fetching every title's details. */
+export async function resolveTmdbDiscoveryGenreKeyword(
+  genre: string,
+  cache?: RecommendationCache,
+  deadlineMs?: number
+): Promise<number | null> {
+  if (!TMDB_TV_KEYWORD_GENRES.has(genre)) return null;
+  const key = `discovery-genre-keyword-v1:${genre}`;
+  const existing = discoveryKeywordCache.get(key);
+  if (existing && existing.expiresAt > Date.now()) return withinDeadline(() => existing.promise, deadlineMs);
+  const promise = (async () => {
+    const stored = await readPersisted<{ id: number | null; expiresAt: number; failed?: boolean }>(cache, key, "tmdb", deadlineMs);
+    if (stored && stored.expiresAt > Date.now()) {
+      const entry = discoveryKeywordCache.get(key);
+      if (entry) entry.expiresAt = stored.expiresAt;
+      if (stored.failed) throw new Error("DISCOVERY_KEYWORD_RECENTLY_UNAVAILABLE");
+      return stored.id;
+    }
+    const url = new URL("https://api.themoviedb.org/3/search/keyword");
+    url.searchParams.set("query", genre);
+    url.searchParams.set("page", "1");
+    const headers = applyTmdbAuth(url, requireTmdbApiKey());
+    const payload = await fetchJson<{ results?: { id?: number; name?: string }[] }>(
+      url.toString(), { headers }, 2_500, deadlineMs
+    );
+    const id = payload.results?.find((item) => item.name?.trim().toLowerCase() === genre && Number.isInteger(item.id) && (item.id ?? 0) > 0)?.id ?? null;
+    const ttl = id === null ? PROVIDER_FAILURE_TTL_MS : TMDB_KEYWORD_CACHE_TTL_MS;
+    const expiresAt = Date.now() + ttl;
+    const entry = discoveryKeywordCache.get(key);
+    if (entry) entry.expiresAt = expiresAt;
+    await writePersisted(cache, key, "tmdb", { id, expiresAt }, ttl, deadlineMs);
+    return id;
+  })();
+  discoveryKeywordCache.set(key, { expiresAt: Date.now() + TMDB_KEYWORD_CACHE_TTL_MS, promise });
+  try { return await promise; }
+  catch (error) {
+    if (isDeadlineError(error)) discoveryKeywordCache.delete(key);
+    else {
+      const entry = discoveryKeywordCache.get(key);
+      const expiresAt = Date.now() + PROVIDER_FAILURE_TTL_MS;
+      if (entry) entry.expiresAt = Math.min(entry.expiresAt, expiresAt);
+      if (!(error instanceof Error && error.message === "DISCOVERY_KEYWORD_RECENTLY_UNAVAILABLE")) {
+        await writePersisted(cache, key, "tmdb", { id: null, failed: true, expiresAt }, PROVIDER_FAILURE_TTL_MS, deadlineMs);
+      }
+    }
+    throw error;
+  }
+}
+
+async function readPersisted<T>(
+  cache: RecommendationCache | undefined,
+  key: string,
+  source: "tmdb" | "anilist",
+  deadlineMs?: number
+): Promise<T | null> {
+  if (!cache) return null;
+  try {
+    return await withinDeadline(() => cache.get<T>(key, source), deadlineMs);
+  } catch (error) {
+    if (!isDeadlineError(error)) console.warn("Recommendation provider cache read failed");
+    return null;
+  }
+}
+
+async function writePersisted<T>(
+  cache: RecommendationCache | undefined,
+  key: string,
+  source: "tmdb" | "anilist",
+  value: T,
+  ttlMs: number,
+  deadlineMs?: number
+): Promise<void> {
+  if (!cache) return;
+  try {
+    await withinDeadline(() => cache.set(key, source, value, ttlMs), deadlineMs);
+  } catch (error) {
+    if (!isDeadlineError(error)) console.warn("Recommendation provider cache write failed");
+  }
+}
+
 function requireTmdbApiKey(): string {
   const value = Deno.env.get("TMDB_API_KEY");
   if (!value) throw new Error("TMDB_API_KEY is not configured");
@@ -661,15 +1040,49 @@ function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {
   return { "Content-Type": "application/json" };
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 5_000): Promise<T> {
+async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 5_000, deadlineMs?: number): Promise<T> {
+  const remainingMs = remainingTime(deadlineMs);
+  if (remainingMs <= 0) throw deadlineError();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), Math.min(timeoutMs, remainingMs));
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return (await response.json()) as T;
+  } catch (error) {
+    if (remainingTime(deadlineMs) <= 0) throw deadlineError();
+    throw error;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function remainingTime(deadlineMs?: number): number {
+  return deadlineMs === undefined ? Number.POSITIVE_INFINITY : Math.max(0, deadlineMs - Date.now());
+}
+
+function deadlineError(): Error {
+  return new Error("RECOMMENDATION_PROVIDER_DEADLINE");
+}
+
+function isDeadlineError(error: unknown): boolean {
+  return error instanceof Error && error.message === "RECOMMENDATION_PROVIDER_DEADLINE";
+}
+
+async function withinDeadline<T>(task: () => Promise<T>, deadlineMs?: number): Promise<T> {
+  const remainingMs = remainingTime(deadlineMs);
+  if (remainingMs <= 0) throw deadlineError();
+  if (!Number.isFinite(remainingMs)) return task();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      task(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(deadlineError()), remainingMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -688,7 +1101,7 @@ function normalizedProviderPopularity(providerRank: number, rawPopularity: numbe
 }
 
 function genreNamesFromIds(ids?: number[] | null): string[] {
-  return Array.from(new Set((ids ?? []).map((id) => TMDB_GENRE_NAMES.get(id)).filter((name): name is string => Boolean(name))));
+  return Array.from(new Set((ids ?? []).map((id) => TMDB_RECOMMENDATION_GENRES.get(id)).filter((name): name is string => Boolean(name))));
 }
 
 function cleanText(value: unknown): string | null {

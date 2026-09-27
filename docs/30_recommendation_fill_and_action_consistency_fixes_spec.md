@@ -72,3 +72,21 @@
 | `supabase/functions/personalized-recommendations/index.ts`, `supabase/functions/_shared/recommendationProviders.ts` 및 `.test.ts` | 서버 후보 선별 뒤 제한된 TMDB 키워드 보강과 RFC-07 회귀 검증 |
 
 범위 밖: Edge Function **배포**, DB/RLS, 추천 순위, 사용자별 제외 설정 저장 방식, 일반 검색의 페이지네이션. 서버 수정은 로컬 코드에만 있으므로 배포 전 운영 화면의 키워드 부족과 12개 미달이 계속될 수 있다. 배포 후 원격 공급자의 실제 지연·최종 카드 수는 인증된 동일 계정의 네트워크 로그와 UI에서 별도 확인한다. `npm test`, `npm run typecheck`, `npm run lint`를 실행한다.
+
+## 6. 2026-09-26 후속 요청: 조회 전 필터와 재사용
+
+사용자가 “후보 제외 안내만 반복하지 말고 다른 적합한 작품을 보여주며 API 사용량을 줄여 달라”고 재요청했다. 이번 후속 범위는 서버 후보 조회와 클라이언트 재시도까지 포함한다. 하드 제외·최신순 탐색·고유 작품 최대12개·유한 자동 보충 계약은 유지한다. 이전 절의 배포 제외는 당시 작업의 범위이며, 현재 반영·검증 여부는 `development_next_steps.md`에서 별도로 기록한다.
+
+- 원격 배포본 v14를 별도 임시 경로에 내려받아 비교했다. 이 버전에는 로컬의 `enrichTmdbRecommendationCandidates` 및 `isRecommendationExcludedForUser` 연결이 없었다. 화면의 미검증 후보29개는 서버에서 제외한 통계가 아니라 클라이언트가 받은 뒤 숨긴 후보 수였다.
+- 공급자 요청에 계정 제외 장르를 전달한다. AniList에는 제외 관계 태그도 전달하며, TMDB에는 확인된 BL·GL 키워드 ID를 사용한다. 제공처의 모든 별칭을 사전 필터로 표현할 수 있다고 가정하지 않고 응답에도 기존 하드 제외를 적용한다. API 키워드 검색이나 LLM 분류를 추가하지 않는다.
+- D-5의 보강8개 상한은 **캐시 미스에 따른 새 외부 조회**에 적용한다. 이미 보유한 키워드와 캐시 적중은 모두 재사용한다. 요청 전체의 새 키워드 조회는 최대16개로 제한하고, 확인하지 못한 나머지는 같은 공급자 페이지의 다음 확인으로 넘긴다. 페이지를 먼저 넘겨 적합한 후보까지 잃지 않는다.
+- 기존 service_role 전용 `external_search_cache`에 공개 공급자 페이지·키워드·한국어 제목 보강 결과만 저장한다. 필터 조합은 공급자 페이지 키에 포함하며, 사용자 라이브러리·피드백·개인화 순위는 공유 캐시에 저장하지 않는다. 기존 DB/RLS 스키마는 변경하지 않는다.
+- 빈 키워드 결과와 일시 실패도 별도 TTL로 재사용한다. 캐시 저장소 장애는 유한 대기 후 외부 조회로 넘어간다. 외부 요청·큐 대기·캐시 접근은 응답 마감시간 안에서 제한한다.
+- 서버는 캐시가 빠른 경우 최대3달·3라운드 안에서 보충한다. 확인 중인 공급자 페이지는 `verificationPass` 커서로 재개하며, 순위 배열이 바뀌어도 이전 offset 때문에 신규 후보를 건너뛰지 않는다. 기존 v2 커서도 읽는다. 제공처 장애·복구로 순위 풀이 달라지는 경우도 offset을 재설정하고 이미 표시한 identity는 제외한다.
+- 클라이언트 Query key는 계정·작품 유형·정규화한 제외 설정을 포함한다. 재시도는 보존된 커서에서 이어가고, 단순 재진입·포커스·재연결로 첫 페이지를 자동 재조회하지 않는다. 정상 소진은 오류로 표시하지 않으며, 실제 네트워크 오류는 기존 카드와 재시도를 유지한다. refresh/refill/loadMore의 잠금 해제 뒤 반응형 revision을 갱신해 자동 보충 effect가 응답 완료를 다시 판단하도록 한다.
+
+추가 회귀 검증은 캐시 인스턴스 교체 후 재사용, 필터별 캐시 분리, 앞8개가 제외돼도 뒤의 적합 후보 확인, 키워드 캐시 적중의 무료 재사용, 요청 전체 조회 상한, 응답 deadline, 커서 재시도·정상 종료를 포함한다. `recommendationCache.test.ts`, `recommendationProviders.test.ts`, `recommendationCatalog.test.ts`, 클라이언트 Feed/Preferences/Visibility 테스트에서 검증한다.
+
+공급자 계약 근거: [TMDB Discover TV](https://developer.themoviedb.org/reference/discover-tv), [AniList Media query](https://docs.anilist.co/reference/query), TMDB 공식 키워드 [BL 289844](https://www.themoviedb.org/keyword/289844-boys-love-bl/tv)·[GL 280003](https://www.themoviedb.org/keyword/280003-girls-love/tv). 사전 제외는 이 매핑에 한정되므로 최종 구조화 키워드 판정을 계속 수행한다.
+
+TMDB 공식 문서는 `without_genres`·`without_keywords`의 복수 값에 대한 부정 결합 범위를 명시하지 않는다. 현재 쉼표 직렬화는 기존 제공처 관례를 유지한 사전 최적화이며, 최종 서버 필터가 제외 항목 중 하나라도 일치하면 제거한다. 해당 연산자의 정확한 원격 의미는 별도 확인 과제로 남긴다.

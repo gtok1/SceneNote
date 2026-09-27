@@ -3,7 +3,7 @@ import { type GestureResponderEvent, Pressable, StyleSheet, Text, View } from "r
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { EMOTION_LABELS } from "@/constants/emotions";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
 import type { TimelinePin } from "@/types/pins";
 import { formatSecondsToTimecode } from "@/utils/timecode";
 
@@ -82,21 +82,22 @@ function formatPinDate(value: string): string {
 
 const styles = StyleSheet.create({
   card: {
+    ...elevation.card,
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
+    flexGrow: 1,
     gap: spacing.md,
-    minHeight: 118,
-    overflow: "hidden",
+    minHeight: 108,
     padding: spacing.md
   },
   poster: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.sm,
-    height: 92,
-    width: 64
+    height: 78,
+    width: 52
   },
   body: {
     flex: 1,
@@ -110,21 +111,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   emotion: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
+    ...typography.micro,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
     color: colors.primary,
     flexShrink: 0,
-    fontSize: 11,
-    fontWeight: "800",
     overflow: "hidden",
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4
+    paddingVertical: 3
   },
   title: {
+    ...typography.headline,
     color: colors.text,
-    flexShrink: 1,
-    fontSize: 15,
-    fontWeight: "900"
+    flexShrink: 1
   },
   metaRow: {
     alignItems: "center",
@@ -132,30 +131,34 @@ const styles = StyleSheet.create({
     gap: spacing.sm
   },
   meta: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800"
+    ...typography.caption,
+    color: colors.textMuted
   },
   time: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 6,
     color: colors.primary,
-    fontSize: 13,
+    fontSize: 12,
     fontVariant: ["tabular-nums"],
-    fontWeight: "900"
+    fontWeight: "700",
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    paddingVertical: 2
   },
   memo: {
-    color: colors.text,
-    fontSize: 13,
-    lineHeight: 18
+    ...typography.body,
+    color: colors.text
   },
   date: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "700",
+    ...typography.caption,
+    color: colors.textSubtle,
     marginTop: "auto"
   },
   spoiler: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.md,
+    justifyContent: "center",
+    minHeight: 44,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },

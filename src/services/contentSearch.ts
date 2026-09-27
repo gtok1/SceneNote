@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { ALL_COUNTRY_FILTER } from "@/utils/countryFilter";
+import { normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 import type {
   MediaTypeFilter,
   CastMember,
@@ -8,13 +8,11 @@ import type {
   Season
 } from "@/types/content";
 
-interface SearchContentParams {
+interface SearchContentParams extends DiscoveryFilterInput {
   query: string;
   signal?: AbortSignal;
   mediaType?: MediaTypeFilter;
   page?: number;
-  /** ISO 3166-1 alpha-2. With an empty query this browses that country instead. */
-  country?: string;
 }
 
 interface SearchContentFunctionResponse {
@@ -28,6 +26,8 @@ interface SearchContentFunctionResponse {
   page?: number;
   hasNextPage?: boolean;
   partial?: boolean;
+  country_filter_limited?: boolean;
+  genre_filter_limited?: boolean;
   from_cache?: boolean;
   has_next?: boolean;
 }
@@ -37,11 +37,15 @@ export async function searchContent({
   mediaType = "all",
   page = 1,
   country,
+  genre,
+  countries,
+  genres,
+  mediaTypes,
   signal
 }: SearchContentParams): Promise<SearchContentResponse> {
   const normalizedQuery = query.trim();
-  const browseCountry = !normalizedQuery && country && country !== ALL_COUNTRY_FILTER ? country : null;
-  if (!normalizedQuery && !browseCountry) {
+  const filters = normalizeDiscoveryFilters({ country, genre, countries, genres, mediaTypes });
+  if (!normalizedQuery && filters.countries.length === 0) {
     return {
       results: [],
       sources: [],
@@ -65,7 +69,7 @@ export async function searchContent({
         query: normalizedQuery,
         media_type: mediaType,
         page,
-        ...(country && country !== ALL_COUNTRY_FILTER ? { country } : {})
+        ...filters
       }
     }
   );
@@ -84,7 +88,9 @@ export async function searchContent({
     total: data?.total ?? data?.results?.length ?? 0,
     page: data?.page ?? page,
     hasNextPage: Boolean(data?.hasNextPage ?? data?.has_next),
-    partial: Boolean(data?.partial)
+    partial: Boolean(data?.partial),
+    country_filter_limited: Boolean(data?.country_filter_limited),
+    genre_filter_limited: Boolean(data?.genre_filter_limited)
   };
 }
 

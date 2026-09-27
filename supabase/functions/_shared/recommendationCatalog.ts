@@ -11,12 +11,17 @@ import {
   type RecommendationMediaType,
   type RecommendationProfileMode
 } from "./recommendationEngine.ts";
+import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "./discoveryFilters.ts";
+import { canFetchRecommendationProvider } from "./recommendationProviderFilters.ts";
+import { userRecommendationFiltersFromFeedback } from "./recommendationUserFilters.ts";
 
 export type RecommendationProvider = "tmdb_kr" | "tmdb_jp" | "anilist" | "tmdb_movie";
 
 export interface RecommendationProviderPage<T extends RecommendationCandidate = RecommendationCandidate> {
   items: T[];
   hasMore: boolean;
+  /** Cached page candidates still need a bounded metadata-verification pass. */
+  pendingVerification?: boolean;
 }
 
 export interface RecommendationProviderRequest {
@@ -32,12 +37,15 @@ export type RecommendationProviderFetcher<T extends RecommendationCandidate = Re
 
 export interface RecommendationCatalogScanOptions<T extends RecommendationCandidate = RecommendationCandidate> {
   mediaType: RecommendationMediaType;
+  discoveryFilters?: DiscoveryFilterInput;
   limit?: number;
   cursor?: string | null;
   now?: Date | string | number;
   minimumMonth?: string;
   maxMonthsPerRequest?: number;
   maxProviderRoundsPerRequest?: number;
+  /** Checked after the first round so the caller can reserve response time. */
+  canContinue?: () => boolean;
   libraryItems?: readonly RecommendationLibraryItem[];
   feedback?: readonly RecommendationFeedback[];
   excludeIds?: readonly string[];
@@ -63,12 +71,15 @@ interface ProviderCursorState {
   page: number;
   done: boolean;
   failures: number;
+  /** Optional so cursors issued before verification continuation remain valid. */
+  verificationPass?: number;
 }
 
 interface RecommendationCursorState {
   version: 2;
   sortVersion: typeof RECOMMENDATION_SORT_VERSION;
   mediaType: RecommendationMediaType;
+  discoveryFilterKey?: string;
   month: string;
   asOfDate: string;
   offset: number;
@@ -86,6 +97,7 @@ const DEFAULT_MAX_MONTHS_PER_REQUEST = 4;
 const DEFAULT_MAX_PROVIDER_ROUNDS_PER_REQUEST = 8;
 const MAX_CURSOR_PAGE = 500;
 const MAX_CURSOR_OFFSET = 500;
+const MAX_CURSOR_VERIFICATION_PASS = 100;
 const KST_OFFSET_MINUTES = 9 * 60;
 const ALL_PROVIDERS: RecommendationProvider[] = ["tmdb_kr", "tmdb_jp", "anilist", "tmdb_movie"];
 
@@ -97,12 +109,15 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
   const now = toDate(options.now) ?? new Date();
   const currentMonth = getKstMonthKey(now);
   const minimumMonth = isMonthKey(options.minimumMonth) ? options.minimumMonth : RECOMMENDATION_CATALOG_MINIMUM_MONTH;
-  let state = decodeRecommendationCursor(options.cursor, options.mediaType, now);
+  let state = decodeRecommendationCursor(options.cursor, options.mediaType, now, options.discoveryFilters);
   if (compareMonths(state.month, currentMonth) > 0) {
-    state = createInitialCursorState(options.mediaType, now);
+    state = createInitialCursorState(options.mediaType, now, options.discoveryFilters);
   }
 
-  const activeProviders = getProvidersForMediaType(options.mediaType);
+  const exclusions = userRecommendationFiltersFromFeedback(options.feedback ?? []);
+  const activeProviders = getProvidersForMediaType(options.mediaType, options.discoveryFilters).filter((provider) =>
+    canFetchRecommendationProvider(provider, options.discoveryFilters, exclusions)
+  );
   const maxMonths = clampInteger(options.maxMonthsPerRequest ?? DEFAULT_MAX_MONTHS_PER_REQUEST, 1, 24);
   const maxRounds = clampInteger(
     options.maxProviderRoundsPerRequest ?? DEFAULT_MAX_PROVIDER_ROUNDS_PER_REQUEST,
@@ -110,6 +125,9 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     40
   );
   const profile = buildPreferenceProfile(options.libraryItems ?? [], options.feedback ?? []);
+  if (activeProviders.length === 0) {
+    return completedResult([], profile.mode, false, new Set(), new Set());
+  }
   const excluded = createNormalizedSet(options.excludeIds ?? []);
   for (const feedback of options.feedback ?? []) {
     if (
@@ -171,7 +189,7 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       visitedMonths.add(state.month);
     }
 
-    if (providerRounds >= maxRounds) {
+    if (providerRounds >= maxRounds || (providerRounds > 0 && options.canContinue?.() === false)) {
       scanBudgetReached = true;
       break;
     }
@@ -179,6 +197,7 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     const pendingProviders = activeProviders.filter((provider) => !state.providers[provider].done);
     const healthyPendingProviders = pendingProviders.filter((provider) => state.providers[provider].failures === 0);
     const attemptedProviders = healthyPendingProviders.length > 0 ? healthyPendingProviders : pendingProviders;
+    const retryingFailedProvider = attemptedProviders.some((provider) => state.providers[provider].failures > 0);
     const settledPages = await Promise.allSettled(
       attemptedProviders.map((provider) =>
         fetchProviderPage({
@@ -226,8 +245,12 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
         profile,
         [...successfulPages.values()]
           .flatMap((page) => page.items)
+          .filter((candidate) => matchesDiscoveryFilters(candidate, options.discoveryFilters))
           .filter((candidate) => options.candidateFilter?.(candidate) ?? true),
-        { mediaType: options.mediaType, libraryItems: options.libraryItems }
+        {
+          mediaType: options.discoveryFilters?.mediaTypes !== undefined ? "all" : options.mediaType,
+          ...(options.libraryItems ? { libraryItems: options.libraryItems } : {})
+        }
       )
     );
 
@@ -235,7 +258,17 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       addAll(excluded, await options.resolveSeenIds(rankedPage));
     }
 
-    let consumedOffset = Math.min(state.offset, rankedPage.length);
+    const pendingVerification = [...successfulPages.values()].some((page) => page.pendingVerification === true);
+    const verificationPoolChanged = pendingVerification || activeProviders.some(
+      (provider) => (state.providers[provider].verificationPass ?? 0) > 0
+    );
+    const providerPoolChanged = retryingFailedProvider || settledPages.some((page) => page.status === "rejected");
+    // Verification may insert a newly eligible candidate before the previous
+    // offset, while failed or recovered providers remove or insert entries. Revisit
+    // the changed ranked pool and use identity exclusions instead.
+    let consumedOffset = verificationPoolChanged || providerPoolChanged
+      ? 0
+      : Math.min(state.offset, rankedPage.length);
     for (let index = consumedOffset; index < rankedPage.length; index += 1) {
       const candidate = rankedPage[index];
       if (!candidate) continue;
@@ -262,8 +295,15 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
       if (selected.length >= limit) break;
     }
 
+    for (const [provider, page] of successfulPages) {
+      const providerState = state.providers[provider];
+      providerState.verificationPass = page.pendingVerification
+        ? Math.min(MAX_CURSOR_VERIFICATION_PASS, (providerState.verificationPass ?? 0) + 1)
+        : 0;
+    }
+
     if (consumedOffset < rankedPage.length) {
-      state.offset = consumedOffset;
+      state.offset = pendingVerification ? 0 : consumedOffset;
       return pendingResult({
         selected,
         state,
@@ -280,6 +320,7 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     state.offset = 0;
     for (const [provider, page] of successfulPages) {
       const providerState = state.providers[provider];
+      if (page.pendingVerification) continue;
       providerState.done = !page.hasMore;
       if (page.hasMore) providerState.page = clampInteger(providerState.page + 1, 1, MAX_CURSOR_PAGE);
     }
@@ -319,23 +360,27 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
 }
 
 export function encodeRecommendationCursor(state: RecommendationCursorState): string {
-  const encoded = btoa(JSON.stringify(state));
+  const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(state))));
   return encoded.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 export function decodeRecommendationCursor(
   cursor: string | null | undefined,
   mediaType: RecommendationMediaType,
-  now: Date | string | number = new Date()
+  now: Date | string | number = new Date(),
+  discoveryFilters?: DiscoveryFilterInput
 ): RecommendationCursorState {
   const parsedNow = toDate(now) ?? new Date();
-  if (!cursor) return createInitialCursorState(mediaType, parsedNow);
+  if (!cursor) return createInitialCursorState(mediaType, parsedNow, discoveryFilters);
 
   try {
     const base64 = cursor.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-    const value = JSON.parse(atob(padded)) as unknown;
+    const value = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)))) as unknown;
     if (!isCursorState(value) || value.mediaType !== mediaType) throw new Error("cursor mismatch");
+    if (normalizeCatalogDiscoveryKey(value.discoveryFilterKey) !== catalogDiscoveryKey(discoveryFilters)) {
+      throw new Error("cursor discovery filter mismatch");
+    }
     return cloneCursorState(value);
   } catch {
     throw new Error("INVALID_RECOMMENDATION_CURSOR");
@@ -365,25 +410,26 @@ export function previousMonth(month: string): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function createInitialCursorState(mediaType: RecommendationMediaType, now: Date): RecommendationCursorState {
+function createInitialCursorState(mediaType: RecommendationMediaType, now: Date, discoveryFilters?: DiscoveryFilterInput): RecommendationCursorState {
   return {
     version: 2,
     sortVersion: RECOMMENDATION_SORT_VERSION,
     mediaType,
+    ...(catalogDiscoveryKey(discoveryFilters) !== discoveryFilterKey() ? { discoveryFilterKey: catalogDiscoveryKey(discoveryFilters) } : {}),
     month: getKstMonthKey(now),
     asOfDate: getKstDateKey(now),
     offset: 0,
-    providers: createProviderStates(getProvidersForMediaType(mediaType))
+    providers: createProviderStates(getProvidersForMediaType(mediaType, discoveryFilters))
   };
 }
 
 function createProviderStates(activeProviders: readonly RecommendationProvider[]): Record<RecommendationProvider, ProviderCursorState> {
   const active = new Set(activeProviders);
   return {
-    tmdb_kr: { page: 1, done: !active.has("tmdb_kr"), failures: 0 },
-    tmdb_jp: { page: 1, done: !active.has("tmdb_jp"), failures: 0 },
-    anilist: { page: 1, done: !active.has("anilist"), failures: 0 },
-    tmdb_movie: { page: 1, done: !active.has("tmdb_movie"), failures: 0 }
+    tmdb_kr: { page: 1, done: !active.has("tmdb_kr"), failures: 0, verificationPass: 0 },
+    tmdb_jp: { page: 1, done: !active.has("tmdb_jp"), failures: 0, verificationPass: 0 },
+    anilist: { page: 1, done: !active.has("anilist"), failures: 0, verificationPass: 0 },
+    tmdb_movie: { page: 1, done: !active.has("tmdb_movie"), failures: 0, verificationPass: 0 }
   };
 }
 
@@ -400,7 +446,26 @@ function moveCursorToMonth(
   };
 }
 
-function getProvidersForMediaType(mediaType: RecommendationMediaType): RecommendationProvider[] {
+function normalizeCatalogDiscoveryKey(key?: string): string {
+  if (key === undefined) return discoveryFilterKey();
+  try {
+    const legacy = JSON.parse(key) as unknown;
+    if (Array.isArray(legacy) && legacy.length === 2 && legacy.every((value) => typeof value === "string")) {
+      return discoveryFilterKey({ genre: legacy[0], country: legacy[1] });
+    }
+  } catch { /* New signatures may carry a media-selection suffix. */ }
+  return key;
+}
+
+function catalogDiscoveryKey(input?: DiscoveryFilterInput): string {
+  return discoveryFilterKey(input) + (input?.mediaTypes !== undefined ? ":media-selection" : "");
+}
+
+function getProvidersForMediaType(mediaType: RecommendationMediaType, input?: DiscoveryFilterInput): RecommendationProvider[] {
+  if (input?.mediaTypes !== undefined) {
+    const types = normalizeDiscoveryFilters(input).mediaTypes;
+    return ALL_PROVIDERS.filter((provider) => !types.length || types.includes(provider === "anilist" ? "anime" : provider === "tmdb_movie" ? "movie" : "drama"));
+  }
   if (mediaType === "anime") return ["anilist"];
   if (mediaType === "drama") return ["tmdb_kr", "tmdb_jp"];
   if (mediaType === "movie") return ["tmdb_movie"];
@@ -475,6 +540,7 @@ function isCursorState(value: unknown): value is RecommendationCursorState {
   if (
     cursor.version !== 2 ||
     cursor.sortVersion !== RECOMMENDATION_SORT_VERSION ||
+    (cursor.discoveryFilterKey !== undefined && (typeof cursor.discoveryFilterKey !== "string" || cursor.discoveryFilterKey.length > 1200)) ||
     !["all", "drama", "anime", "movie"].includes(cursor.mediaType ?? "") ||
     !isMonthKey(cursor.month) ||
     !isDateKey(cursor.asOfDate) ||
@@ -499,7 +565,12 @@ function isProviderCursorState(value: unknown): value is ProviderCursorState {
     typeof state.done === "boolean" &&
     Number.isInteger(state.failures) &&
     (state.failures ?? -1) >= 0 &&
-    (state.failures ?? 0) <= 100
+    (state.failures ?? 0) <= 100 &&
+    (state.verificationPass === undefined || (
+      Number.isInteger(state.verificationPass) &&
+      state.verificationPass >= 0 &&
+      state.verificationPass <= MAX_CURSOR_VERIFICATION_PASS
+    ))
   );
 }
 
@@ -507,10 +578,10 @@ function cloneCursorState(state: RecommendationCursorState): RecommendationCurso
   return {
     ...state,
     providers: {
-      tmdb_kr: { ...state.providers.tmdb_kr },
-      tmdb_jp: { ...state.providers.tmdb_jp },
-      anilist: { ...state.providers.anilist },
-      tmdb_movie: { ...state.providers.tmdb_movie }
+      tmdb_kr: { verificationPass: 0, ...state.providers.tmdb_kr },
+      tmdb_jp: { verificationPass: 0, ...state.providers.tmdb_jp },
+      anilist: { verificationPass: 0, ...state.providers.anilist },
+      tmdb_movie: { verificationPass: 0, ...state.providers.tmdb_movie }
     }
   };
 }

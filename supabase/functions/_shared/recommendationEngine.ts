@@ -23,6 +23,8 @@ export interface RecommendationCandidate {
   external_source: string;
   external_id: string;
   content_type: string;
+  /** Provider-confirmed medium, including TV dramas outside Korea and Japan. */
+  category?: "drama" | "anime" | "movie";
   title_primary: string;
   title_original?: string | null;
   air_year?: number | null;
@@ -41,6 +43,8 @@ export interface RecommendationCandidate {
   source_tags?: readonly SourceContentTag[] | null;
   themes?: readonly ContentTheme[] | null;
   countries?: readonly string[] | null;
+  matched_countries?: readonly string[] | null;
+  matched_genres?: readonly string[] | null;
   languages?: readonly string[] | null;
   people?: readonly string[] | null;
   studios?: readonly string[] | null;
@@ -901,8 +905,9 @@ function findSharedValues(
 
 function matchesMediaType(candidate: RecommendationCandidate, mediaType: RecommendationMediaType): boolean {
   const contentType = normalizeContentType(candidate.content_type);
-  if (mediaType === "all") return contentType !== "other";
-  if (mediaType === "drama") return contentType === "kdrama" || contentType === "jdrama";
+  const internationalDrama = contentType === "other" && candidate.category === "drama" && candidate.has_seasons === true;
+  if (mediaType === "all") return contentType !== "other" || internationalDrama;
+  if (mediaType === "drama") return contentType === "kdrama" || contentType === "jdrama" || internationalDrama;
   return contentType === mediaType;
 }
 

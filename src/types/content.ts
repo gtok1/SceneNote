@@ -21,6 +21,10 @@ export interface SearchResult {
   genres?: string[];
   /** ISO 3166-1 alpha-2 codes, from TMDB `origin_country`. */
   origin_country?: string[];
+  /** Country-set proof from a provider discovery query, not inferred production countries. */
+  matched_countries?: string[];
+  /** Genre-set proof when a provider query can verify any selected alternative. */
+  matched_genres?: string[];
   /** 시즌별로 펼쳐진 카드일 때만 존재. 작품 전체 카드면 undefined. */
   season_number?: number;
   duplicate_hint?: boolean;
@@ -47,6 +51,8 @@ export interface SearchContentResponse {
   page: number;
   hasNextPage: boolean;
   partial: boolean;
+  country_filter_limited?: boolean;
+  genre_filter_limited?: boolean;
 }
 
 export interface Content {

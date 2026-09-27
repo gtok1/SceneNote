@@ -5,6 +5,7 @@ import {
   ALL_COUNTRY_FILTER,
   COUNTRY_FILTER_OPTIONS,
   canRunSearch,
+  getCountryFilterLabel,
   isBrowseMode,
   matchesCountryFilter
 } from "./countryFilter";
@@ -13,6 +14,13 @@ describe("country filter options", () => {
   it("offers Korea, Japan, the US and China as ISO 3166-1 alpha-2 codes", () => {
     assert.deepEqual(COUNTRY_FILTER_OPTIONS.map((option) => option.code), ["KR", "JP", "US", "CN"]);
     assert.deepEqual(COUNTRY_FILTER_OPTIONS.map((option) => option.label), ["한국", "일본", "미국", "중국"]);
+  });
+
+  it("describes the applied production country without treating language as country", () => {
+    assert.equal(getCountryFilterLabel("all"), "모든 제작 국가");
+    assert.equal(getCountryFilterLabel(" jp "), "일본");
+    assert.equal(getCountryFilterLabel("US"), "미국");
+    assert.equal(getCountryFilterLabel("FR"), "FR");
   });
 });
 

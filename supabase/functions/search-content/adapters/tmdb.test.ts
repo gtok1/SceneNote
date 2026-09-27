@@ -4,11 +4,15 @@ import { describe, it } from "node:test";
 import {
   applyCurrentSeasonMetadata,
   applyTmdbSeasonMetadata,
+  discoverTmdb,
   expandAiredSeasons,
+  filterSearchResultsByDiscovery,
   MAX_EXPANDED_SEASONS,
   pickCurrentSeason
 } from "./tmdb.ts";
 import type { SearchResult } from "./types.ts";
+import { normalizeDiscoveryFilters } from "../../_shared/discoveryFilters.ts";
+import type { RecommendationCache } from "../../_shared/recommendationCache.ts";
 
 const result: SearchResult = {
   external_source: "tmdb",
@@ -179,3 +183,247 @@ describe("expandAiredSeasons", () => {
     assert.equal(expandAiredSeasons(result, named, NOW)[0]?.title_primary, "별의 계승자");
   });
 });
+
+describe("positive filters over reusable title-search results", () => {
+  it("filters genres without country calls and does not mutate cached pages", async () => {
+    const raw = [movie("1", ["Comedy"]), movie("2", ["Drama"])];
+    const snapshot = structuredClone(raw);
+    await withMockTmdb(async () => { assert.fail("no country selected must make zero metadata calls"); }, async () => {
+      const filtered = await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ genre: "코미디" }));
+      assert.deepEqual(filtered.results.map((item) => item.external_id), ["1"]);
+      assert.equal(filtered.countryFilterLimited, false);
+      const unfiltered = await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters());
+      assert.equal(unfiltered.results.length, 2);
+    });
+    assert.deepEqual(raw, snapshot);
+  });
+
+  it("applies genre AND country to cached AniList and expanded TMDB season cards", async () => {
+    const seasons = expandAiredSeasons({ ...result, genres: ["Comedy"], origin_country: ["JP"] }, VIVANT_SEASONS, NOW);
+    const raw = [...seasons, { ...result, external_source: "anilist" as const, external_id: "8", origin_country: ["KR"], genres: ["Comedy"] }];
+    await withMockTmdb(async () => { assert.fail("known countries must not cause detail requests"); }, async () => {
+      const filtered = await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ genre: "코미디", country: "jp" }));
+      assert.deepEqual(filtered.results.map((item) => item.season_number), [2, 1]);
+      assert(filtered.results.every((item) => item.external_id === result.external_id));
+    });
+  });
+
+  it("only enriches genre-matching movies and uses production countries, not language", async () => {
+    const calls: string[] = [];
+    await withMockTmdb(async (input) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname);
+      assert.equal(url.searchParams.get("api_key"), "test-only-key");
+      return Response.json({ original_language: "en", production_countries: [{ iso_3166_1: "KR" }, { iso_3166_1: "US" }] });
+    }, async () => {
+      const filtered = await filterSearchResultsByDiscovery([movie("1", ["Comedy"]), movie("2", ["Drama"])], normalizeDiscoveryFilters({ genre: "코미디", country: "KR" }));
+      assert.deepEqual(calls, ["/3/movie/1"]);
+      assert.deepEqual(filtered.results[0]?.origin_country, ["KR", "US"]);
+      assert.equal(filtered.countryFilterLimited, false);
+    });
+  });
+
+  it("reuses cached production countries after changing the selected country", async () => {
+    const cache = countryCache();
+    let calls = 0;
+    await withMockTmdb(async () => { calls += 1; return Response.json({ production_countries: [{ iso_3166_1: "KR" }] }); }, async () => {
+      const raw = [movie("1")];
+      assert.equal((await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ country: "KR" }), { cache })).results.length, 1);
+      assert.equal((await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ country: "US" }), { cache })).results.length, 0);
+      assert.equal(calls, 1);
+      assert.equal(cache.writes[0]?.ttlMs, 86_400_000);
+      assert.deepEqual(raw[0]?.origin_country, []);
+    });
+  });
+
+  it("keeps empty production evidence empty and never substitutes the selected country", async () => {
+    const cache = countryCache();
+    let calls = 0;
+    await withMockTmdb(async () => { calls += 1; return Response.json({ original_language: "ko", production_countries: [] }); }, async () => {
+      const raw = [movie("3")];
+      assert.equal((await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ country: "KR" }), { cache })).results.length, 0);
+      assert.equal((await filterSearchResultsByDiscovery(raw, normalizeDiscoveryFilters({ country: "JP" }), { cache })).results.length, 0);
+      assert.equal(calls, 1);
+    });
+  });
+
+  it("bounds new movie lookups at eight/four concurrent and resumes missing metadata on retry", async () => {
+    const cache = countryCache();
+    let calls = 0;
+    let active = 0;
+    let maxActive = 0;
+    await withMockTmdb(async () => {
+      calls += 1;
+      active += 1;
+      maxActive = Math.max(active, maxActive);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return Response.json({ production_countries: [{ iso_3166_1: "US" }] });
+    }, async () => {
+      const raw = Array.from({ length: 10 }, (_, index) => movie(String(index)));
+      const filters = normalizeDiscoveryFilters({ country: "US" });
+      const first = await filterSearchResultsByDiscovery(raw, filters, { cache });
+      assert.equal(first.results.length, 8);
+      assert.equal(first.countryFilterLimited, true);
+      assert.equal(calls, 8);
+      const second = await filterSearchResultsByDiscovery(raw, filters, { cache });
+      assert.equal(second.results.length, 10);
+      assert.equal(second.countryFilterLimited, false);
+      assert.equal(calls, 10);
+      assert(maxActive <= 4);
+    });
+  });
+
+  it("marks real provider failures partial and reuses a short-lived failure cache", async () => {
+    const cache = countryCache();
+    let calls = 0;
+    await withMockTmdb(async () => { calls += 1; return new Response(null, { status: 503 }); }, async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const filtered = await filterSearchResultsByDiscovery([movie("1")], normalizeDiscoveryFilters({ country: "US" }), { cache });
+        assert.deepEqual(filtered.results, []);
+        assert.equal(filtered.countryFilterLimited, true);
+      }
+      assert.equal(calls, 1);
+      assert.equal(cache.writes[0]?.ttlMs, 60_000);
+    });
+  });
+
+  it("stops a stalled lookup at the shared deadline without poisoning the cache", async () => {
+    const cache = countryCache();
+    await withMockTmdb(async () => new Promise<Response>(() => undefined), async () => {
+      const start = Date.now();
+      const filtered = await filterSearchResultsByDiscovery([movie("1")], normalizeDiscoveryFilters({ country: "US" }), { cache, deadlineMs: Date.now() + 20 });
+      assert.equal(filtered.countryFilterLimited, true);
+      assert.equal(cache.writes.length, 0);
+      assert(Date.now() - start < 1_000);
+    });
+  });
+
+  it("pushes genre and country into country discovery and verifies returned genres", async () => {
+    await withMockTmdb(async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("with_origin_country"), "KR");
+      assert.equal(url.searchParams.get("with_genres"), "35");
+      return Response.json({ page: 1, total_pages: 2, total_results: 30, results: [
+        { id: 1, title: "한국 코미디", genre_ids: [35] },
+        { id: 2, title: "다른 장르", genre_ids: [18] }
+      ] });
+    }, async () => {
+      const response = await discoverTmdb({ country: "KR", genre: "코미디", mediaType: "movie", page: 1, signal: new AbortController().signal });
+      assert.deepEqual(response.results.map((item) => item.external_id), ["1"]);
+      assert.deepEqual(response.results[0]?.origin_country, ["KR"]);
+      assert.equal(response.hasNextPage, true);
+    });
+  });
+
+  it("verifies a Korean TV romance through cached structured keywords instead of rejecting the Drama genre", async () => {
+    const cache = countryCache();
+    const tv = { ...result, external_id: "999910001", genres: ["Drama"], origin_country: ["KR"] };
+    let calls = 0;
+    await withMockTmdb(async (input) => {
+      calls += 1;
+      assert.equal(new URL(String(input)).pathname, "/3/tv/999910001/keywords");
+      return Response.json({ results: [{ name: "romance" }] });
+    }, async () => {
+      const filters = normalizeDiscoveryFilters({ genre: "로맨스", country: "KR" });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const filtered = await filterSearchResultsByDiscovery([tv], filters, { cache });
+        assert.equal(filtered.results.length, 1);
+        assert.deepEqual(filtered.results[0]?.genres, ["Drama", "romance"]);
+        assert.equal(filtered.genreFilterLimited, false);
+      }
+      assert.equal(calls, 1);
+      assert.deepEqual(tv.genres, ["Drama"]);
+    });
+  });
+
+  it("does not fetch TV keywords for another country or accept vague plot text as genre evidence", async () => {
+    const korean = { ...result, external_id: "999910002", genres: ["Drama"], origin_country: ["KR"], overview: "로맨스가 시작된다" };
+    const japanese = { ...korean, external_id: "999910003", origin_country: ["JP"] };
+    const calls: string[] = [];
+    await withMockTmdb(async (input) => {
+      calls.push(new URL(String(input)).pathname);
+      return Response.json({ results: [{ name: "family" }] });
+    }, async () => {
+      const filtered = await filterSearchResultsByDiscovery([korean, japanese], normalizeDiscoveryFilters({ genre: "로맨스", country: "KR" }));
+      assert.deepEqual(filtered.results, []);
+      assert.equal(filtered.genreFilterLimited, false);
+      assert.deepEqual(calls, ["/3/tv/999910002/keywords"]);
+    });
+  });
+
+  it("reports missing TV keyword metadata and shares the eight-lookup cap with movie-country verification", async () => {
+    const tvs = Array.from({ length: 8 }, (_, index) => ({ ...result, external_id: String(999910100 + index), genres: ["Drama"], origin_country: ["KR"] }));
+    let calls = 0;
+    await withMockTmdb(async (input) => {
+      calls += 1;
+      assert(new URL(String(input)).pathname.endsWith("/keywords"));
+      return Response.json({ results: [{ name: "romance" }] });
+    }, async () => {
+      const filtered = await filterSearchResultsByDiscovery([...tvs, movie("999910200", ["Romance"])], normalizeDiscoveryFilters({ genre: "로맨스", country: "KR" }));
+      assert.equal(filtered.results.length, 8);
+      assert.equal(filtered.countryFilterLimited, true);
+      assert.equal(calls, 8);
+    });
+  });
+
+  it("combines selected genres and countries with OR while keeping type constraints", async () => {
+    const korean = { ...result, external_id: "999920001", content_type: "kdrama" as const, genres: ["Comedy"], origin_country: ["KR"] };
+    const japanese = { ...result, external_id: "999920002", content_type: "jdrama" as const, genres: ["Mystery"], origin_country: ["JP"] };
+    const american = { ...result, external_id: "999920003", genres: ["Comedy"], origin_country: ["US"] };
+    const wrongGenre = { ...result, external_id: "999920004", genres: ["Action"], origin_country: ["JP"] };
+    const selectedMovie = { ...movie("999920005", ["Comedy"]), origin_country: ["KR"] };
+    await withMockTmdb(async () => { throw new Error("Known evidence must not trigger external lookups"); }, async () => {
+      const filtered = await filterSearchResultsByDiscovery([korean, japanese, american, wrongGenre, selectedMovie], {
+        genres: ["코미디", "미스터리"], countries: ["KR", "JP"], mediaTypes: ["drama"]
+      });
+      assert.deepEqual(filtered.results.map((item) => item.external_id), ["999920001", "999920002"]);
+      assert.equal(filtered.genreFilterLimited, false);
+      assert.equal(filtered.countryFilterLimited, false);
+    });
+  });
+
+  it("does not verify keyword alternatives for an already matching selected genre", async () => {
+    const comedy = { ...result, external_id: "999920101", genres: ["Comedy"], origin_country: ["KR"] };
+    const romantic = { ...result, external_id: "999920102", genres: ["Drama"], origin_country: ["JP"] };
+    const calls: string[] = [];
+    await withMockTmdb(async (input) => {
+      calls.push(new URL(String(input)).pathname);
+      return Response.json({ results: [{ name: "romance" }] });
+    }, async () => {
+      const filtered = await filterSearchResultsByDiscovery([comedy, romantic], {
+        genres: ["comedy", "romance", "thriller"], countries: ["KR", "JP"]
+      });
+      assert.deepEqual(filtered.results.map((item) => item.external_id), ["999920101", "999920102"]);
+      assert.deepEqual(calls, ["/3/tv/999920102/keywords"]);
+      assert.deepEqual(filtered.results[1]?.genres, ["Drama", "romance"]);
+      assert(!filtered.results[1]?.genres?.includes("thriller"));
+    });
+  });
+});
+
+function movie(id: string, genres = ["Drama"]): SearchResult {
+  return { ...result, external_id: id, content_type: "movie", has_seasons: false, origin_country: [], genres };
+}
+
+function countryCache(): RecommendationCache & { writes: { key: string; ttlMs: number }[] } {
+  const data = new Map<string, unknown>();
+  const writes: { key: string; ttlMs: number }[] = [];
+  return {
+    writes,
+    async get<T>(key: string) { return data.get(key) as T ?? null; },
+    async set(key, _source, value, ttlMs) { data.set(key, value); writes.push({ key, ttlMs }); }
+  };
+}
+
+async function withMockTmdb(fetchMock: typeof fetch, run: () => Promise<void>): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  globalThis.fetch = fetchMock;
+  Object.defineProperty(globalThis, "Deno", { configurable: true, value: { env: { get: () => "test-only-key" } } });
+  try { await run(); } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno);
+    else Reflect.deleteProperty(globalThis, "Deno");
+  }
+}

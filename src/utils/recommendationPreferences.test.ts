@@ -5,8 +5,20 @@ import {
   normalizeRecommendationPreferenceKey,
   parseRecommendationExclusions,
   recommendationExclusionTargetKey,
+  recommendationExclusionSignature,
   updateRecommendationExclusions
 } from "./recommendationPreferences";
+
+test("equivalent account filters share a stable cache signature", () => {
+  const first = recommendationExclusionSignature({
+    excludedThemeKeys: ["girls-love", "boys-love"], excludedGenres: ["Drama", "Action"]
+  });
+  assert.equal(first, recommendationExclusionSignature({
+    excludedThemeKeys: [" BOYS-LOVE ", "girls-love", "boys-love"], excludedGenres: ["action", "Ｄｒａｍａ"]
+  }));
+  assert.notEqual(first, recommendationExclusionSignature({ excludedThemeKeys: [], excludedGenres: ["drama", "action"] }));
+  assert.equal(recommendationExclusionSignature(), "[[],[]]");
+});
 
 test("preference keys use the same NFKC, case, and whitespace normalization as recommendation genres", () => {
   assert.equal(normalizeRecommendationPreferenceKey("  ＲＯＭＡＮＣＥ   Drama  "), "romance drama");

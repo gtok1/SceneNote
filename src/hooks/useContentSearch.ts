@@ -4,20 +4,21 @@ import { queryKeys } from "@/lib/query";
 import { getExternalContentDetail, searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { mergeSearchPages } from "@/utils/searchPagination";
-import { ALL_COUNTRY_FILTER, isBrowseMode } from "@/utils/countryFilter";
+import { discoveryFilterKey, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 
 export function useContentSearch(
   query: string,
   mediaType: MediaTypeFilter = "all",
-  country: string = ALL_COUNTRY_FILTER,
-  options: { enabled?: boolean } = {}
+  countries: string | readonly string[] = [],
+  options: DiscoveryFilterInput & { enabled?: boolean } = {}
 ) {
   const normalizedQuery = query.trim();
-  const browsing = isBrowseMode(normalizedQuery, country);
+  const filters = normalizeDiscoveryFilters({ ...options, ...(typeof countries === "string" ? { country: countries } : { countries }) });
+  const browsing = normalizedQuery.length === 0 && filters.countries.length > 0;
   const searchQuery = useInfiniteQuery({
-    queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1, country),
-    queryFn: ({ pageParam }) =>
-      searchContent({ query: normalizedQuery, mediaType, page: pageParam, country }),
+    queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1, discoveryFilterKey(filters)),
+    queryFn: ({ pageParam, signal }) =>
+      searchContent({ query: normalizedQuery, mediaType, page: pageParam, ...filters, signal }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.hasNextPage ? lastPage.page + 1 : undefined,
     // Browse mode has no query to be long enough, the country stands in for it.
@@ -34,6 +35,9 @@ export function useContentSearch(
     data: latestPage ? {
       ...latestPage,
       results,
+      country_filter_limited: pages.some((page) => page.country_filter_limited),
+      genre_filter_limited: pages.some((page) => page.genre_filter_limited),
+      partial: pages.some((page) => page.partial),
       total: Math.max(latestPage.total, results.length)
     } : undefined
   };

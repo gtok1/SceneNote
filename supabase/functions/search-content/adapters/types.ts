@@ -27,6 +27,8 @@ export interface SearchResult {
   season_number?: number;
   title_is_synthesized?: boolean;
   resolved_from_id?: string;
+  filter_match?: boolean;
+  series_title?: string | null;
 }
 
 export interface AdapterSearchParams {

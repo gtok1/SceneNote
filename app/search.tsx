@@ -23,6 +23,7 @@ import { SearchResultItem } from "@/components/content/SearchResultItem";
 import { SimilarContentQuickViewModal } from "@/components/content/SimilarContentQuickViewModal";
 import { ThemeReductionSheet } from "@/components/content/ThemeReductionSheet";
 import { colors, radius, spacing } from "@/constants/theme";
+import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, useFavoritePeople, usePersonContentSearch } from "@/hooks/usePeople";
@@ -40,16 +41,17 @@ import { useAppUIStore } from "@/stores/appUIStore";
 import { useSearchUiStore } from "@/stores/searchUiStore";
 import { useSearchHistoryStore } from "@/stores/searchHistoryStore";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
-import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
+import type { LibraryListItem } from "@/types/library";
 import type { PersonSearchResult } from "@/types/people";
-import { filterByYear, normalizeYearFilter, sortByYear } from "@/utils/contentSort";
+import { normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { getCountryFilterLabel } from "@/utils/countryFilter";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 import { getSearchResultActions } from "@/utils/searchResultActions";
 import { filterVisibleRecommendationCandidates, summarizeRecommendationVisibility } from "@/utils/recommendationVisibility";
 import { getGenreDisplayName } from "@/utils/genre";
 import { createSearchFilterDraft } from "@/utils/searchFilterDraft";
-import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
+import { partitionSearchResults } from "@/utils/searchResultVisibility";
+import { discoveryFilterKey, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
 import { shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
 import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
@@ -88,13 +90,15 @@ export default function SearchScreen() {
     [genreFilters, countryFilters, mediaTypes]
   );
   const hasDiscoveryFilters = genreFilters.length > 0 || countryFilters.length > 0 || mediaTypes.length > 0;
+  const year = useSearchUiStore((state) => state.year);
   const mediaTypeLabels = { anime: "애니", drama: "드라마", movie: "영화" };
   const discoveryFilterSummary = [
     mediaTypes.length ? mediaTypes.map((value) => mediaTypeLabels[value]).join(", ") : "모든 유형",
     genreFilters.length ? genreFilters.map(getGenreDisplayName).join(", ") : "모든 장르",
-    countryFilters.length ? countryFilters.map(getCountryFilterLabel).join(", ") : "모든 제작 국가"
+    countryFilters.length ? countryFilters.map(getCountryFilterLabel).join(", ") : "모든 제작 국가",
+    ...(statusFilter !== "all" ? [`상태: ${WATCH_STATUS_LABEL[statusFilter]}`] : []),
+    ...(year ? [`${year}년`] : [])
   ].join(" · ");
-  const year = useSearchUiStore((state) => state.year);
   const sortOrder = useSearchUiStore((state) => state.sortOrder);
   const appliedSearchFilters = useMemo(
     () => createSearchFilterDraft({ mediaTypes, genreFilters, countryFilters, statusFilter, year, sortOrder }),
@@ -103,7 +107,7 @@ export default function SearchScreen() {
   const clearDiscoveryFilters = async () => {
     if (!searchFilterPreferences.isReady || searchFilterPreferences.isSaving) return;
     try {
-      await searchFilterPreferences.applyFilters({ ...appliedSearchFilters, mediaTypes: [], genreFilters: [], countryFilters: [] });
+      await searchFilterPreferences.applyFilters({ ...appliedSearchFilters, mediaTypes: [], genreFilters: [], countryFilters: [], statusFilter: "all", year: "" });
     } catch (error) {
       addToast(error instanceof Error ? error.message : "검색 조건을 저장하지 못했어요. 다시 시도해 주세요.", "error");
     }
@@ -142,6 +146,9 @@ export default function SearchScreen() {
   const [isResolvingAnchor, setIsResolvingAnchor] = useState(false);
   const [anchorResolutionError, setAnchorResolutionError] = useState<string | null>(null);
   const [selectedSimilar, setSelectedSimilar] = useState<SimilarContentResult | null>(null);
+  const [showHiddenResults, setShowHiddenResults] = useState(false);
+  const appliedDiscoveryFilterKey = discoveryFilterKey(discoveryFilters);
+  useEffect(() => { setShowHiddenResults(false); }, [query, appliedDiscoveryFilterKey, statusFilter, year]);
   useEffect(() => {
     setSelectedRecommendation(null); setThemeReductionTarget(null); setSelectedSimilar(null);
     setRecommendationExclusionsVisible(false);
@@ -187,31 +194,21 @@ export default function SearchScreen() {
     return byKey;
   }, [library.data]);
   const baseResults = useMemo(
-    () =>
-      sortByYear(
-        filterByYear(
-          filterResultsByLibraryStatus(
-            mergeSearchResults(
-              search.data?.results ?? [],
-              filterResultsByMediaType(personSearch.data?.results ?? [], mediaType)
-            ),
-            statusFilter,
-            library.data ?? []
-          ),
-          yearFilter
-        ),
-        sortOrder
-      ),
-    [library.data, mediaType, personSearch.data?.results, search.data?.results, sortOrder, statusFilter, yearFilter]
+    () => mergeSearchResults(search.data?.results ?? [], personSearch.data?.results ?? []),
+    [personSearch.data?.results, search.data?.results]
   );
   const genreOptions = useMemo(
     () => baseResults.flatMap((result) => result.genres ?? []),
     [baseResults]
   );
-  const activeResults = useMemo(
-    () => baseResults.filter((result) => matchesDiscoveryFilters(result, discoveryFilters)),
-    [baseResults, discoveryFilters]
+  const partitionedResults = useMemo(
+    () => partitionSearchResults(baseResults, {
+      discoveryFilters, statusFilter, year: yearFilter, libraryItems: library.data ?? []
+    }),
+    [baseResults, discoveryFilters, statusFilter, yearFilter, library.data]
   );
+  const visibleResults = useMemo(() => sortByYear(partitionedResults.visible, sortOrder), [partitionedResults.visible, sortOrder]);
+  const hiddenResults = useMemo(() => sortByYear(partitionedResults.hidden, sortOrder), [partitionedResults.hidden, sortOrder]);
   const isSimilarityMode = similarIntent !== null;
   const isLoading = isSimilarityMode ? isResolvingAnchor || similarSearch.isLoading : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
   const isError = isSimilarityMode ? similarSearch.isError : search.isError && (!PEOPLE_FEATURES_ENABLED || personSearch.isError);
@@ -276,7 +273,8 @@ export default function SearchScreen() {
       : recommendationIsLoading || recommendationIsContinuing
         ? "내 취향에 맞는 최신 작품을 찾는 중이에요. 잠시만 기다려 주세요."
         : null;
-  const displayedResults: SearchResult[] = isSimilarityMode ? similarSearch.data?.items ?? [] : hasSearchInput ? (query.trim().length >= 2 ? activeResults : []) : activeRecommendations;
+  const displayedResults: SearchResult[] = isSimilarityMode ? similarSearch.data?.items ?? [] : hasSearchInput
+    ? (hasSearchQuery ? showHiddenResults ? [...visibleResults, ...hiddenResults] : visibleResults : []) : activeRecommendations;
   const recommendationPresentations = useMemo(
     () => new Map(activeRecommendations.map((item) => [item.canonical_id, mapRecommendationToCardViewModel(item)])),
     [activeRecommendations]
@@ -596,13 +594,13 @@ export default function SearchScreen() {
         genreOptions={genreOptions}
         value={query}
       />
-      {searchFilterPreferences.isReady && !isSimilarityMode && hasDiscoveryFilters ? (
+      {searchFilterPreferences.isReady && !isSimilarityMode && (hasDiscoveryFilters || statusFilter !== "all" || Boolean(year)) ? (
         <View style={styles.discoverySummary}>
           <Text accessibilityLiveRegion="polite" style={styles.discoverySummaryText}>
             적용 중: {discoveryFilterSummary}
           </Text>
           <Pressable
-            accessibilityLabel="작품 유형, 장르, 제작 국가 필터 해제 후 저장"
+            accessibilityLabel="검색 필터 모두 해제 후 저장"
             accessibilityRole="button"
             accessibilityState={{ busy: searchFilterPreferences.isSaving, disabled: searchFilterPreferences.isSaving }}
             disabled={searchFilterPreferences.isSaving}
@@ -926,7 +924,15 @@ export default function SearchScreen() {
       {!SEARCH_RECOMMENDATIONS_ENABLED && !isSimilarityMode && query.trim() === "" ? (
         <EmptyState description="작품 제목을 두 글자 이상 입력해 감상 기록을 시작해 보세요." title="작품을 검색해 보세요" />
       ) : null}
-      {!isSimilarityMode && !isLoading && !isError && hasSearchQuery && activeResults.length === 0 ? (
+      {!isSimilarityMode && !isLoading && !isError && hasSearchQuery && visibleResults.length === 0 && hiddenResults.length > 0 && !showHiddenResults ? (
+        <EmptyState
+          title="필터 조건에 맞는 작품이 없어요"
+          description={`검색 결과 ${hiddenResults.length}개가 현재 필터 때문에 숨겨졌어요.`}
+          actionLabel="필터 없이 보기"
+          onAction={() => setShowHiddenResults(true)}
+        />
+      ) : null}
+      {!isSimilarityMode && !isLoading && !isError && hasSearchQuery && visibleResults.length === 0 && hiddenResults.length === 0 ? (
         <EmptyState
           description={searchFilterLimited ? "검색어와 필터는 유지돼요. 다시 시도를 눌러 작품 정보를 확인해 주세요." : hasDiscoveryFilters ? `${discoveryFilterSummary} 조건을 바꾸거나 다른 작품명이나 배우·성우 이름으로 검색해 보세요.` : "다른 작품명이나 배우·성우 이름으로 검색해 보세요."}
           title={searchFilterLimited ? "검색 결과를 모두 확인하지 못했어요" : hasDiscoveryFilters ? "선택한 조건에 맞는 검색 결과가 없습니다" : "검색 결과가 없습니다"}
@@ -950,12 +956,24 @@ export default function SearchScreen() {
         />
       ) : null}
 
-      {!isSimilarityMode && hasSearchQuery && !isLoading && activeResults.length > 0 ? (
+      {!isSimilarityMode && hasSearchQuery && !isLoading && (visibleResults.length > 0 || hiddenResults.length > 0) ? (
         <View style={styles.resultsHeader}>
           <Text style={styles.sectionTitle}>검색 결과</Text>
           <Text style={styles.resultsHint}>
-            {yearFilter ? `${yearFilter}년 작품만 ` : ""}작품명 검색 결과를 선택한 정렬 순서로 보여줍니다.
+            {yearFilter && !showHiddenResults ? `${yearFilter}년 작품만 ` : ""}작품명 검색 결과를 선택한 정렬 순서로 보여줍니다.
           </Text>
+        </View>
+      ) : null}
+      {!isSimilarityMode && hasSearchQuery && !isLoading && hiddenResults.length > 0 ? (
+        <View style={styles.hiddenResultsNotice}>
+          <Text accessibilityLiveRegion="polite" style={styles.resultsHint}>
+            {showHiddenResults
+              ? `필터 밖 결과 ${hiddenResults.length}개를 함께 보여주고 있어요.`
+              : `필터 조건에 맞지 않아 ${hiddenResults.length}개를 숨겼어요.`}
+          </Text>
+          <Pressable accessibilityRole="button" onPress={() => setShowHiddenResults(value => !value)} style={styles.hiddenResultsButton}>
+            <Text style={styles.inlineRetryText}>{showHiddenResults ? "필터 적용" : "모두 보기"}</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -1021,7 +1039,7 @@ export default function SearchScreen() {
                   <Text style={styles.inlineRetryText}>다시 시도</Text>
                 </Pressable>
               </View>
-            ) : !search.hasNextPage && activeResults.length > 0 ? (
+            ) : !search.hasNextPage && displayedResults.length > 0 ? (
               <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>모든 결과를 확인했습니다.</Text>
             ) : null
           ) : showRecommendationFeed ? (
@@ -1162,13 +1180,6 @@ export default function SearchScreen() {
   );
 }
 
-function filterResultsByMediaType(results: SearchResult[], mediaType: MediaTypeFilter): SearchResult[] {
-  if (mediaType === "all") return results;
-  if (mediaType === "anime") return results.filter((item) => item.content_type === "anime");
-  if (mediaType === "movie") return results.filter((item) => item.content_type === "movie");
-  return results.filter((item) => item.content_type === "kdrama" || item.content_type === "jdrama");
-}
-
 function createExternalKey(result: SearchResult): string {
   return `${result.external_source}:${result.external_id}`;
 }
@@ -1205,22 +1216,6 @@ function isResultAlreadyAdded(
   // whole-work row from before migration 0021 must not disable its add button.
   // A non-season card keeps the old behaviour: any row for the work counts.
   return typeof result.season_number === "number" ? match.kind === "season" : match.kind !== "none";
-}
-
-function filterResultsByLibraryStatus(
-  results: SearchResult[],
-  statusFilter: LibraryStatusFilter,
-  libraryItems: LibraryListItem[]
-): SearchResult[] {
-  if (statusFilter === "all") return results;
-
-  const matchingExternalKeys = new Set(
-    libraryItems
-      .filter((item) => item.statuses.includes(statusFilter) && item.source_api !== "manual")
-      .map((item) => `${item.source_api}:${item.source_id}`)
-  );
-
-  return results.filter((result) => matchingExternalKeys.has(`${result.external_source}:${result.external_id}`));
 }
 
 function mergeSearchResults(titleResults: SearchResult[], personResults: SearchResult[]): SearchResult[] {
@@ -1458,6 +1453,22 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
+  },
+  hiddenResultsNotice: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm
+  },
+  hiddenResultsButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md
   },
   similarHeader: { gap: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.lg },
   similarFilters: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },

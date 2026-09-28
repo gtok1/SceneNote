@@ -5,7 +5,8 @@ import { searchKitsu } from "./adapters/kitsu.ts";
 import {
   compactResults,
   createSearchQueryVariants,
-  filterResultsByCompactQuery
+  filterResponseForVariant,
+  annotateFilterMatches
 } from "./adapters/normalize.ts";
 import { discoverTmdb, filterSearchResultsByDiscovery, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
@@ -43,6 +44,7 @@ interface SearchResponse {
   partial: boolean;
   country_filter_limited?: boolean;
   genre_filter_limited?: boolean;
+  filtered_out_count?: number;
 }
 
 interface SearchJob {
@@ -55,7 +57,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-const SEARCH_CACHE_VERSION = "ko-v13-season-expansion";
+const SEARCH_CACHE_VERSION = "ko-v14-unfiltered-query";
 
 Deno.serve(async (req: Request) => {
   const requestDeadline = Date.now() + 8_500;
@@ -140,9 +142,10 @@ Deno.serve(async (req: Request) => {
 
   const normalizedQuery = query.replace(/\s+/g, " ").trim();
   const queryVariants = createSearchQueryVariants(normalizedQuery);
-  const targetSources = getTargetSources(mediaType).filter((source) => filters.mediaTypes.length === 0 ||
-    source === "tmdb" || ((source === "anilist" || source === "kitsu") && filters.mediaTypes.includes("anime")) ||
-    (source === "tvmaze" && filters.mediaTypes.includes("drama")));
+  const fetchMediaType: MediaTypeFilter = "all";
+  const searchFilters = body.value.mediaTypes === undefined && filters.mediaTypes.length === 0 && mediaType !== "all"
+    ? { ...filters, mediaTypes: [mediaType] } : filters;
+  const targetSources = getTargetSources(fetchMediaType);
   const cachedResults: SearchResult[] = [];
   const cachedTotals: number[] = [];
   const cachedHasNextPages: boolean[] = [];
@@ -151,7 +154,7 @@ Deno.serve(async (req: Request) => {
 
   for (const source of targetSources) {
     for (const queryVariant of queryVariants) {
-      const queryHash = await createQueryHash(queryVariant, mediaType, page, source);
+      const queryHash = await createQueryHash(queryVariant, fetchMediaType, page, source);
       const { data: cacheRow } = await adminClient
         .from("external_search_cache")
         .select("response_json")
@@ -180,7 +183,7 @@ Deno.serve(async (req: Request) => {
   const failedSourceCandidates: ExternalSource[] = [];
 
   if (missedSearches.length > 0) {
-    const calls = missedSearches.map((job) => callAdapter(job.source, job.variant.query, mediaType, page));
+    const calls = missedSearches.map((job) => callAdapter(job.source, job.variant.query, fetchMediaType, page));
     const settled = await Promise.allSettled(calls);
 
     for (const [index, result] of settled.entries()) {
@@ -195,7 +198,7 @@ Deno.serve(async (req: Request) => {
 
       const response = filterResponseForVariant(result.value, searchJob.variant);
       freshResponses.push(response);
-      const queryHash = await createQueryHash(searchJob.variant, mediaType, page, response.source);
+      const queryHash = await createQueryHash(searchJob.variant, fetchMediaType, page, response.source);
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       await adminClient.from("external_search_cache").upsert(
@@ -220,10 +223,12 @@ Deno.serve(async (req: Request) => {
   // Keep the provider page cache independent of the viewer's selected filters.
   // Only the small, reusable production-country evidence is cached separately.
   const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
-  const filtered = await filterSearchResultsByDiscovery(unfilteredResults, filters, {
+  const filtered = await filterSearchResultsByDiscovery(unfilteredResults, searchFilters, {
     cache: countryCache, deadlineMs: requestDeadline, signal: req.signal
   });
-  const results = filtered.results;
+  const hasFilters = searchFilters.genres.length + searchFilters.countries.length + searchFilters.mediaTypes.length > 0;
+  const annotated = annotateFilterMatches(unfilteredResults, filtered.results, hasFilters);
+  const results = annotated.results;
   const successfulSources = [
     ...sourcesFromCache,
     ...freshResponses.map((response) => response.source)
@@ -246,7 +251,8 @@ Deno.serve(async (req: Request) => {
     hasNextPage: cachedHasNextPages.some(Boolean) || freshResponses.some((item) => item.hasNextPage),
     partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
     country_filter_limited: filtered.countryFilterLimited,
-    genre_filter_limited: filtered.genreFilterLimited
+    genre_filter_limited: filtered.genreFilterLimited,
+    filtered_out_count: annotated.filteredOutCount
   };
 
   return json(response);
@@ -448,20 +454,6 @@ async function createQueryHash(
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function filterResponseForVariant(
-  response: AdapterSearchResponse,
-  variant: QueryVariant
-): AdapterSearchResponse {
-  if (variant.matchMode !== "compact-title") return response;
-
-  const results = filterResultsByCompactQuery(response.results, variant.compactQuery);
-  return {
-    ...response,
-    results,
-    total: results.length
-  };
 }
 
 function parseSourceFromError(reason: unknown): ExternalSource | null {

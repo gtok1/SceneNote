@@ -29,6 +29,8 @@ export interface SearchResult {
   season_number?: number;
   duplicate_hint?: boolean;
   matched_people?: string[];
+  filter_match?: boolean;
+  series_title?: string | null;
 }
 
 export interface CastMember {
@@ -53,6 +55,7 @@ export interface SearchContentResponse {
   partial: boolean;
   country_filter_limited?: boolean;
   genre_filter_limited?: boolean;
+  filtered_out_count?: number;
 }
 
 export interface Content {

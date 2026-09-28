@@ -28,6 +28,7 @@ interface SearchContentFunctionResponse {
   partial?: boolean;
   country_filter_limited?: boolean;
   genre_filter_limited?: boolean;
+  filtered_out_count?: number;
   from_cache?: boolean;
   has_next?: boolean;
 }
@@ -90,7 +91,8 @@ export async function searchContent({
     hasNextPage: Boolean(data?.hasNextPage ?? data?.has_next),
     partial: Boolean(data?.partial),
     country_filter_limited: Boolean(data?.country_filter_limited),
-    genre_filter_limited: Boolean(data?.genre_filter_limited)
+    genre_filter_limited: Boolean(data?.genre_filter_limited),
+    filtered_out_count: data?.filtered_out_count ?? 0
   };
 }
 

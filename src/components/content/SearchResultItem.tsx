@@ -8,6 +8,7 @@ import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createLibraryWatchStateLabel } from "@/utils/contentMetaDisplay";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
+import { formatSearchResultTitle } from "@/utils/searchResultTitle";
 
 interface SearchResultItemProps {
   result: SearchResult;
@@ -33,6 +34,7 @@ export const SearchResultItem = memo(function SearchResultItem({
   onFindSimilar
 }: SearchResultItemProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
+  const displayTitle = formatSearchResultTitle(result);
   const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
   const watchCountLabel = createLibraryWatchStateLabel(
     matchLibraryItemForSeason(libraryItems, result.season_number)
@@ -41,13 +43,13 @@ export const SearchResultItem = memo(function SearchResultItem({
   return (
     <View style={styles.card}>
       <Pressable
-        accessibilityLabel={`${result.title_primary} 상세 보기`}
+        accessibilityLabel={`${displayTitle} 상세 보기`}
         accessibilityRole="button"
         onPress={onPress}
         style={styles.mainButton}
       >
         <Image
-          accessibilityLabel={`${result.title_primary} 포스터`}
+          accessibilityLabel={`${displayTitle} 포스터`}
           source={result.poster_url ? { uri: result.poster_url } : null}
           style={styles.poster}
           contentFit="cover"
@@ -55,7 +57,7 @@ export const SearchResultItem = memo(function SearchResultItem({
         <View style={styles.body}>
           <View style={styles.titleRow}>
             <Text numberOfLines={2} style={styles.title}>
-              {result.title_primary}
+              {displayTitle}
             </Text>
             <Text style={styles.source}>{result.external_source.toUpperCase()}</Text>
           </View>
@@ -83,13 +85,13 @@ export const SearchResultItem = memo(function SearchResultItem({
       </Pressable>
       <View style={styles.actions}>
       {onFindSimilar ? (
-        <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
+        <Pressable accessibilityLabel={`${displayTitle} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
           <Text style={styles.similarText}>비슷한 작품</Text>
         </Pressable>
       ) : null}
       {onAddToWishlist ? (
         <Pressable
-          accessibilityLabel={`${result.title_primary} 보고 싶음`}
+          accessibilityLabel={`${displayTitle} 보고 싶음`}
           accessibilityRole="button"
           accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
           disabled={areActionsDisabled}
@@ -101,7 +103,7 @@ export const SearchResultItem = memo(function SearchResultItem({
       ) : null}
       {onMarkCompleted ? (
         <Pressable
-          accessibilityLabel={`${result.title_primary} 완료`}
+          accessibilityLabel={`${displayTitle} 완료`}
           accessibilityRole="button"
           accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
           disabled={areActionsDisabled}

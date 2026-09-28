@@ -35,6 +35,7 @@
 | `docs/32_home_modern_redesign_spec.md` | 홈 모던 스타일 개편 1단계. 디자인 토큰(radius·typography·elevation), 홈 단일 콘텐츠 컨테이너·포스터 타일 격자, 하단 탭 알약 선택 표시 | 홈·공통 테마·하단 탭·카드 스타일 작업 |
 | `docs/33_kr_ott_availability_spec.md` | 추천 피드를 국내 OTT(정액제·무료·광고형) 시청 가능 작품으로 한정, "이번 달 인기 N위" 제거, 보러가기 광고형·해외 제공 안내·AniList 애니 조회·JustWatch 표기 | 추천 후보 수집·추천 카드·작품 상세 보러가기·TMDB 시청 제공처 작업 |
 | `docs/34_search_seasons_and_people_restore_spec.md` | 검색 시즌 카드가 같은 TMDB id로 합쳐지는 결함 정정(서버·클라이언트), 배우·성우 검색과 좋아하는 인물 기능 복원(`PEOPLE_FEATURES_ENABLED`, 인물 탭 6번째 탭). docs/11·19의 인물 제외 결정을 인물 기능에 한해 대체 | 검색 결과 병합·시즌 카드·인물 검색·좋아하는 인물·하단 탭 작업 |
+| `docs/35_search_completeness_and_deploy_drift_spec.md` | "TMDB에 있는데 검색 안 됨" 근본 정정: Edge Function 배포 불일치 점검(`npm run edge:drift`), 저장 필터가 결과를 조용히 버리지 않게(숨김 개수·모두 보기), 실사 일드 애니 오분류, 시즌 카드 시리즈명 표시, 검색 골든셋(`npm run search:golden`) | 검색 결과·검색 필터·Edge Function 배포 확인 작업 |
 
 **규칙**
 

@@ -18,7 +18,9 @@
     "lint": "eslint .",
     "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts supabase/functions/**/*.test.ts supabase/functions/search-content/adapters/*.test.ts",
     "import:netflix": "tsx scripts/import-netflix-tmdb-bulk.ts",
-    "smoke:edge": "tsx scripts/smoke-edge-functions.ts"
+    "smoke:edge": "tsx scripts/smoke-edge-functions.ts",
+    "edge:drift": "tsx scripts/check-edge-drift.ts",
+    "search:golden": "tsx scripts/search-golden.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.0",

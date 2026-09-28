@@ -8,6 +8,7 @@ import {
   expandAiredSeasons,
   filterSearchResultsByDiscovery,
   MAX_EXPANDED_SEASONS,
+  normalizeTmdbItem,
   pickCurrentSeason
 } from "./tmdb.ts";
 import type { SearchResult } from "./types.ts";
@@ -86,6 +87,32 @@ const VIVANT_SEASONS = [
 ];
 const NOW = new Date("2026-09-06T00:00:00Z");
 
+describe("TMDB live-action classification", () => {
+  it("K-1 keeps a Japanese live-action drama based on manga as jdrama", () => {
+    const item = normalizeTmdbItem({
+      id: 55582, name: "고독한 미식가", origin_country: ["JP"],
+      genre_ids: [18], overview: "만화를 원작으로 한 드라마"
+    }, "all");
+    assert.equal(item?.content_type, "jdrama");
+  });
+
+  it("K-2 classifies genre 16 Japanese TV as anime", () => {
+    assert.equal(normalizeTmdbItem({ id: 2, name: "테스트", origin_country: ["JP"], genre_ids: [16, 18] }, "all")?.content_type, "anime");
+  });
+
+  it("K-3 recognizes a Japanese animation title", () => {
+    assert.equal(normalizeTmdbItem({ id: 3, name: "테스트", original_name: "テレビアニメ テスト", origin_country: ["JP"], genre_ids: [18] }, "all")?.content_type, "anime");
+  });
+
+  it("K-4 does not treat the Korean word 애니멀 as anime", () => {
+    assert.equal(normalizeTmdbItem({ id: 4, name: "애니멀 킹덤", origin_country: ["KR"], genre_ids: [10764] }, "all")?.content_type, "kdrama");
+  });
+
+  it("K-5 keeps the explicit Japanese anime title hint", () => {
+    assert.equal(normalizeTmdbItem({ id: 5, name: "황천의 츠가이", origin_country: ["JP"], genre_ids: [18] }, "all")?.content_type, "anime");
+  });
+});
+
 describe("pickCurrentSeason", () => {
   it("picks the most recently started season, not the highest-numbered one", () => {
     const season = pickCurrentSeason(VIVANT_SEASONS, NOW);
@@ -134,6 +161,31 @@ describe("applyCurrentSeasonMetadata", () => {
 });
 
 describe("expandAiredSeasons", () => {
+  it("S-1 preserves a meaningful final-season title and adds its series title", () => {
+    const base = { ...result, title_primary: "진격의 거인" };
+    const cards = expandAiredSeasons(base, [
+      { season_number: 3, name: "시즌 3", air_date: "2018-07-23", episode_count: 12 },
+      { season_number: 4, name: "시즌 4 (The Final Season)", air_date: "2020-12-07", episode_count: 28 }
+    ], NOW);
+    assert.equal(cards[0]?.title_primary, "시즌 4 (The Final Season)");
+    assert.equal(cards[0]?.series_title, "진격의 거인");
+  });
+
+  it("S-2 omits series title when the supplied season title already contains it", () => {
+    const cards = expandAiredSeasons({ ...result, title_primary: "재벌X형사" }, [
+      { season_number: 1, name: "시즌 1", air_date: "2024-01-01" },
+      { season_number: 2, name: "재벌X형사 2", air_date: "2025-01-01" }
+    ], NOW);
+    assert.equal(cards[0]?.series_title, undefined);
+  });
+
+  it("S-3 omits series title for a synthesized season title", () => {
+    const cards = expandAiredSeasons({ ...result, title_primary: "재벌X형사" }, [
+      { season_number: 1, name: "시즌 1", air_date: "2024-01-01" },
+      { season_number: 2, name: "시즌 2", air_date: "2025-01-01" }
+    ], NOW);
+    assert.equal(cards[0]?.series_title, undefined);
+  });
   it("splits a show with two aired seasons into one card each and drops the unaired one", () => {
     const cards = expandAiredSeasons(result, VIVANT_SEASONS, NOW);
     assert.deepEqual(
@@ -182,6 +234,14 @@ describe("expandAiredSeasons", () => {
     ];
     assert.equal(expandAiredSeasons(result, named, NOW)[0]?.title_primary, "별의 계승자");
   });
+});
+
+it("S-4 adds series title to a meaningful explicitly requested season", () => {
+  const updated = applyTmdbSeasonMetadata(result, [
+    { season_number: 2, name: "검성의 귀환", air_date: "2026-07-08", episode_count: 12 }
+  ], 2);
+  assert.equal(updated.title_primary, "검성의 귀환");
+  assert.equal(updated.series_title, "촌구석 아저씨, 검성이 되다");
 });
 
 describe("positive filters over reusable title-search results", () => {

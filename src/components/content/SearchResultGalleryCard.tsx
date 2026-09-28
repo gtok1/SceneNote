@@ -8,6 +8,7 @@ import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createLibraryWatchStateLabel } from "@/utils/contentMetaDisplay";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
+import { formatSearchResultTitle } from "@/utils/searchResultTitle";
 
 interface SearchResultGalleryCardProps {
   result: SearchResult;
@@ -33,6 +34,7 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
   onFindSimilar
 }: SearchResultGalleryCardProps) {
   const episodeLabel = createEpisodeCountLabel(result.episode_count);
+  const displayTitle = formatSearchResultTitle(result);
   const airDateLabel = createAirDateLabel(result.air_date, result.air_year);
   const watchCountLabel = createLibraryWatchStateLabel(
     matchLibraryItemForSeason(libraryItems, result.season_number)
@@ -42,20 +44,20 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
     <View style={styles.cell}>
       <View style={styles.card}>
         <Pressable
-          accessibilityLabel={`${result.title_primary} 상세 보기`}
+          accessibilityLabel={`${displayTitle} 상세 보기`}
           accessibilityRole="button"
           onPress={onPress}
           style={styles.mainButton}
         >
           <Image
-            accessibilityLabel={`${result.title_primary} 포스터`}
+            accessibilityLabel={`${displayTitle} 포스터`}
             contentFit="cover"
             source={result.poster_url ? { uri: result.poster_url } : null}
             style={styles.poster}
           />
           <View style={styles.body}>
             <Text numberOfLines={2} style={styles.title}>
-              {result.title_primary}
+              {displayTitle}
             </Text>
             <Text numberOfLines={1} style={styles.meta}>
               {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
@@ -78,13 +80,13 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
           <Text style={styles.source}>{result.external_source.toUpperCase()}</Text>
           <View style={styles.actions}>
           {onFindSimilar ? (
-            <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
+            <Pressable accessibilityLabel={`${displayTitle} 비슷한 작품 찾기`} accessibilityRole="button" onPress={onFindSimilar} style={styles.similarButton}>
               <Text style={styles.similarText}>비슷한 작품</Text>
             </Pressable>
           ) : null}
           {onAddToWishlist ? (
             <Pressable
-              accessibilityLabel={`${result.title_primary} 보고 싶음`}
+              accessibilityLabel={`${displayTitle} 보고 싶음`}
               accessibilityRole="button"
               accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
               disabled={areActionsDisabled}
@@ -96,7 +98,7 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
           ) : null}
           {onMarkCompleted ? (
             <Pressable
-              accessibilityLabel={`${result.title_primary} 완료`}
+              accessibilityLabel={`${displayTitle} 완료`}
               accessibilityRole="button"
               accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
               disabled={areActionsDisabled}

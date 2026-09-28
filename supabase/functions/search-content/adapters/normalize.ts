@@ -1,4 +1,4 @@
-import type { SearchResult } from "./types.ts";
+import type { AdapterSearchResponse, SearchResult } from "./types.ts";
 
 const MAX_QUERY_VARIANTS = 5;
 
@@ -11,6 +11,33 @@ export interface SearchQueryVariant {
 export interface SeasonQuery {
   baseQuery: string;
   seasonNumber: number;
+}
+
+export function searchResultIdentity(result: Pick<SearchResult, "external_source" | "external_id" | "season_number">): string {
+  return `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
+}
+
+export function annotateFilterMatches(
+  all: readonly SearchResult[], matched: readonly SearchResult[], hasFilters: boolean
+): { results: SearchResult[]; filteredOutCount: number } {
+  if (!hasFilters) return { results: [...all], filteredOutCount: 0 };
+  const matchedByIdentity = new Map(matched.map(result => [searchResultIdentity(result), result]));
+  let filteredOutCount = 0;
+  const results = all.map(result => {
+    const match = matchedByIdentity.get(searchResultIdentity(result));
+    if (match) return { ...match, filter_match: true };
+    filteredOutCount += 1;
+    return { ...result, filter_match: false };
+  });
+  return { results, filteredOutCount };
+}
+
+export function filterResponseForVariant(
+  response: AdapterSearchResponse, variant: SearchQueryVariant
+): AdapterSearchResponse {
+  if (variant.matchMode !== "compact-title") return response;
+  const results = filterResultsByCompactQuery(response.results, variant.compactQuery);
+  return { ...response, results, total: results.length };
 }
 
 export function compactResults(results: SearchResult[]): SearchResult[] {

@@ -1,4 +1,4 @@
-import { cleanText, parseSeasonQuery, yearFromDate } from "./normalize.ts";
+import { cleanText, compactSearchText, parseSeasonQuery, yearFromDate } from "./normalize.ts";
 import { hasTmdbAnimationGenreIds } from "../../_shared/tmdbClassification.ts";
 import { matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../_shared/discoveryFilters.ts";
 import type { RecommendationCache } from "../../_shared/recommendationCache.ts";
@@ -422,6 +422,8 @@ export function applyTmdbSeasonMetadata(
   return {
     ...result,
     title_primary: titlePrimary,
+    ...(meaningfulKoreanTitle && !compactSearchText(meaningfulKoreanTitle).includes(compactSearchText(result.title_primary))
+      ? { series_title: result.title_primary } : {}),
     ...(synthesizedTitle && !meaningfulKoreanTitle ? { title_is_synthesized: true } : {}),
     match_titles: Array.from(new Set([...(result.match_titles ?? []), titlePrimary])),
     season_number: seasonNumber,
@@ -512,6 +514,8 @@ export function expandAiredSeasons(
     return {
       ...result,
       title_primary: titlePrimary,
+      ...(meaningfulTitle && !compactSearchText(meaningfulTitle).includes(compactSearchText(result.title_primary))
+        ? { series_title: result.title_primary } : {}),
       ...(meaningfulTitle ? {} : { title_is_synthesized: true }),
       match_titles: Array.from(new Set([...(result.match_titles ?? []), titlePrimary])),
       season_number: seasonNumber,
@@ -540,7 +544,7 @@ async function fetchTmdbSeasons(
   }
 }
 
-function normalizeTmdbItem(
+export function normalizeTmdbItem(
   item: TmdbSearchItem,
   mediaType: AdapterSearchParams["mediaType"]
 ): SearchResult | null {
@@ -597,12 +601,13 @@ function inferTmdbContentType(item: TmdbSearchItem, isMovie: boolean): ContentTy
 function isLikelyAnime(item: TmdbSearchItem): boolean {
   if (hasTmdbAnimationGenreIds(item.genre_ids)) return true;
 
-  const text = [item.title, item.name, item.original_title, item.original_name, item.overview]
+  // Manga adaptations can be live action; the overview is not classification evidence.
+  const titles = [item.title, item.name, item.original_title, item.original_name]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
-  if (/\banime\b|animation|애니|アニメ|만화/.test(text)) return true;
+  if (/\banime\b|\banimation\b|アニメ/.test(titles)) return true;
 
   const animeTitleHints = [
     "츠가이",
@@ -614,7 +619,7 @@ function isLikelyAnime(item: TmdbSearchItem): boolean {
     "one piece"
   ];
 
-  return Boolean(item.origin_country?.includes("JP") && animeTitleHints.some((hint) => text.includes(hint.toLowerCase())));
+  return Boolean(item.origin_country?.includes("JP") && animeTitleHints.some((hint) => titles.includes(hint.toLowerCase())));
 }
 
 function applyTmdbAuth(url: URL, apiKeyOrToken: string): HeadersInit {

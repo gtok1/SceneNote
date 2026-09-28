@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  annotateFilterMatches,
   compactResults,
   createSearchQueryVariants,
+  filterResponseForVariant,
   filterResultsByCompactQuery,
-  parseSeasonQuery
+  parseSeasonQuery,
+  searchResultIdentity
 } from "./normalize.ts";
 import type { SearchResult } from "./types.ts";
 
@@ -183,5 +186,51 @@ describe("search query normalization", () => {
     assert.equal(compacted[0]?.external_source, "tmdb");
     assert.equal(compacted[0]?.season_number, 1);
     assert.equal(compacted[0]?.duplicate_hint, true);
+  });
+});
+
+describe("search filter annotations", () => {
+  const a = result("A", null, { external_id: "1" });
+  const b = result("B", null, { external_id: "2" });
+  const c = result("C", null, { external_id: "3" });
+  const enrichedB = { ...b, origin_country: ["KR"] };
+
+  it("A-1 preserves all results and uses enriched matches", () => {
+    const annotated = annotateFilterMatches([a, b, c], [enrichedB], true);
+    assert.deepEqual(annotated.results.map(item => item.external_id), ["1", "2", "3"]);
+    assert.deepEqual(annotated.results.map(item => item.filter_match), [false, true, false]);
+    assert.deepEqual(annotated.results[1]?.origin_country, ["KR"]);
+    assert.equal(annotated.filteredOutCount, 2);
+  });
+
+  it("A-2 leaves unfiltered objects and order unchanged", () => {
+    const annotated = annotateFilterMatches([a, b, c], [enrichedB], false);
+    assert.deepEqual(annotated.results, [a, b, c]);
+    assert(annotated.results.every((item, index) => item === [a, b, c][index]));
+    assert(annotated.results.every(item => !("filter_match" in item)));
+    assert.equal(annotated.filteredOutCount, 0);
+  });
+
+  it("A-3 distinguishes seasons with the same provider id", () => {
+    const first = { ...a, season_number: 1 };
+    const second = { ...a, season_number: 2 };
+    assert.deepEqual(annotateFilterMatches([first, second], [second], true).results.map(item => item.filter_match), [false, true]);
+  });
+
+  it("A-4 includes season identity or whole in a key", () => {
+    assert.equal(searchResultIdentity({ ...a, season_number: null as unknown as number }), "tmdb:1:whole");
+    assert.equal(searchResultIdentity({ ...a, season_number: 2 }), "tmdb:1:2");
+  });
+
+  it("N-1 returns a direct adapter response unchanged", () => {
+    const response = { source: "tmdb" as const, results: [a], total: 4, hasNextPage: true };
+    assert.equal(filterResponseForVariant(response, { query: "A", matchMode: "direct", compactQuery: "AAAA" }), response);
+  });
+
+  it("N-2 filters compact-title fallback and updates total", () => {
+    const response = { source: "tmdb" as const, results: [result("신사의 품격"), result("신사와 아가씨")], total: 2 };
+    const filtered = filterResponseForVariant(response, { query: "신사의", matchMode: "compact-title", compactQuery: "신사의품격" });
+    assert.deepEqual(filtered.results.map(item => item.title_primary), ["신사의 품격"]);
+    assert.equal(filtered.total, 1);
   });
 });

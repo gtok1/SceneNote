@@ -36,6 +36,7 @@
 | [32 홈 모던 개편](32_home_modern_redesign_spec.md) | 1단계: 디자인 토큰·홈 레이아웃·포스터 타일·하단 탭 스타일. 다른 화면은 2단계 | 신규: 미구현 |
 | [33 국내 OTT 시청 가능 우선](33_kr_ott_availability_spec.md) | 추천 후보를 국내 OTT 제공작으로 한정, 상대 순위 라벨 제거, 보러가기 광고형·해외 제공 안내·AniList 조회 | 신규: 미구현 |
 | [34 검색 시즌·인물 복원](34_search_seasons_and_people_restore_spec.md) | 시즌 카드 합쳐짐 정정, 배우·성우 검색·좋아하는 인물·인물 탭 복원. 11·19의 인물 제외를 인물 기능에 한해 대체 | 신규: 미구현 |
+| [35 검색 누락·배포 불일치](35_search_completeness_and_deploy_drift_spec.md) | 배포 불일치 점검 도구, 저장 필터의 숨김 결과 표시, 애니 오분류, 시즌 카드 시리즈명, 검색 골든셋 | 신규: 미구현 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

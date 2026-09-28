@@ -24,6 +24,8 @@ export type WatchProvidersByCategory = Record<WatchProviderCategory, WatchProvid
 export interface WatchProvidersResponse {
   external_source: "tmdb";
   external_id: string;
+  tmdb_id?: string | null;
+  other_regions?: string[];
   region: "KR";
   link: string | null;
   providers: WatchProvidersByCategory;

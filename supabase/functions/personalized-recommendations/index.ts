@@ -18,8 +18,10 @@ import {
 } from "../_shared/recommendationImpressions.ts";
 import {
   enrichTmdbRecommendationCandidates,
+  fetchKrWatchRegion,
   fetchRecommendationProviderPage
 } from "../_shared/recommendationProviders.ts";
+import { attachKrOttProviders } from "../_shared/watchProviders.ts";
 import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../_shared/discoveryFilters.ts";
 import {
@@ -278,8 +280,13 @@ Deno.serve(async (req: Request) => {
 
     const failedSources = normalizeFailedSources(result.failedProviders);
     const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
+    const itemsWithProviders = await attachKrOttProviders(
+      result.items,
+      (kind, tmdbId) => fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline }),
+      { deadlineMs: requestDeadline }
+    );
     return json({
-      items: result.items.map((item) => {
+      items: itemsWithProviders.map((item) => {
         if (includeDebug) return { ...item, origin_country: item.countries ?? [] };
         const { candidate_score: _candidateScore, ...publicItem } = item;
         return { ...publicItem, origin_country: item.countries ?? [] };

@@ -57,4 +57,37 @@ describe("search pagination", () => {
       enriched
     );
   });
+
+  it("G-1 keeps two seasons from the first page in order", () => {
+    const merged = mergeSearchPages([page(1, [
+      { ...result("220074"), season_number: 2 },
+      { ...result("220074"), season_number: 1 }
+    ], false)]);
+    assert.deepEqual(merged.map(item => item.season_number), [2, 1]);
+  });
+
+  it("G-2 drops a later whole-show card when seasons came first", () => {
+    const merged = mergeSearchPages([
+      page(1, [{ ...result("220074"), season_number: 2 }, { ...result("220074"), season_number: 1 }], true),
+      page(2, [result("220074")], false)
+    ]);
+    assert.deepEqual(merged.map(item => item.season_number), [2, 1]);
+  });
+
+  it("G-3 removes an earlier whole-show card when seasons arrive later", () => {
+    const merged = mergeSearchPages([
+      page(1, [result("220074")], true),
+      page(2, [{ ...result("220074"), season_number: 1 }, { ...result("220074"), season_number: 2 }], false)
+    ]);
+    assert.deepEqual(merged.map(item => item.season_number), [1, 2]);
+  });
+
+  it("G-4 keeps the first page's duplicate season card", () => {
+    const merged = mergeSearchPages([
+      page(1, [{ ...result("220074"), season_number: 1, poster_url: "A" }], true),
+      page(2, [{ ...result("220074"), season_number: 1, poster_url: "B" }], false)
+    ]);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]?.poster_url, "A");
+  });
 });

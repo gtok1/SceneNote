@@ -14,7 +14,7 @@ SceneNote는 애니메이션·한국/일본 드라마·영화의 감상 기록�
 - 핀 생성·조회·편집·삭제, 태그·감정·스포일러 처리, 홈 최근 기록과 프로필 통계.
 - 검색 화면의 개인화 추천·유사 작품 탐색. 현재 `SEARCH_RECOMMENDATIONS_ENABLED = true`이며 관련 기준은 [검색 추천 복구 명세](docs/22_search_recommendations_restore_spec.md)와 후속 명세를 따른다.
 
-[기능 플래그](src/constants/features.ts)의 `EXTENDED_FEATURES_ENABLED = false`에 따라 인물 화면, 엑셀/사진 가져오기, 취향 리포트 등의 확장 기능은 코드가 있어도 현재 주요 진입에서 숨겨진다. 플래그만으로 모든 확장 경로·서버 기능이 차단되었다고 판단하지 않는다. 예를 들어 평점/리뷰 편집 UI와 공개 공유 경로는 남아 있으므로 [화면 명세](docs/11_screen_implementation_spec.md)의 제외 요구사항과 함께 검토해야 한다.
+[기능 플래그](src/constants/features.ts)의 `EXTENDED_FEATURES_ENABLED = false`에 따라 엑셀/사진 가져오기, 취향 리포트 등의 확장 기능은 코드가 있어도 현재 주요 진입에서 숨겨진다. 배우·성우 검색과 좋아하는 인물(인물 탭·상세·작품 출연 섹션)은 `PEOPLE_FEATURES_ENABLED = true`로 별도 노출한다(docs/34). 플래그만으로 모든 확장 경로·서버 기능이 차단되었다고 판단하지 않는다. 예를 들어 평점/리뷰 편집 UI와 공개 공유 경로는 남아 있으므로 [화면 명세](docs/11_screen_implementation_spec.md)의 제외 요구사항과 함께 검토해야 한다.
 
 ## 구성과 버전 확인 위치
 

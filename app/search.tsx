@@ -1,4 +1,4 @@
-import { EXTENDED_FEATURES_ENABLED, SEARCH_RECOMMENDATIONS_ENABLED } from "@/constants/features";
+import { PEOPLE_FEATURES_ENABLED, SEARCH_RECOMMENDATIONS_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
@@ -25,7 +25,7 @@ import { ThemeReductionSheet } from "@/components/content/ThemeReductionSheet";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
-import { useAddFavoritePerson, usePersonContentSearch } from "@/hooks/usePeople";
+import { useAddFavoritePerson, useFavoritePeople, usePersonContentSearch } from "@/hooks/usePeople";
 import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommendations";
 import { useRecommendationPreferences } from "@/hooks/useRecommendationPreferences";
 import { useSearchFilterPreferences } from "@/hooks/useSearchFilterPreferences";
@@ -113,6 +113,8 @@ export default function SearchScreen() {
   const [similarIntent, setSimilarIntent] = useState<Extract<ParsedSearchIntent, { mode: "similarity" }> | null>(null);
   const search = useContentSearch(query, mediaType, countryFilters, { genres: genreFilters, mediaTypes, enabled: searchFilterPreferences.isReady && focused && online && !similarIntent && parseSearchIntent(query).mode !== "similarity" && query.trim().length >= 2 });
   const personSearch = usePersonContentSearch(searchFilterPreferences.isReady ? query : "", "all");
+  const favoritePeople = useFavoritePeople();
+  const favoritePersonKeys = new Set((favoritePeople.data ?? []).map(person => `${person.source}:${person.external_id}`));
   const library = useLibrary("all");
   const recommendationPreferences = useRecommendationPreferences();
   const recommendationExclusions = useMemo(() => ({
@@ -212,7 +214,7 @@ export default function SearchScreen() {
   );
   const isSimilarityMode = similarIntent !== null;
   const isLoading = isSimilarityMode ? isResolvingAnchor || similarSearch.isLoading : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
-  const isError = isSimilarityMode ? similarSearch.isError : search.isError && (!EXTENDED_FEATURES_ENABLED || personSearch.isError);
+  const isError = isSimilarityMode ? similarSearch.isError : search.isError && (!PEOPLE_FEATURES_ENABLED || personSearch.isError);
   const error = isSimilarityMode ? similarSearch.error : search.error ?? personSearch.error;
   const searchFilterLimited = Boolean(search.data?.country_filter_limited || search.data?.genre_filter_limited);
   const isGallery = viewMode === "gallery";
@@ -290,7 +292,7 @@ export default function SearchScreen() {
     if (SEARCH_RECOMMENDATIONS_ENABLED && intent.mode === "similarity") { void resolveAndStartSimilarity(intent); return; }
     addSearchHistoryQuery(value);
     setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null);
-    void search.refetch(); if (EXTENDED_FEATURES_ENABLED) void personSearch.refetch();
+    void search.refetch(); if (PEOPLE_FEATURES_ENABLED) void personSearch.refetch();
   };
   const refetch = () => { if (!searchFilterPreferences.isReady || !online || !focused) return; if (similarAnchor && similarIntent) { void similarSearch.refetch(); } else runSearch(query); };
   const searchFromHistory = (historyQuery: string) => {
@@ -358,9 +360,15 @@ export default function SearchScreen() {
     });
   };
 
+  const openPersonDetail = (person: PersonSearchResult) => {
+    const key = `${person.source}:${person.external_id}`;
+    router.push({ pathname: "/people/[id]", params: { id: key, source: person.source, externalId: person.external_id, category: person.category } });
+  };
+
   const addPerson = (person: PersonSearchResult) => {
     addFavoritePerson.mutate(person, {
-      onError: (error) => Alert.alert("저장 실패", error.message)
+      onSuccess: () => addToast(`${person.name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openPersonDetail(person) }),
+      onError: (error) => addToast(error.message || "등록하지 못했어요.", "error")
     });
   };
 
@@ -653,21 +661,25 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      {EXTENDED_FEATURES_ENABLED && !isSimilarityMode && hasSearchQuery && personSearch.data?.people.length ? (
+      {PEOPLE_FEATURES_ENABLED && !isSimilarityMode && hasSearchQuery && personSearch.data?.people.length ? (
         <View style={styles.peopleSection}>
           <Text style={styles.sectionTitle}>찾은 인물</Text>
           <View style={styles.peopleList}>
-            {personSearch.data.people.slice(0, 6).map((person) => (
+            {personSearch.data.people.slice(0, 6).map((person) => {
+              const registered = favoritePersonKeys.has(`${person.source}:${person.external_id}`);
+              return (
               <Pressable
+                accessibilityLabel={registered ? `${person.name} 상세 보기` : `${person.name} 좋아하는 인물로 등록`}
                 accessibilityRole="button"
                 key={`${person.source}:${person.external_id}`}
-                onPress={() => addPerson(person)}
+                onPress={() => (registered ? openPersonDetail(person) : addPerson(person))}
                 style={styles.personChip}
               >
                 <Text style={styles.personName}>{person.name}</Text>
-                <Text style={styles.personMeta}>{person.category === "voice_actor" ? "성우 등록" : "배우 등록"}</Text>
+                <Text style={styles.personMeta}>{registered ? "등록됨" : person.category === "voice_actor" ? "성우 등록" : "배우 등록"}</Text>
               </Pressable>
-            ))}
+              );
+            })}
           </View>
         </View>
       ) : null}
@@ -916,7 +928,7 @@ export default function SearchScreen() {
       ) : null}
       {!isSimilarityMode && !isLoading && !isError && hasSearchQuery && activeResults.length === 0 ? (
         <EmptyState
-          description={searchFilterLimited ? "검색어와 필터는 유지돼요. 다시 시도를 눌러 작품 정보를 확인해 주세요." : hasDiscoveryFilters ? `${discoveryFilterSummary} 조건을 바꾸거나 다른 작품명으로 검색해 보세요.` : "다른 작품명으로 검색해 보세요."}
+          description={searchFilterLimited ? "검색어와 필터는 유지돼요. 다시 시도를 눌러 작품 정보를 확인해 주세요." : hasDiscoveryFilters ? `${discoveryFilterSummary} 조건을 바꾸거나 다른 작품명이나 배우·성우 이름으로 검색해 보세요.` : "다른 작품명이나 배우·성우 이름으로 검색해 보세요."}
           title={searchFilterLimited ? "검색 결과를 모두 확인하지 못했어요" : hasDiscoveryFilters ? "선택한 조건에 맞는 검색 결과가 없습니다" : "검색 결과가 없습니다"}
           {...(!searchFilterLimited && hasDiscoveryFilters ? { actionLabel: "장르·국가 필터 변경", onAction: () => searchBarRef.current?.openFilters() } : {})}
         />

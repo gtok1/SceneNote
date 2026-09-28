@@ -1,5 +1,5 @@
 import { Redirect , useRouter } from "expo-router";
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -257,4 +257,4 @@ const styles = StyleSheet.create({
   }
 });
 
-export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <PeopleScreen /> : <Redirect href="/library" />; }
+export default function MvpRoute() { return PEOPLE_FEATURES_ENABLED ? <PeopleScreen /> : <Redirect href="/library" />; }

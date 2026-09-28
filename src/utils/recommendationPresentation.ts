@@ -1,5 +1,6 @@
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
 import { createDisplayGenreNames, getGenreDisplayName } from "@/utils/genre";
+import { formatWatchProviderLabel } from "@/utils/watchProviderDisplay";
 
 import type { RecommendationSignal } from "../../supabase/functions/_shared/recommendationEngine";
 
@@ -11,6 +12,7 @@ export interface RecommendationPresentation {
   recommendationSignals: RecommendationSignal[];
   ratingLabel: string | null;
   popularityLabel: string | null;
+  watchProviderLabel: string | null;
   releaseStatusLabel: string | null;
   metadataLabel: string;
   sourceLabel: string | null;
@@ -51,6 +53,7 @@ export function mapRecommendationToCardViewModel(
     recommendationSignals,
     ratingLabel: buildRatingPresentation(item),
     popularityLabel: buildPopularityPresentation(item),
+    watchProviderLabel: formatWatchProviderLabel(item.watch_providers_kr),
     releaseStatusLabel,
     metadataLabel: buildReleaseMetadata(item),
     sourceLabel: buildSourceLabel(item.external_source),
@@ -172,9 +175,7 @@ export function buildRatingPresentation(item: PersonalizedRecommendation): strin
 
 export function buildPopularityPresentation(item: PersonalizedRecommendation): string | null {
   const popularityCount = finitePositive(item.popularity_count);
-  if (popularityCount) return `관심 ${formatCompactNumber(popularityCount)}`;
-  const rank = finitePositive(item.rank);
-  return rank && rank <= 20 ? `이번 달 인기 ${Math.floor(rank)}위` : null;
+  return popularityCount ? `관심 ${formatCompactNumber(popularityCount)}` : null;
 }
 
 export function buildReleaseStatusLabel(status: string | null | undefined): string | null {

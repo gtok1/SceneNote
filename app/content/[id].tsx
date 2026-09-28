@@ -1,4 +1,4 @@
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { KeyboardAvoidingView, Platform, useWindowDimensions , Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -120,7 +120,9 @@ export default function ContentDetailScreen() {
     source: watchProviderSource,
     externalId: watchProviderExternalId,
     mediaType: watchProviderMediaType,
-    title: watchProviderTitle
+    title: watchProviderTitle,
+    originalTitle: externalDetail.data?.content.title_original ?? params.originalTitle ?? dbContent?.title_original ?? null,
+    airYear: externalDetail.data?.content.air_year ?? (params.airYear ? Number(params.airYear) : null) ?? dbContent?.air_year ?? null
   });
   const resolvedContentId = externalDetail.data?.content.content_id ?? params.id;
   const requestedSeason = parseSeasonParam(params.season);
@@ -263,8 +265,8 @@ export default function ContentDetailScreen() {
         known_for: [view.title].filter(Boolean)
       },
       {
-        onSuccess: () => Alert.alert("등록 완료", `${member.name}을(를) 좋아하는 인물에 등록했습니다.`),
-        onError: (error) => Alert.alert("등록 실패", error.message)
+        onSuccess: () => addToast(`${member.name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openCastMember(member) }),
+        onError: (error) => addToast(error.message || "등록하지 못했어요.", "error")
       }
     );
   };
@@ -489,9 +491,10 @@ export default function ContentDetailScreen() {
           error={watchProviders.error}
           isLoading={watchProviders.isLoading}
           providers={watchProviders.data.providers}
+          otherRegions={watchProviders.data.other_regions ?? []}
         />
 
-        {EXTENDED_FEATURES_ENABLED && view.cast.length ? (
+        {PEOPLE_FEATURES_ENABLED && view.cast.length ? (
           <View style={styles.castSection}>
             <Text style={styles.sectionTitle}>{view.contentType === "anime" ? "성우" : "출연 배우"}</Text>
             <Text style={styles.castHint}>처음 누르면 좋아하는 인물에 등록되고, 등록된 인물은 상세 화면으로 이동합니다.</Text>

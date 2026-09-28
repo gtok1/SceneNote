@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { radius, spacing } from "@/constants/theme";
+import { describeNoKrProviders, pickInitialWatchCategory } from "@/utils/watchProviderDisplay";
 import {
   WATCH_PROVIDER_CATEGORIES,
   WATCH_PROVIDER_CATEGORY_LABEL,
@@ -17,10 +18,18 @@ interface WatchProviderListProps {
   providers: WatchProvidersByCategory;
   isLoading?: boolean;
   error?: string | null;
+  otherRegions?: readonly string[];
 }
 
-export function WatchProviderList({ providers, isLoading = false, error = null }: WatchProviderListProps) {
-  const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>("flatrate");
+export function WatchProviderList({ providers, isLoading = false, error = null, otherRegions = [] }: WatchProviderListProps) {
+  const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategory(providers));
+  const providerIds = WATCH_PROVIDER_CATEGORIES.map(category =>
+    `${category}:${providers[category].map(provider => provider.provider_id).join(",")}`
+  ).join("|");
+  useEffect(() => {
+    setSelectedCategory(pickInitialWatchCategory(providers));
+    // Reset only when the available provider identities change, not after a user's tab selection.
+  }, [providerIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const hasAnyProvider = WATCH_PROVIDER_CATEGORIES.some((category) => providers[category].length > 0);
   const activeProviders = providers[selectedCategory];
 
@@ -36,7 +45,7 @@ export function WatchProviderList({ providers, isLoading = false, error = null }
         <Text style={styles.region}>KR</Text>
       </View>
 
-      <View style={styles.tabs}>
+      {hasAnyProvider ? <View style={styles.tabs}>
         {WATCH_PROVIDER_CATEGORIES.map((category) => {
           const selected = selectedCategory === category;
           const count = providers[category].length;
@@ -56,12 +65,12 @@ export function WatchProviderList({ providers, isLoading = false, error = null }
             </Pressable>
           );
         })}
-      </View>
+      </View> : null}
 
       {isLoading ? <Text style={styles.emptyText}>시청 가능한 플랫폼 정보를 불러오는 중입니다.</Text> : null}
       {!isLoading && error ? <Text style={styles.emptyText}>{error}</Text> : null}
       {!isLoading && !error && !hasAnyProvider ? (
-        <Text style={styles.emptyText}>시청 가능한 플랫폼 정보가 없습니다.</Text>
+        <Text style={styles.emptyText}>{describeNoKrProviders(otherRegions)}</Text>
       ) : null}
       {!isLoading && !error && hasAnyProvider && activeProviders.length === 0 ? (
         <Text style={styles.emptyText}>시청 가능한 플랫폼 정보가 없습니다.</Text>
@@ -93,6 +102,7 @@ export function WatchProviderList({ providers, isLoading = false, error = null }
           ))}
         </View>
       ) : null}
+      <Text style={styles.attribution}>시청 정보 제공: JustWatch</Text>
     </View>
   );
 }
@@ -195,5 +205,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 19
-  }
+  },
+  attribution: { fontSize: 11, color: "#9CA3AF" }
 });

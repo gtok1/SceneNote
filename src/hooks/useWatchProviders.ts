@@ -11,9 +11,11 @@ interface UseWatchProvidersParams {
   externalId: string | undefined;
   mediaType: "movie" | "tv";
   title: string | null | undefined;
+  originalTitle?: string | null;
+  airYear?: number | null;
 }
 
-export function useWatchProviders({ source, externalId, mediaType, title }: UseWatchProvidersParams) {
+export function useWatchProviders({ source, externalId, mediaType, title, originalTitle, airYear }: UseWatchProvidersParams) {
   const [state, setState] = useAtom(watchProvidersAtom);
   const cacheKey = useMemo(
     () => (source && externalId ? `${source}:${mediaType}:${externalId}:KR` : null),
@@ -35,10 +37,14 @@ export function useWatchProviders({ source, externalId, mediaType, title }: UseW
       }));
 
       try {
-        const data =
-          source === "tmdb"
-            ? await getWatchProviders({ source, externalId, mediaType, title })
-            : createEmptyWatchProviders(externalId);
+        const data = await getWatchProviders({
+          source,
+          externalId,
+          mediaType,
+          title,
+          originalTitle: originalTitle ?? null,
+          airYear: airYear ?? null
+        });
 
         setState((current) => ({
           ...current,
@@ -57,7 +63,7 @@ export function useWatchProviders({ source, externalId, mediaType, title }: UseW
         }));
       }
     },
-    [cacheKey, externalId, mediaType, setState, source, state.itemsByKey, state.loadingByKey, title]
+    [airYear, cacheKey, externalId, mediaType, originalTitle, setState, source, state.itemsByKey, state.loadingByKey, title]
   );
 
   useEffect(() => {

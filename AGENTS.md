@@ -33,6 +33,8 @@
 | `docs/30_recommendation_fill_and_action_consistency_fixes_spec.md` | 추천 12개 미달·탐색 시간 초과와 카드 세 번째 행동 아이콘 노출 재수정 명세 | 검색 추천 보충·카드 행동 작업 |
 | `docs/31_usability_review_fixes_spec.md` | 사용성 검토 결함 U-1~U-11. 모바일 핀 열기, 라이브러리 삭제 확인, 회차·시즌 장면순 정렬, 핀 상세 편집/삭제 이동, 에피소드 다음 회차 스크롤, 태그 제안 | 핀 탭·핀 작성·작품 상세·에피소드 목록 작업 |
 | `docs/32_home_modern_redesign_spec.md` | 홈 모던 스타일 개편 1단계. 디자인 토큰(radius·typography·elevation), 홈 단일 콘텐츠 컨테이너·포스터 타일 격자, 하단 탭 알약 선택 표시 | 홈·공통 테마·하단 탭·카드 스타일 작업 |
+| `docs/33_kr_ott_availability_spec.md` | 추천 피드를 국내 OTT(정액제·무료·광고형) 시청 가능 작품으로 한정, "이번 달 인기 N위" 제거, 보러가기 광고형·해외 제공 안내·AniList 애니 조회·JustWatch 표기 | 추천 후보 수집·추천 카드·작품 상세 보러가기·TMDB 시청 제공처 작업 |
+| `docs/34_search_seasons_and_people_restore_spec.md` | 검색 시즌 카드가 같은 TMDB id로 합쳐지는 결함 정정(서버·클라이언트), 배우·성우 검색과 좋아하는 인물 기능 복원(`PEOPLE_FEATURES_ENABLED`, 인물 탭 6번째 탭). docs/11·19의 인물 제외 결정을 인물 기능에 한해 대체 | 검색 결과 병합·시즌 카드·인물 검색·좋아하는 인물·하단 탭 작업 |
 
 **규칙**
 

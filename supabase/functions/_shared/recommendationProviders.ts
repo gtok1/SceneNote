@@ -6,6 +6,8 @@ import type { RecommendationCandidate } from "./recommendationEngine.ts";
 import { inferTmdbTvContentType } from "./tmdbClassification.ts";
 import { normalizeContentThemes, type ContentTheme } from "./recommendationThemes.ts";
 import type { RecommendationCache } from "./recommendationCache.ts";
+import { normalizeTitleForMatch } from "./titleMatch.ts";
+import { applyKrOttDiscoverFilter, type TmdbWatchProviderRegion } from "./watchProviders.ts";
 import type { UserRecommendationFilters } from "./recommendationUserFilters.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, normalizeDiscoveryGenre, type DiscoveryFilterInput } from "./discoveryFilters.ts";
 import {
@@ -136,10 +138,12 @@ const TMDB_MAX_PAGE = 500;
 const TMDB_ANIME_LOCALIZATION_PAGES = 3;
 const PROVIDER_CACHE_TTL_MS = 10 * 60_000;
 const PROVIDER_FAILURE_TTL_MS = 60_000;
-const PROVIDER_CACHE_VERSION = "recommendation-provider-v3";
-const ANILIST_PROVIDER_CACHE_VERSION = "recommendation-provider-anilist-v4";
+const PROVIDER_CACHE_VERSION = "recommendation-provider-v4";
+const ANILIST_PROVIDER_CACHE_VERSION = "recommendation-provider-anilist-v5";
 const KEYWORD_CACHE_VERSION = "recommendation-keywords-v1";
-const LOCALIZATION_CACHE_VERSION = "recommendation-anime-ko-v2";
+const LOCALIZATION_CACHE_VERSION = "recommendation-anime-ko-v3";
+const KR_WATCH_CACHE_VERSION = "kr-ott-watch-v1";
+const KR_WATCH_CACHE_TTL_MS = 24 * 60 * 60_000;
 const PROVIDER_CACHE_MAX_ENTRIES = 300;
 const TMDB_KEYWORD_CACHE_TTL_MS = 24 * 60 * 60_000;
 const TMDB_KEYWORD_FAILURE_TTL_MS = 60_000;
@@ -512,7 +516,7 @@ async function fetchTmdbDramaMonth(
     url.searchParams.set("first_air_date.lte", bounds.endDate);
     url.searchParams.set("include_null_first_air_dates", "false");
     url.searchParams.set("sort_by", "popularity.desc");
-    url.searchParams.set("watch_region", TMDB_REGION);
+    applyKrOttDiscoverFilter(url);
     url.searchParams.set("with_genres", lane.genreIds.join("|"));
     url.searchParams.set("with_origin_country", countries.join("|"));
     if (lane.keywords.length) url.searchParams.set("with_keywords", lane.keywords.map((entry) => entry.id).join("|"));
@@ -548,7 +552,7 @@ async function fetchTmdbMovieMonth(
   url.searchParams.set("primary_release_date.gte", bounds.startDate);
   url.searchParams.set("primary_release_date.lte", bounds.endDate);
   url.searchParams.set("sort_by", "popularity.desc");
-  url.searchParams.set("watch_region", TMDB_REGION);
+  applyKrOttDiscoverFilter(url);
   if (discovery.countries.length) url.searchParams.set("with_origin_country", discovery.countries.join("|"));
   const includedIds = [...new Set(eligibleDiscoveryGenres(discovery.genres, options.filters).map((genre) => tmdbIncludedGenreId(genre, "movie")).filter((id): id is number => typeof id === "number"))];
   if (includedIds.length) url.searchParams.set("with_genres", includedIds.join("|"));
@@ -709,7 +713,8 @@ async function fetchTmdbKoreanAnimeMonth(request: RecommendationProviderRequest,
       url.searchParams.set("first_air_date.lte", bounds.endDate);
       url.searchParams.set("include_null_first_air_dates", "false");
       url.searchParams.set("sort_by", "popularity.desc");
-      url.searchParams.set("watch_region", TMDB_REGION);
+      // 국내 OTT 제공 애니만 한국어 현지화 매칭 대상이 된다. 매칭되지 않은 AniList 후보는 normalizeAniListAnime에서 제외된다 (docs/33 D-3).
+      applyKrOttDiscoverFilter(url);
       url.searchParams.set("with_origin_country", country);
       url.searchParams.set("with_genres", "16");
       const headers = applyTmdbAuth(url, apiKey);
@@ -1026,6 +1031,23 @@ async function writePersisted<T>(
   }
 }
 
+export async function fetchKrWatchRegion(
+  kind: "tv" | "movie",
+  tmdbId: string,
+  options: { cache?: RecommendationCache; deadlineMs?: number } = {}
+): Promise<TmdbWatchProviderRegion | null> {
+  const key = `${KR_WATCH_CACHE_VERSION}:${kind}:${tmdbId}`;
+  const cached = await readPersisted<{ region: TmdbWatchProviderRegion | null }>(options.cache, key, "tmdb", options.deadlineMs);
+  if (cached && typeof cached === "object" && "region" in cached) return cached.region ?? null;
+  const apiKey = requireTmdbApiKey();
+  const url = new URL(`https://api.themoviedb.org/3/${kind}/${tmdbId}/watch/providers`);
+  const headers = applyTmdbAuth(url, apiKey);
+  const payload = await fetchJson<{ results?: Record<string, TmdbWatchProviderRegion | undefined> }>(url.toString(), { headers }, 2_000, options.deadlineMs);
+  const region = payload.results?.KR ?? null;
+  await writePersisted(options.cache, key, "tmdb", { region }, KR_WATCH_CACHE_TTL_MS, options.deadlineMs);
+  return region;
+}
+
 function requireTmdbApiKey(): string {
   const value = Deno.env.get("TMDB_API_KEY");
   if (!value) throw new Error("TMDB_API_KEY is not configured");
@@ -1162,14 +1184,6 @@ function positiveFiniteOrNull(value: number | null | undefined): number | null {
 
 function hasHangul(value: string | null | undefined): boolean {
   return /[가-힣]/u.test(value ?? "");
-}
-
-function normalizeTitleForMatch(value: string | null | undefined): string {
-  return (value ?? "")
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "")
-    .trim();
 }
 
 function sumPositiveAmounts(values: { amount?: number | null }[] | null | undefined): number | null {

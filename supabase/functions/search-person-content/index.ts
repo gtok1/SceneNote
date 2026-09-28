@@ -1,6 +1,7 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
+import { isEligiblePersonCredit, selectPersonCastCredits } from "../_shared/personCredits.ts";
 
 type ContentType = "anime" | "kdrama" | "jdrama" | "movie" | "other";
 type PersonCategory = "actor" | "voice_actor";
@@ -142,7 +143,7 @@ async function searchTmdbPeople(query: string): Promise<{ people: PersonResult[]
     ),
     ...creditResults.flatMap((result) => (result.status === "fulfilled" ? result.value : []))
   ]
-    .filter((item) => item.media_type === "movie" || item.media_type === "tv")
+    .filter(isEligiblePersonCredit)
     .sort((a, b) => {
       const bScore = (b.popularity ?? 0) + (b.vote_count ?? 0) / 1000;
       const aScore = (a.popularity ?? 0) + (a.vote_count ?? 0) / 1000;
@@ -166,6 +167,7 @@ type TmdbCreditItem = {
   first_air_date?: string | null;
   origin_country?: string[];
   genre_ids?: number[];
+  character?: string | null;
   popularity?: number | null;
   vote_count?: number | null;
   matched_person_name?: string | null;
@@ -183,7 +185,7 @@ async function fetchTmdbPersonCredits(personId: string, apiKey: string): Promise
     fetchJson<{ name?: string | null }>(personUrl.toString(), { headers: personHeaders }).catch(() => ({ name: null }))
   ]);
   const matchedPersonName = person.name?.trim() || null;
-  return (payload.cast ?? []).slice(0, 40).map((item) => ({
+  return selectPersonCastCredits(payload.cast ?? []).map((item) => ({
     ...item,
     matched_person_name: matchedPersonName
   }));

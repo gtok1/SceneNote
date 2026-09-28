@@ -52,6 +52,12 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
         </View>
         <View style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>{result.title_primary}</Text>
+          {presentation.watchProviderLabel ? (
+            <View accessibilityLabel={`시청 가능: ${presentation.watchProviderLabel}`} style={styles.watchProviderRow}>
+              <Ionicons name="tv-outline" size={12} color={colors.primary} />
+              <Text numberOfLines={1} style={styles.watchProviderText}>{presentation.watchProviderLabel}</Text>
+            </View>
+          ) : null}
           {presentation.hook ? <Text numberOfLines={2} style={styles.hook}>{presentation.hook}</Text> : null}
           <Text numberOfLines={2} style={styles.meta}>
             {[reactionLabel, presentation.metadataLabel].filter(Boolean).join(" · ")}
@@ -141,6 +147,8 @@ const styles = StyleSheet.create({
   reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
   reasonText: { color: colors.text, fontSize: 12, fontWeight: "700", lineHeight: 17 },
   actions: { flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: spacing.sm },
+  watchProviderRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  watchProviderText: { flexShrink: 1, fontSize: 12, fontWeight: "700", color: colors.primary },
   quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "center", padding: spacing.xs },
   feedbackActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" },
   iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },

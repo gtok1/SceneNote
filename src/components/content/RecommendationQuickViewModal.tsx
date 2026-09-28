@@ -78,6 +78,12 @@ export function RecommendationQuickViewModal({
             <View style={styles.headerTitle}>
               <Text style={styles.eyebrow}>빠른 보기</Text>
               <Text numberOfLines={2} style={styles.title}>{item.title_primary}</Text>
+              {resolvedPresentation.watchProviderLabel ? (
+                <View accessibilityLabel={`시청 가능: ${resolvedPresentation.watchProviderLabel}`} style={styles.watchProviderRow}>
+                  <Ionicons name="tv-outline" size={12} color={colors.primary} />
+                  <Text numberOfLines={1} style={styles.watchProviderText}>{resolvedPresentation.watchProviderLabel}</Text>
+                </View>
+              ) : null}
             </View>
             <Pressable accessibilityLabel="빠른 보기 닫기" accessibilityRole="button" ref={firstRef} onPress={onClose} style={styles.closeButton}>
               <Ionicons color={colors.text} name="close" size={22} />
@@ -179,6 +185,8 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, gap: spacing.xs, paddingRight: spacing.md },
   eyebrow: { color: colors.primary, fontSize: 11, fontWeight: "900" },
   title: { color: colors.text, fontSize: 21, fontWeight: "900", lineHeight: 27 },
+  watchProviderRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  watchProviderText: { flexShrink: 1, fontSize: 12, fontWeight: "700", color: colors.primary },
   closeButton: { alignItems: "center", borderRadius: 20, height: 44, justifyContent: "center", width: 44 },
   scrollContent: { gap: spacing.lg, padding: spacing.lg },
   hero: { alignItems: "flex-start", flexDirection: "row", gap: spacing.lg },

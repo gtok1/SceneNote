@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,14 +12,17 @@ import {
   ArchiveBoxIcon,
   CompassIcon,
   HomeTheaterIcon,
+  PersonChatIcon,
   PinQuoteIcon,
   UserSettingsIcon
 } from "@/components/icons/FooterIcons";
 import { colors, elevation, radius, typography } from "@/constants/theme";
+import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
 import { useAuthStore } from "@/stores/authStore";
 import { getAuthLinkSession } from "@/utils/authLinks";
+import { getBottomNavMetrics } from "@/utils/bottomNavLayout";
 
 export default function RootLayout() {
   return (
@@ -146,13 +149,18 @@ const navItems = [
   { href: "/search", label: "검색", icon: CompassIcon, ariaLabel: "검색으로 이동" },
   { href: "/library", label: "라이브러리", icon: ArchiveBoxIcon, ariaLabel: "라이브러리로 이동" },
   { href: "/pins", label: "핀", icon: PinQuoteIcon, ariaLabel: "핀으로 이동" },
+  { href: "/people", label: "인물", icon: PersonChatIcon, ariaLabel: "인물로 이동" },
   { href: "/profile", label: "프로필", icon: UserSettingsIcon, ariaLabel: "프로필로 이동" }
 ] as const;
+
+const visibleNavItems = navItems.filter(item => PEOPLE_FEATURES_ENABLED || item.href !== "/people");
 
 type NavHref = (typeof navItems)[number]["href"];
 
 function GlobalBottomNav() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const metrics = getBottomNavMetrics(width, visibleNavItems.length);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useGlobalSearchParams();
@@ -166,7 +174,7 @@ function GlobalBottomNav() {
   return (
     <View style={[styles.bottomNav, { paddingBottom: insets.bottom, paddingLeft: Math.max(4, insets.left), paddingRight: Math.max(4, insets.right) }]}>
       <View style={styles.navRow}>
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const active = item.href === activeHref;
           const Icon = item.icon;
 
@@ -186,10 +194,10 @@ function GlobalBottomNav() {
                 focusedHref === item.href ? styles.navItemFocused : null
               ]}
             >
-              <View style={[styles.navIcon, active ? styles.navIconActive : null]}>
+              <View style={[styles.navIcon, { width: metrics.iconPillWidth }, active ? styles.navIconActive : null]}>
                 <Icon active={active} color={active ? colors.primary : colors.textMuted} size={24} />
               </View>
-              <Text style={[styles.navLabel, active ? styles.navLabelActive : null]}>{item.label}</Text>
+              <Text numberOfLines={1} style={[styles.navLabel, { fontSize: metrics.labelFontSize }, active ? styles.navLabelActive : null]}>{item.label}</Text>
             </Pressable>
           );
         })}
@@ -205,6 +213,7 @@ function getActiveNavHref(pathname: string, searchParams: Record<string, unknown
   if (route === "/search" || route.startsWith("/search/")) return "/search";
   if (route === "/library" || route.startsWith("/library/")) return "/library";
   if (route === "/pins" || route.startsWith("/pins/")) return "/pins";
+  if (route === "/people" || route.startsWith("/people/")) return "/people";
   if (route === "/profile" || route.startsWith("/profile/")) return "/profile";
 
   if (route === "/content" || route.startsWith("/content/")) {

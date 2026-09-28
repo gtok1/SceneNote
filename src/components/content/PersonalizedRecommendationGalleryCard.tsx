@@ -63,6 +63,12 @@ export const PersonalizedRecommendationGalleryCard = memo(
 
             <View style={styles.body}>
               <Text numberOfLines={2} style={styles.title}>{result.title_primary}</Text>
+              {presentation.watchProviderLabel ? (
+                <View accessibilityLabel={`시청 가능: ${presentation.watchProviderLabel}`} style={styles.watchProviderRow}>
+                  <Ionicons name="tv-outline" size={12} color={colors.primary} />
+                  <Text numberOfLines={1} style={styles.watchProviderText}>{presentation.watchProviderLabel}</Text>
+                </View>
+              ) : null}
               {presentation.hook ? (
                 <Text numberOfLines={2} style={styles.hook}>{presentation.hook}</Text>
               ) : null}
@@ -169,6 +175,8 @@ const styles = StyleSheet.create({
   },
   body: { gap: 6, minHeight: 196, padding: spacing.sm },
   title: { color: colors.text, fontSize: 14, fontWeight: "900", lineHeight: 18, minHeight: 36 },
+  watchProviderRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  watchProviderText: { flexShrink: 1, fontSize: 12, fontWeight: "700", color: colors.primary },
   hook: { color: colors.text, fontSize: 12, lineHeight: 17, minHeight: 34 },
   meta: { color: colors.textMuted, fontSize: 11, fontWeight: "700", lineHeight: 15 },
   reasonBox: {

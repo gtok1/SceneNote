@@ -31,6 +31,7 @@ export interface PersonalizedRecommendation extends SearchResult {
   rating_scale?: 10 | 100 | null;
   rating_count?: number | null;
   popularity_count?: number | null;
+  watch_providers_kr?: { provider_id: number; name: string }[] | null;
   release_status?: string | null;
   format?: string | null;
   duration_minutes?: number | null;

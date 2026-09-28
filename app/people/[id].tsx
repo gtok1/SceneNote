@@ -1,5 +1,5 @@
 import { Redirect , useLocalSearchParams, useRouter } from "expo-router";
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -1198,4 +1198,4 @@ const styles = StyleSheet.create({
   removeButtonText: { color: colors.danger, fontSize: 13, fontWeight: "900" }
 });
 
-export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <PersonDetailScreen /> : <Redirect href="/library" />; }
+export default function MvpRoute() { return PEOPLE_FEATURES_ENABLED ? <PersonDetailScreen /> : <Redirect href="/library" />; }

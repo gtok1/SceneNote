@@ -34,6 +34,8 @@
 | [28 추천 스크롤 회귀](28_recommendation_scroll_pagination_fixes_spec.md), [29 구현 지시](29_codex_prompt_recommendation_scroll_pagination_fixes.md), [30 추천 보충·행동 일관성](30_recommendation_fill_and_action_consistency_fixes_spec.md) | 추천 추가 로딩·12개 보충·카드 행동 | 유지: 30의 후속 수정 함께 확인 |
 | [31 사용성 결함](31_usability_review_fixes_spec.md) | 핀 열기·삭제 확인·시즌/회차 정렬 등 U-1~U-11 | 요구사항 유지: U-1~U-3 코드 미충족 확인, 전체 완료 아님 |
 | [32 홈 모던 개편](32_home_modern_redesign_spec.md) | 1단계: 디자인 토큰·홈 레이아웃·포스터 타일·하단 탭 스타일. 다른 화면은 2단계 | 신규: 미구현 |
+| [33 국내 OTT 시청 가능 우선](33_kr_ott_availability_spec.md) | 추천 후보를 국내 OTT 제공작으로 한정, 상대 순위 라벨 제거, 보러가기 광고형·해외 제공 안내·AniList 조회 | 신규: 미구현 |
+| [34 검색 시즌·인물 복원](34_search_seasons_and_people_restore_spec.md) | 시즌 카드 합쳐짐 정정, 배우·성우 검색·좋아하는 인물·인물 탭 복원. 11·19의 인물 제외를 인물 기능에 한해 대체 | 신규: 미구현 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

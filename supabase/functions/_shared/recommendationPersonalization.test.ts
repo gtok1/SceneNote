@@ -327,3 +327,19 @@ function generalLibrary(): RecommendationLibraryItem[] {
 function themeFeedback(action: RecommendationFeedback["action"]): RecommendationFeedback {
   return { target_type: "theme", target_key: "relationship:boys-love", action, source_content_id: "source" };
 }
+
+describe("KR OTT exploration wording", () => {
+  it("R-1 uses recent release wording for an unknown theme", () => {
+    const library=generalLibrary();
+    const ranked=rankCandidates(buildPreferenceProfile(library),[themedCandidate("unknown-new",BL_TAG)],{libraryItems:library});
+    assert.match(ranked[0]?.recommendation_reason ?? "",/최근 공개작/u);
+    assert.doesNotMatch(ranked[0]?.recommendation_reason ?? "",/인기/u);
+  });
+  it("R-2 keeps the themed exploration prefix and recent release suffix", () => {
+    const library=generalLibrary();
+    const ranked=rankCandidates(buildPreferenceProfile(library),[themedCandidate("themed-new",REVENGE_TAG)],{libraryItems:library});
+    const reason=ranked[0]?.recommendation_reason ?? "";
+    assert.match(reason,/^기존 선택과 다른 방향으로 /u);
+    assert.match(reason,/최근 공개작을 섞어봤어요\.$/u);
+  });
+});

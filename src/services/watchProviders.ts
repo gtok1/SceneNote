@@ -14,8 +14,10 @@ export async function getWatchProviders(params: {
   externalId: string;
   mediaType: "movie" | "tv";
   title: string | null | undefined;
+  originalTitle?: string | null;
+  airYear?: number | null;
 }): Promise<WatchProvidersResponse> {
-  if (params.source !== "tmdb") {
+  if (params.source !== "tmdb" && params.source !== "anilist") {
     return createEmptyWatchProviders(params.externalId);
   }
 
@@ -25,6 +27,8 @@ export async function getWatchProviders(params: {
       external_id: params.externalId,
       media_type: params.mediaType,
       title: params.title,
+      original_title: params.originalTitle,
+      air_year: params.airYear,
       watch_region: "KR"
     }
   });
@@ -37,6 +41,8 @@ export function createEmptyWatchProviders(externalId: string): WatchProvidersRes
   return {
     external_source: "tmdb",
     external_id: externalId,
+    tmdb_id: null,
+    other_regions: [],
     region: "KR",
     link: null,
     providers: emptyWatchProviders,

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   enrichTmdbRecommendationCandidates,
+  fetchKrWatchRegion,
   fetchRecommendationProviderPage,
   findTmdbKoreanAnimeLocalization,
   TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT,
@@ -160,7 +161,7 @@ describe("recommendation provider query and persistent cache", () => {
     const storedPage = { items: [], hasMore: true };
     const cache: RecommendationCache = {
       async get<T>(key: string, source: "tmdb" | "anilist") {
-        assert.match(key, /^recommendation-provider-v3:tmdb_jp:2024-03:1/);
+        assert.match(key, /^recommendation-provider-v4:tmdb_jp:2024-03:1/);
         assert.equal(source, "tmdb");
         return { page: storedPage, expiresAt: Date.now() + 600_000 } as T;
       },
@@ -208,7 +209,7 @@ describe("recommendation provider query and persistent cache", () => {
   it("reuses persisted Korean localization while fetching a new AniList page", async () => {
     const cache: RecommendationCache = {
       async get<T>(key: string, source: "tmdb" | "anilist") {
-        if (!key.startsWith("recommendation-anime-ko-v2:")) return null;
+        if (!key.startsWith("recommendation-anime-ko-v3:")) return null;
         assert.equal(source, "tmdb");
         return { items: [], expiresAt: Date.now() + 600_000 } as T;
       },
@@ -931,6 +932,51 @@ describe("AniList optional GraphQL filters", () => {
         cache, discoveryFilters: { countries: ["JP"], mediaTypes: ["anime"] }
       });
       assert.equal(graphqlCalls, 1);
+    });
+  });
+});
+
+describe("KR OTT recommendation provider requests", () => {
+  it("P-1 applies the same three KR OTT filters to every discover request", async () => {
+    const urls: URL[]=[];
+    await withMockProviderFetch(async input => {
+      const url=new URL(String(input));
+      if(url.hostname==="graphql.anilist.co") return animePageResponse();
+      if(url.pathname.includes("/discover/")) urls.push(url);
+      return new Response(JSON.stringify({results:[],total_pages:1}));
+    }, async () => {
+      for(const provider of ["tmdb_kr","tmdb_jp","tmdb_movie","anilist"] as const) {
+        await fetchRecommendationProviderPage({provider,month:"2024-11",page:1,asOfDate:"2024-11-20"});
+      }
+    });
+    assert.equal(urls.length,4);
+    assert(urls.some(url=>url.searchParams.get("with_genres")==="16"));
+    for(const url of urls) {
+      assert.equal(url.searchParams.get("watch_region"),"KR");
+      assert.equal(url.searchParams.get("with_watch_providers"),"8|1796|1883|1881|356|337|97|350|119|283");
+      assert.equal(url.searchParams.get("with_watch_monetization_types"),"flatrate|free|ads");
+    }
+  });
+  it("P-4 fetches and persists only the KR region for 24 hours", async () => {
+    const writes:{key:string;value:unknown;ttlMs:number}[]=[];
+    const cache:RecommendationCache={
+      async get<T>(){return null as T | null;},
+      async set(key,_source,value,ttlMs){writes.push({key,value,ttlMs});}
+    };
+    const urls:string[]=[];
+    const kr={flatrate:[{provider_id:8,provider_name:"Netflix"}]};
+    await withMockProviderFetch(async input=>{urls.push(new URL(String(input)).pathname);return new Response(JSON.stringify({results:{KR:kr,JP:{flatrate:[]}}}));}, async()=>{
+      assert.deepEqual(await fetchKrWatchRegion("tv","260463",{cache}),kr);
+    });
+    assert.deepEqual(urls,["/3/tv/260463/watch/providers"]);
+    assert.equal(writes[0]?.key,"kr-ott-watch-v1:tv:260463");
+    assert.deepEqual(writes[0]?.value,{region:kr});
+    assert.equal(writes[0]?.ttlMs,86_400_000);
+  });
+  it("P-5 returns cached null without a network call", async()=>{
+    const cache:RecommendationCache={async get<T>(){return {region:null} as T;},async set(){assert.fail("must not rewrite cache");}};
+    await withMockProviderFetch(async()=>{assert.fail("must not fetch");},async()=>{
+      assert.equal(await fetchKrWatchRegion("tv","260464",{cache}),null);
     });
   });
 });

@@ -7,6 +7,7 @@ import type {
   PersonSearchResult,
   PersonSource
 } from "@/types/people";
+import { romanizeHangulPersonQuery } from "@/utils/personNameRomanization";
 
 export async function searchPersonContent(query: string, category: PersonCategory | "all" = "all") {
   const normalizedQuery = query.trim();
@@ -19,7 +20,27 @@ export async function searchPersonContent(query: string, category: PersonCategor
   });
 
   if (error) throw new Error(error.message);
-  return data ?? { people: [], results: [], failedSources: [], query: normalizedQuery };
+  const primary = data ?? { people: [], results: [], failedSources: [], query: normalizedQuery };
+  const romanizedQuery = romanizeHangulPersonQuery(normalizedQuery);
+  const hasActor = primary.people.some(person => person.category === "actor");
+  if (!romanizedQuery || (category === "all" ? hasActor : primary.people.some(person => person.category === category))) return primary;
+
+  // TMDB often has a Japanese actor's Latin alias but no Korean alternate name.
+  // A failed fallback must not discard a successful primary search.
+  try {
+    const { data: fallback, error: fallbackError } = await supabase.functions.invoke<PersonContentSearchResponse>("search-person-content", {
+      body: { query: romanizedQuery, category: category === "all" ? "actor" : category }
+    });
+    if (fallbackError || !fallback) return primary;
+    return {
+      people: [...primary.people, ...fallback.people],
+      results: [...primary.results, ...fallback.results],
+      failedSources: [...new Set([...primary.failedSources, ...fallback.failedSources])],
+      query: normalizedQuery
+    };
+  } catch {
+    return primary;
+  }
 }
 
 export async function getPersonDetail(params: {

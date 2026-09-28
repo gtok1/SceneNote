@@ -621,14 +621,14 @@ export function buildRecommendationReason(
   if (isExploration) {
     const theme = resolveThemes(candidate)[0];
     const detail = theme ? `${theme.label} 분위기를 담은 ` : "새로운 분위기의 ";
-    return reason("exploration", `기존 선택과 다른 방향으로 ${detail}최신 인기작을 섞어봤어요.`, [], theme ? [theme.label] : [], "weak", "취향 탐색");
+    return reason("exploration", `기존 선택과 다른 방향으로 ${detail}최근 공개작을 섞어봤어요.`, [], theme ? [theme.label] : [], "weak", "취향 탐색");
   }
 
   if (signal?.type === "shared_genres" || signal?.type === "preferred_genres") {
     return reason("broad_genre_match", `${values.join("·")} 장르가 일부 겹쳐요.`, sourceContentIds, values, "weak", "비슷한 점");
   }
 
-  return reason("exploration", "새로운 취향 탐색을 위한 최근 인기작이에요.", [], [], "weak", "취향 탐색");
+  return reason("exploration", "새로운 취향 탐색을 위한 최근 공개작이에요.", [], [], "weak", "취향 탐색");
 }
 
 export function createRecommendationSignals(

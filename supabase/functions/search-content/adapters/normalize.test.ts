@@ -136,4 +136,52 @@ describe("search query normalization", () => {
 
     assert.equal(compacted.length, 2);
   });
+
+  it("T-1 keeps two seasons of the same TMDB show in adapter order", () => {
+    const compacted = compactResults([
+      result("재벌X형사 시즌 2", "재벌X형사", { external_id: "220074", season_number: 2, air_year: 2026 }),
+      result("재벌X형사 시즌 1", "재벌X형사", { external_id: "220074", season_number: 1, air_year: 2024 })
+    ]);
+    assert.equal(compacted.length, 2);
+    assert.deepEqual(compacted.map(item => item.season_number), [2, 1]);
+    assert.deepEqual(compacted.map(item => item.title_primary), ["재벌X형사 시즌 2", "재벌X형사 시즌 1"]);
+  });
+
+  it("T-2 drops a whole-show card when season cards exist", () => {
+    const compacted = compactResults([
+      result("재벌X형사", "재벌X형사", { external_id: "220074", season_number: null }),
+      result("재벌X형사 시즌 1", "재벌X형사", { external_id: "220074", season_number: 1 }),
+      result("재벌X형사 시즌 2", "재벌X형사", { external_id: "220074", season_number: 2 })
+    ]);
+    assert.equal(compacted.length, 2);
+    assert(compacted.every(item => item.season_number != null));
+  });
+
+  it("T-3 merges duplicate cards for the same season", () => {
+    const compacted = compactResults([
+      result("재벌X형사 시즌 1", "재벌X형사", { external_id: "220074", season_number: 1 }),
+      result("재벌X형사 시즌 1", "재벌X형사", { external_id: "220074", season_number: 1, poster_url: "poster.jpg" })
+    ]);
+    assert.equal(compacted.length, 1);
+    assert.equal(compacted[0]?.poster_url, "poster.jpg");
+  });
+
+  it("T-4 keeps two seasons airing in the same year", () => {
+    const compacted = compactResults([
+      result("X 시즌 1", "X", { external_id: "220074", season_number: 1, air_year: 2024, air_date: "2024-01-01" }),
+      result("X 시즌 2", "X", { external_id: "220074", season_number: 2, air_year: 2024, air_date: "2024-10-01" })
+    ]);
+    assert.equal(compacted.length, 2);
+  });
+
+  it("T-5 still merges a TMDB season with a TVmaze whole-show duplicate", () => {
+    const compacted = compactResults([
+      result("재벌X형사 시즌 1", "재벌X형사", { external_source: "tmdb", external_id: "220074", season_number: 1, air_year: 2024 }),
+      result("재벌X형사", "재벌X형사", { external_source: "tvmaze", external_id: "44", season_number: null, air_year: 2024 })
+    ]);
+    assert.equal(compacted.length, 1);
+    assert.equal(compacted[0]?.external_source, "tmdb");
+    assert.equal(compacted[0]?.season_number, 1);
+    assert.equal(compacted[0]?.duplicate_hint, true);
+  });
 });

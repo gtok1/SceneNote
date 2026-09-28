@@ -1,4 +1,4 @@
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { addFavoritePerson, deleteFavoritePerson, getFavoritePeople, getPersonDetail, searchPersonContent } from "@/services/people";
@@ -9,7 +9,7 @@ export function usePersonContentSearch(query: string, category: PersonCategory |
   return useQuery({
     queryKey: ["person-content-search", query.trim(), category],
     queryFn: () => searchPersonContent(query, category),
-    enabled: EXTENDED_FEATURES_ENABLED && query.trim().length >= 2,
+    enabled: PEOPLE_FEATURES_ENABLED && query.trim().length >= 2,
     staleTime: 60_000
   });
 }
@@ -20,7 +20,7 @@ export function useFavoritePeople() {
   return useQuery({
     queryKey: ["favorite-people", user?.id ?? "anonymous"],
     queryFn: getFavoritePeople,
-    enabled: EXTENDED_FEATURES_ENABLED && Boolean(user),
+    enabled: PEOPLE_FEATURES_ENABLED && Boolean(user),
     staleTime: 60_000
   });
 }
@@ -38,7 +38,7 @@ export function usePersonDetail(
         externalId: externalId ?? "",
         category: category as PersonCategory
       }),
-    enabled: EXTENDED_FEATURES_ENABLED && Boolean(source && externalId && category),
+    enabled: PEOPLE_FEATURES_ENABLED && Boolean(source && externalId && category),
     staleTime: 10 * 60_000
   });
 }

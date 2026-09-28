@@ -17,14 +17,20 @@ export function compactResults(results: SearchResult[]): SearchResult[] {
   const byExactKey = new Map<string, SearchResult>();
 
   for (const result of results) {
-    const exactKey = `${result.external_source}:${result.external_id}`;
+    const exactKey = `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
     const previous = byExactKey.get(exactKey);
     byExactKey.set(exactKey, previous ? mergeSearchResult(previous, result) : result);
   }
 
+  const showsWithSeasons = new Set(
+    [...byExactKey.values()]
+      .filter(result => result.season_number != null)
+      .map(result => `${result.external_source}:${result.external_id}`)
+  );
   const compacted: SearchResult[] = [];
 
   for (const result of byExactKey.values()) {
+    if (result.season_number == null && showsWithSeasons.has(`${result.external_source}:${result.external_id}`)) continue;
     const duplicateIndex = compacted.findIndex((item) => areSameWork(item, result));
 
     if (duplicateIndex < 0) {
@@ -124,6 +130,7 @@ export function yearFromDate(value: unknown): number | null {
 }
 
 function areSameWork(left: SearchResult, right: SearchResult): boolean {
+  if (left.season_number != null && right.season_number != null && left.season_number !== right.season_number) return false;
   if (left.content_type !== right.content_type) return false;
   if (left.air_year && right.air_year && left.air_year !== right.air_year) return false;
 

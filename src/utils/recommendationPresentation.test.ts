@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
 import {
+  buildPopularityPresentation,
   buildPersonalizedReason,
   buildRatingPresentation,
   buildRecommendationHook,
@@ -176,5 +177,23 @@ describe("rating and release metadata presentation", () => {
     const presentation = mapRecommendationToCardViewModel(recommendation(), new Date("2026-07-10T00:00:00.000Z"));
     assert.equal(presentation.sourceLabel, "AniList");
     assert.equal(presentation.statusBadges.includes("신작"), true);
+  });
+});
+
+describe("KR OTT recommendation card presentation", () => {
+  it("C-1 omits lane-relative rank without population evidence", () => {
+    assert.equal(buildPopularityPresentation(recommendation({rank:5,popularity_count:null})),null);
+  });
+  it("C-2 labels a verified population count as interest", () => {
+    assert.match(buildPopularityPresentation(recommendation({popularity_count:12000})) ?? "",/^관심 /u);
+  });
+  it("C-3 presents final-card OTT providers", () => {
+    const view=mapRecommendationToCardViewModel(recommendation({watch_providers_kr:[{provider_id:8,name:"넷플릭스"},{provider_id:1883,name:"티빙"}]}));
+    assert.equal(view.watchProviderLabel,"넷플릭스 · 티빙");
+  });
+  it("C-4 omits missing, null and empty OTT provider summaries", () => {
+    assert.equal(mapRecommendationToCardViewModel(recommendation()).watchProviderLabel,null);
+    assert.equal(mapRecommendationToCardViewModel(recommendation({watch_providers_kr:null})).watchProviderLabel,null);
+    assert.equal(mapRecommendationToCardViewModel(recommendation({watch_providers_kr:[]})).watchProviderLabel,null);
   });
 });

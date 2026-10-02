@@ -1,4 +1,5 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
+import { LIBRARY_SHARE_QUERY_CHUNK, chunk } from "../_shared/libraryShare.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
 import type { ContentType, WatchStatus } from "../_shared/types.ts";
 
@@ -93,24 +94,28 @@ Deno.serve(async (req: Request) => {
   }
 
   const contentIds = share.content_ids ?? [];
+  const idChunks = chunk(contentIds, LIBRARY_SHARE_QUERY_CHUNK);
   const [profileResult, libraryResult, reviewsResult, seasonsResult] = await Promise.all([
     adminClient.from("profiles").select("display_name").eq("id", share.owner_user_id).maybeSingle(),
-    adminClient
-      .from("user_library_items")
-      .select(
-        "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at,added_at,updated_at,contents(*,content_genres(genres(name)))"
-      )
-      .eq("user_id", share.owner_user_id)
-      .in("content_id", contentIds),
-    adminClient
-      .from("reviews")
-      .select("content_id,rating,one_line_review")
-      .eq("user_id", share.owner_user_id)
-      .in("content_id", contentIds),
-    adminClient
-      .from("seasons")
-      .select("content_id,episode_count")
-      .in("content_id", contentIds)
+    selectInChunks(idChunks, (ids) =>
+      adminClient
+        .from("user_library_items")
+        .select(
+          "id,user_id,content_id,status,status_flags,watch_count,first_watched_at,last_watched_at,added_at,updated_at,contents(*,content_genres(genres(name)))"
+        )
+        .eq("user_id", share.owner_user_id)
+        .in("content_id", ids)
+    ),
+    selectInChunks(idChunks, (ids) =>
+      adminClient
+        .from("reviews")
+        .select("content_id,rating,one_line_review")
+        .eq("user_id", share.owner_user_id)
+        .in("content_id", ids)
+    ),
+    selectInChunks(idChunks, (ids) =>
+      adminClient.from("seasons").select("content_id,episode_count").in("content_id", ids)
+    )
   ]);
 
   if (profileResult.error) return jsonError(500, "DB_ERROR", profileResult.error.message);
@@ -203,4 +208,14 @@ function extractGenreNames(contentGenres?: ContentRow["content_genres"]): string
         .map((name) => name.trim())
     )
   );
+}
+
+// 공유 작품 ID를 한 번에 `in` 조건으로 보내면 URL이 길어져 실패한다(1000개 ≈ 37KB). 나눠 조회해 이어 붙인다.
+async function selectInChunks<T>(
+  idChunks: string[][],
+  query: (ids: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const results = await Promise.all(idChunks.map((ids) => query(ids)));
+  const error = results.find((result) => result.error)?.error ?? null;
+  return { data: results.flatMap((result) => result.data ?? []), error };
 }

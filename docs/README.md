@@ -37,6 +37,9 @@
 | [33 국내 OTT 시청 가능 우선](33_kr_ott_availability_spec.md) | 추천 후보를 국내 OTT 제공작으로 한정, 상대 순위 라벨 제거, 보러가기 광고형·해외 제공 안내·AniList 조회 | 신규: 미구현 |
 | [34 검색 시즌·인물 복원](34_search_seasons_and_people_restore_spec.md) | 시즌 카드 합쳐짐 정정, 배우·성우 검색·좋아하는 인물·인물 탭 복원. 11·19의 인물 제외를 인물 기능에 한해 대체 | 신규: 미구현 |
 | [35 검색 누락·배포 불일치](35_search_completeness_and_deploy_drift_spec.md) | 배포 불일치 점검 도구, 저장 필터의 숨김 결과 표시, 애니 오분류, 시즌 카드 시리즈명, 검색 골든셋 | 신규: 미구현 |
+| [36 인물 탭 SaaS 개편](36_people_tab_saas_redesign_spec.md) | 32의 토큰·격자 구간으로 인물 탭 재구성, 공용 인물 카드, 빼기 되돌리기, 분류 세그먼트, 검색 디바운스 | 신규: 미구현 |
+| [37 프로필 대시보드 개편](37_profile_dashboard_redesign_spec.md) | 32·36의 토큰·격자로 프로필 재구성, 해외 드라마·올해 본 작품 집계 정정, 연도 그래프 미상 묶음 제외, 장르 TOP 5, 계정 행·웹 탈퇴 확인 | 신규: 미구현 |
+| [38 일본 인물 한글 이름](38_japanese_person_korean_name_spec.md) | 한글 이름 출처 우선순위·관용 표기 변환·저장 칸(0023)·기존 좋아하는 인물 백필·직접 입력 | 신규: 미구현 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

@@ -1,27 +1,54 @@
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View
+} from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { GenreStatsSection } from "@/components/stats/GenreStatsSection";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
+import { AccountSection } from "@/components/profile/AccountSection";
+import { GenreRankingPanel } from "@/components/profile/GenreRankingPanel";
+import { MetricTile } from "@/components/profile/MetricTile";
+import { ProfileHeaderCard } from "@/components/profile/ProfileHeaderCard";
+import { ProfileSkeleton } from "@/components/profile/ProfileSkeleton";
+import { TypeDistributionPanel } from "@/components/profile/TypeDistributionPanel";
+import { YearComparisonPanel } from "@/components/profile/YearComparisonPanel";
 import { TasteReportCard } from "@/components/stats/TasteReportCard";
-import { TypeStatsSection } from "@/components/stats/TypeStatsSection";
-import { YearStatsSection } from "@/components/stats/YearStatsSection";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { useGenreStats } from "@/hooks/useGenreStats";
 import { useLibrary, useLibraryStats } from "@/hooks/useLibrary";
 import { queryClient, queryKeys } from "@/lib/query";
 import { getProfile, updateProfileDisplayName } from "@/services/profile";
+import { useAppUIStore } from "@/stores/appUIStore";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
+import { confirmDestructive } from "@/utils/confirmDestructive";
+import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import {
+  YEAR_CHART_MAX_BARS,
+  YEAR_CHART_MAX_BARS_WIDE,
+  createGenreRanking,
+  createProfileMetrics,
+  getProfileLayout,
+  userFacingErrorMessage
+} from "@/utils/profileDashboard";
 import {
   countCurrentYearWatchedItems,
   createContentTypeStats,
-  createCurrentYearSummary,
   createDisplayGenreStats,
+  createLibraryStatusSummary,
   displayNameFromEmail
 } from "@/utils/profileStats";
 import { shareTasteReportImage } from "@/utils/tasteReportShare";
@@ -32,6 +59,10 @@ export default function ProfileScreen() {
   const stats = useLibraryStats();
   const library = useLibrary("all");
   const genreStats = useGenreStats();
+  const { width } = useWindowDimensions();
+  const layout = getProfileLayout(width);
+  const insets = useSafeAreaInsets();
+  const addToast = useAppUIStore((state) => state.addToast);
   const recommendationExclusionCount = useRecommendationUiStore(
     (state) => state.excludedRecommendations.length
   );
@@ -43,7 +74,6 @@ export default function ProfileScreen() {
     message: string;
   } | null>(null);
   const tasteReportRef = useRef<View | null>(null);
-  const isAccountActionPending = signOut.isPending || deleteAccount.isPending;
   const userId = user?.id ?? "anonymous";
   const profile = useQuery({
     queryKey: queryKeys.profile.detail(userId),
@@ -57,17 +87,21 @@ export default function ProfileScreen() {
       setIsEditingName(false);
     },
     onError: (error) => {
-      Alert.alert("닉네임 저장 실패", error instanceof Error ? error.message : "닉네임을 저장하지 못했습니다.");
+      addToast(
+        userFacingErrorMessage(error, "닉네임을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."),
+        "error"
+      );
     }
   });
 
   const libraryItems = useMemo(() => library.data ?? [], [library.data]);
   const fallbackDisplayName = displayNameFromEmail(user?.email);
   const displayName = profile.data?.display_name?.trim() || fallbackDisplayName;
-  const totalCount = stats.data?.total ?? libraryItems.length;
-  const completedCount = stats.data?.completed ?? 0;
+  // 숫자 카드·분포·연도 그래프가 모두 같은 라이브러리 목록에서 세어져야 서로 맞는다. 핀 수만 DB 집계를 쓴다.
+  const statusSummary = useMemo(() => createLibraryStatusSummary(libraryItems), [libraryItems]);
+  const totalCount = statusSummary.total;
+  const completedCount = statusSummary.completed;
   const pinCount = stats.data?.pins ?? 0;
-  const currentYearSummary = useMemo(() => createCurrentYearSummary(libraryItems), [libraryItems]);
   const currentYearWatchedCount = useMemo(() => countCurrentYearWatchedItems(libraryItems), [libraryItems]);
   const typeStats = useMemo(() => createContentTypeStats(libraryItems), [libraryItems]);
   const reportGenreStats = useMemo(
@@ -83,42 +117,39 @@ export default function ProfileScreen() {
     deleteAccount.isPending ||
     signOut.isPending;
 
+
+  const metrics = useMemo(
+    () => createProfileMetrics({ summary: library.data ? statusSummary : null, pins: stats.data?.pins }),
+    [library.data, statusSummary, stats.data?.pins]
+  );
+  const genreRanking = useMemo(() => createGenreRanking(libraryItems), [libraryItems]);
+
   useEffect(() => {
     setDisplayNameDraft(displayName);
   }, [displayName]);
 
   const handleDeleteAccount = () => {
     if (deleteAccount.isPending) return;
-
-    Alert.alert(
-      "회원 탈퇴",
-      "라이브러리, 에피소드 진행률, 핀, 태그, 리뷰, 좋아하는 인물, 공유 링크 등 모든 개인 기록이 영구 삭제됩니다.",
-      [
-        { text: "취소", style: "cancel" },
-        { text: "계속", onPress: confirmDeleteAccount }
-      ]
-    );
-  };
-
-  const confirmDeleteAccount = () => {
-    Alert.alert(
-      "정말 탈퇴하시겠어요?",
-      "이 작업은 되돌릴 수 없습니다.",
-      [
-        { text: "취소", style: "cancel" },
-        {
-          text: "탈퇴",
-          style: "destructive",
-          onPress: () =>
+    confirmDestructive({
+      title: "회원 탈퇴",
+      message: "라이브러리, 에피소드 진행률, 핀, 태그, 리뷰, 좋아하는 인물, 공유 링크 등 모든 개인 기록이 영구 삭제됩니다.",
+      confirmLabel: "계속",
+      onConfirm: () =>
+        confirmDestructive({
+          title: "정말 탈퇴하시겠어요?",
+          message: "이 작업은 되돌릴 수 없습니다.",
+          confirmLabel: "탈퇴",
+          onConfirm: () =>
             deleteAccount.mutate(undefined, {
               onSuccess: () => router.replace("/sign-in"),
-              onError: (error) => {
-                Alert.alert("회원 탈퇴 실패", error.message);
-              }
+              onError: (error) =>
+                addToast(
+                  userFacingErrorMessage(error, "회원 탈퇴를 처리하지 못했어요. 잠시 후 다시 시도해 주세요."),
+                  "error"
+                )
             })
-        }
-      ]
-    );
+        })
+    });
   };
 
   const startEditingName = () => {
@@ -173,110 +204,104 @@ export default function ProfileScreen() {
     />
   );
 
+
+  const shareButton = (
+    <Pressable
+      accessibilityRole="button"
+      disabled={shareDisabled}
+      onPress={openTasteReportPreview}
+      style={[styles.shareButton, shareDisabled ? styles.actionDisabled : null]}
+    >
+      <Ionicons color={colors.primary} name="image-outline" size={18} />
+      <Text style={styles.shareButtonText}>취향 카드 공유</Text>
+    </Pressable>
+  );
+
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.profile}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileCopy}>
-              <Text style={styles.name}>{displayName}</Text>
-              <Text style={styles.email}>{user?.email ?? "개인 감상 기록"}</Text>
-              {isEditingName ? (
-                <View style={styles.nameEditor}>
-                  <TextInput
-                    accessibilityLabel="닉네임"
-                    autoCapitalize="none"
-                    maxLength={24}
-                    onChangeText={setDisplayNameDraft}
-                    onSubmitEditing={saveDisplayName}
-                    placeholder="닉네임"
-                    placeholderTextColor={colors.textMuted}
-                    returnKeyType="done"
-                    style={styles.nameInput}
-                    value={displayNameDraft}
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={updateDisplayName.isPending}
-                    onPress={saveDisplayName}
-                    style={[styles.nameSaveButton, updateDisplayName.isPending ? styles.actionDisabled : null]}
-                  >
-                    <Text style={styles.nameSaveText}>{updateDisplayName.isPending ? "저장 중" : "저장"}</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={updateDisplayName.isPending}
-                    onPress={() => {
-                      setDisplayNameDraft(displayName);
-                      setIsEditingName(false);
-                    }}
-                    style={styles.nameCancelButton}
-                  >
-                    <Text style={styles.nameCancelText}>취소</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable accessibilityRole="button" onPress={startEditingName} style={styles.editNameButton}>
-                  <Ionicons color={colors.primary} name="create-outline" size={15} />
-                  <Text style={styles.editNameText}>닉네임 변경</Text>
-                </Pressable>
-              )}
-            </View>
-            {EXTENDED_FEATURES_ENABLED ? (<Pressable
-              accessibilityRole="button"
-              disabled={shareDisabled}
-              onPress={openTasteReportPreview}
-              style={[styles.shareButton, shareDisabled ? styles.actionDisabled : null]}
-            >
-              <Ionicons color={colors.primary} name="image-outline" size={18} />
-              <Text style={styles.shareButtonText}>취향 카드 공유</Text>
-            </Pressable>) : null}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 96 }}
+        showsVerticalScrollIndicator={false}
+        style={{ backgroundColor: colors.background, flex: 1 }}
+      >
+        <View
+          style={{
+            alignSelf: "center",
+            gap: layout.gap,
+            maxWidth: HOME_CONTENT_MAX_WIDTH,
+            paddingHorizontal: layout.gutter,
+            width: "100%"
+          }}
+        >
+          <View style={{ paddingTop: insets.top + 12 }}>
+            <Text style={styles.screenTitle}>프로필</Text>
           </View>
+          <ProfileHeaderCard
+            accessory={EXTENDED_FEATURES_ENABLED ? shareButton : undefined}
+            displayName={displayName}
+            draft={displayNameDraft}
+            email={user?.email ?? null}
+            isEditing={isEditingName}
+            onCancel={() => {
+              setDisplayNameDraft(displayName);
+              setIsEditingName(false);
+            }}
+            onChangeDraft={setDisplayNameDraft}
+            onSave={saveDisplayName}
+            onStartEdit={startEditingName}
+            saving={updateDisplayName.isPending}
+          />
           {EXTENDED_FEATURES_ENABLED && !hasLibraryItems ? (
             <Text style={styles.shareHint}>작품을 추가하면 내 취향 카드를 만들 수 있어요.</Text>
           ) : null}
+          {library.isLoading && !library.data ? (
+            <ProfileSkeleton layout={layout} />
+          ) : library.isError && !library.data ? (
+            <ErrorState message="통계를 불러오지 못했어요." onRetry={() => library.refetch()} />
+          ) : (
+            <>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: layout.gap }}>
+                {metrics.map((metric) => (
+                  <MetricTile key={metric.key} metric={metric} width={layout.metricWidth} />
+                ))}
+              </View>
+              {totalCount === 0 ? (
+                <EmptyState
+                  actionLabel="작품 검색하기"
+                  description="작품을 라이브러리에 추가하면 취향 통계가 여기에 모여요."
+                  onAction={() => router.push("/search")}
+                  title="아직 통계가 없어요"
+                />
+              ) : (
+                <View style={{ alignItems: "stretch", flexDirection: "row", flexWrap: "wrap", gap: layout.gap }}>
+                  <TypeDistributionPanel
+                    stats={typeStats}
+                    totalCount={libraryItems.length}
+                    wide={layout.panelWide}
+                    width={layout.panelWidth}
+                  />
+                  <GenreRankingPanel ranking={genreRanking} width={layout.panelWidth} />
+                  <YearComparisonPanel
+                    items={libraryItems}
+                    maxBars={layout.contentWidth >= 600 ? YEAR_CHART_MAX_BARS_WIDE : YEAR_CHART_MAX_BARS}
+                    width={layout.contentWidth}
+                  />
+                </View>
+              )}
+            </>
+          )}
+          <AccountSection
+            deleting={deleteAccount.isPending}
+            exclusionCount={recommendationExclusionCount}
+            onDeleteAccount={handleDeleteAccount}
+            onOpenExclusions={
+              EXTENDED_FEATURES_ENABLED ? () => router.push("/settings/excluded-recommendations") : undefined
+            }
+            onSignOut={() => signOut.mutate()}
+            signingOut={signOut.isPending}
+            width={layout.panelWidth}
+          />
         </View>
-
-        <View style={styles.stats}>
-          <Stat label="등록 작품" value={totalCount} />
-          <Stat label="완료" value={completedCount} />
-          <Stat label="핀" value={pinCount} />
-          <Stat label={currentYearSummary.label} value={currentYearSummary.value} />
-        </View>
-
-        <TypeStatsSection />
-        <YearStatsSection />
-        <GenreStatsSection />
-
-        {EXTENDED_FEATURES_ENABLED ? (<Pressable
-          accessibilityRole="button"
-          onPress={() => router.push("/settings/excluded-recommendations")}
-          style={styles.settingsRow}
-        >
-          <View style={styles.settingsRowCopy}>
-            <Text style={styles.settingsRowTitle}>추천에서 제외한 작품</Text>
-            <Text style={styles.settingsRowMeta}>{recommendationExclusionCount}개</Text>
-          </View>
-          <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
-        </Pressable>) : null}
-
-        <Pressable
-          accessibilityRole="button"
-          disabled={isAccountActionPending}
-          onPress={() => signOut.mutate()}
-          style={[styles.logout, isAccountActionPending ? styles.actionDisabled : null]}
-        >
-          <Text style={styles.logoutText}>{signOut.isPending ? "로그아웃 중" : "로그아웃"}</Text>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          disabled={isAccountActionPending}
-          onPress={handleDeleteAccount}
-          style={[styles.deleteAccount, isAccountActionPending ? styles.actionDisabled : null]}
-        >
-          <Text style={styles.danger}>{deleteAccount.isPending ? "탈퇴 처리 중" : "회원 탈퇴"}</Text>
-        </Pressable>
       </ScrollView>
 
       <Modal
@@ -348,7 +373,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {hasLibraryItems ? (
+      {EXTENDED_FEATURES_ENABLED && hasLibraryItems ? (
         <View pointerEvents="none" style={styles.captureLayer}>
           {reportCard}
         </View>
@@ -357,108 +382,10 @@ export default function ProfileScreen() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | undefined }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{value ?? "--"}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    gap: spacing.lg,
-    padding: spacing.lg,
-    paddingBottom: 24
-  },
-  profile: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: spacing.md,
-    padding: spacing.lg
-  },
-  profileHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-    justifyContent: "space-between"
-  },
-  profileCopy: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 180
-  },
-  name: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "800"
-  },
-  email: {
-    color: colors.textMuted,
-    fontSize: 13
-  },
-  editNameButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    gap: spacing.xs,
-    minHeight: 30
-  },
-  editNameText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "900"
-  },
-  nameEditor: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginTop: spacing.xs
-  },
-  nameInput: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "800",
-    minHeight: 40,
-    minWidth: 180,
-    outlineStyle: "none" as never,
-    paddingHorizontal: spacing.md
-  },
-  nameSaveButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    minHeight: 40,
-    paddingHorizontal: spacing.md
-  },
-  nameSaveText: {
-    color: colors.surface,
-    fontSize: 13,
-    fontWeight: "900",
-    lineHeight: 40
-  },
-  nameCancelButton: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
-    minHeight: 40,
-    paddingHorizontal: spacing.md
-  },
-  nameCancelText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "900",
-    lineHeight: 40
+  screenTitle: {
+    ...typography.display,
+    color: colors.text
   },
   shareButton: {
     alignItems: "center",
@@ -479,75 +406,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700"
   },
-  stats: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm
-  },
-  settingsRow: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 64,
-    paddingHorizontal: spacing.lg
-  },
-  settingsRowCopy: {
-    gap: 2
-  },
-  settingsRowTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  settingsRowMeta: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  stat: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexBasis: 132,
-    flexGrow: 1,
-    padding: spacing.md
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "900"
-  },
-  statLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  logout: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    padding: spacing.lg
-  },
-  logoutText: {
-    color: colors.surface,
-    fontWeight: "800"
-  },
   actionDisabled: {
     opacity: 0.5
-  },
-  deleteAccount: {
-    alignItems: "center",
-    padding: spacing.md
-  },
-  danger: {
-    color: colors.danger,
-    fontWeight: "700",
-    textAlign: "center"
   },
   modalBackdrop: {
     alignItems: "center",

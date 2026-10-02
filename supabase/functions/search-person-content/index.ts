@@ -2,6 +2,8 @@ import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
 import { isEligiblePersonCredit, selectPersonCastCredits } from "../_shared/personCredits.ts";
+import { hasHangul, hasJapaneseScript, resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
+import { anilistKoreanNameInput, tmdbKoreanNameInput, type TmdbPersonNameDetail } from "../_shared/personNames.ts";
 
 type ContentType = "anime" | "kdrama" | "jdrama" | "movie" | "other";
 type PersonCategory = "actor" | "voice_actor";
@@ -35,6 +37,8 @@ interface PersonResult {
   original_name: string | null;
   profile_url: string | null;
   known_for: string[];
+  name_ko: string | null;
+  name_ko_source: Exclude<KoreanNameSource, "user"> | null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -120,12 +124,16 @@ async function searchTmdbPeople(query: string): Promise<{ people: PersonResult[]
     .filter((person) => person.known_for_department === "Acting" || (person.known_for?.length ?? 0) > 0)
     .slice(0, 6);
 
-  const people = candidatePeople.map((person) => ({
+  const koreanNames = await Promise.all(candidatePeople.map((person) => resolveTmdbKoreanName(person, apiKey)));
+
+  const people = candidatePeople.map((person, index) => ({
       source: "tmdb" as const,
       external_id: String(person.id),
       category: "actor" as const,
       name: person.name?.trim() || person.original_name?.trim() || "Unknown",
       original_name: person.original_name?.trim() || null,
+      name_ko: koreanNames[index]?.nameKo ?? null,
+      name_ko_source: koreanNames[index]?.source ?? null,
       profile_url: person.profile_path ? `https://image.tmdb.org/t/p/w185${person.profile_path}` : null,
       known_for: (person.known_for ?? []).slice(0, 3).map((item) => item.title || item.name || "").filter(Boolean)
     }));
@@ -173,6 +181,35 @@ type TmdbCreditItem = {
   matched_person_name?: string | null;
 };
 
+type ResolvedKoreanName = ReturnType<typeof resolveKoreanName>;
+
+function koreanNameFields(resolved: ResolvedKoreanName): Pick<PersonResult, "name_ko" | "name_ko_source"> {
+  return { name_ko: resolved?.nameKo ?? null, name_ko_source: resolved?.source ?? null };
+}
+
+// 한글 이름이 이미 있으면 추가 조회 없이 판정하고, 번역이 없는 일본 인물만 상세를 한 번 더 조회한다.
+// 조회 실패는 이름을 못 찾은 것으로 취급하고 검색은 계속한다.
+async function resolveTmdbKoreanName(
+  person: { id: number; name?: string | null; original_name?: string | null },
+  apiKey: string
+): Promise<ResolvedKoreanName> {
+  if (hasHangul(person.name)) {
+    return resolveKoreanName({ nativeName: person.original_name?.trim() || null, localizedName: person.name?.trim() || null });
+  }
+  if (!hasJapaneseScript(person.name) && !hasJapaneseScript(person.original_name)) return null;
+
+  try {
+    const url = new URL(`https://api.themoviedb.org/3/person/${person.id}`);
+    url.searchParams.set("language", "ko-KR");
+    url.searchParams.set("append_to_response", "translations");
+    const headers = applyTmdbAuth(url, apiKey);
+    const detail = await fetchJson<TmdbPersonNameDetail>(url.toString(), { headers });
+    return resolveKoreanName(tmdbKoreanNameInput(detail));
+  } catch {
+    return null;
+  }
+}
+
 async function fetchTmdbPersonCredits(personId: string, apiKey: string): Promise<TmdbCreditItem[]> {
   const url = new URL(`https://api.themoviedb.org/3/person/${personId}/combined_credits`);
   url.searchParams.set("language", "ko-KR");
@@ -215,7 +252,7 @@ const STAFF_QUERY = `
     Page(page: 1, perPage: 8) {
       staff(search: $search, sort: [SEARCH_MATCH, FAVOURITES_DESC]) {
         id
-        name { full native }
+        name { first last full native alternative }
         image { large medium }
         staffMedia(page: 1, perPage: 8, type: ANIME, sort: [POPULARITY_DESC]) {
           nodes {
@@ -244,7 +281,7 @@ async function searchAniListStaff(query: string): Promise<{ people: PersonResult
       Page?: {
         staff?: {
           id: number;
-          name?: { full?: string | null; native?: string | null } | null;
+          name?: { first?: string | null; last?: string | null; full?: string | null; native?: string | null; alternative?: (string | null)[] | null } | null;
           image?: { large?: string | null; medium?: string | null } | null;
           staffMedia?: {
             nodes?: {
@@ -276,6 +313,7 @@ async function searchAniListStaff(query: string): Promise<{ people: PersonResult
     category: "voice_actor" as const,
     name: person.name?.native?.trim() || person.name?.full?.trim() || "Unknown",
     original_name: person.name?.full?.trim() || null,
+    ...koreanNameFields(resolveKoreanName(anilistKoreanNameInput(person.name))),
     profile_url: person.image?.large ?? person.image?.medium ?? null,
     known_for: (person.staffMedia?.nodes ?? [])
       .slice(0, 3)

@@ -47,6 +47,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="people"
         options={{
+          headerShown: false,
           title: "인물",
           tabBarIcon: ({ color, size }) => <Ionicons color={color} name="star-outline" size={size} />
         }}
@@ -54,6 +55,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          headerShown: false,
           title: "프로필",
           tabBarIcon: ({ color, size }) => <Ionicons color={color} name="person-outline" size={size} />
         }}

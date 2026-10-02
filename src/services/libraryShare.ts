@@ -1,5 +1,12 @@
+import { LIBRARY_SHARE_MAX_ITEMS } from "../../supabase/functions/_shared/libraryShare";
 import { supabase } from "@/lib/supabase";
 import { getLibraryItems } from "@/services/library";
+import {
+  type LibraryShareAction,
+  type LibraryShareErrorInfo,
+  libraryShareErrorMessage,
+  tooManyShareItemsMessage
+} from "@/utils/libraryShareErrors";
 import type { Json } from "@/types/database";
 import type { LibraryListItem } from "@/types/library";
 import type { LibraryShareDetail, LibraryShareFilters, LibraryShareSummary } from "@/types/libraryShare";
@@ -45,10 +52,13 @@ export async function createLibraryShare(params: {
   filters: LibraryShareFilters;
   contentIds: string[];
 }): Promise<LibraryShareSummary> {
+  const contentIds = Array.from(new Set(params.contentIds));
+  if (contentIds.length > LIBRARY_SHARE_MAX_ITEMS) throw new Error(tooManyShareItemsMessage(LIBRARY_SHARE_MAX_ITEMS));
+
   const body = {
     title: params.title,
     filters: params.filters,
-    content_ids: params.contentIds
+    content_ids: contentIds
   };
 
   const { data, error } = await supabase.functions.invoke<CreateLibraryShareResponse>("create-library-share", { body });
@@ -56,11 +66,36 @@ export async function createLibraryShare(params: {
   if (!error && data) return toLibraryShareSummary(data);
 
   if (error && shouldFallbackToDirectShare(error)) {
-    return createLibraryShareDirectly(params);
+    return createLibraryShareDirectly({ ...params, contentIds });
   }
 
-  if (error) throw new Error(toFunctionErrorMessage(error));
+  if (error) throw new Error(await toShareFunctionErrorMessage(error, "create"));
   throw new Error("공유 링크 생성 응답이 비어 있습니다.");
+}
+
+async function toShareFunctionErrorMessage(error: unknown, action: LibraryShareAction): Promise<string> {
+  const info = await readShareFunctionError(error);
+  if (info.message && isMissingShareTableMessage(info.message)) return SHARE_TABLE_MISSING_MESSAGE;
+  return libraryShareErrorMessage(info, action);
+}
+
+// supabase-js의 FunctionsHttpError는 context에 응답(Response)을 담는다. 본문의 { error, message, max_items }를 읽는다.
+async function readShareFunctionError(error: unknown): Promise<LibraryShareErrorInfo> {
+  const info: LibraryShareErrorInfo = { status: getFunctionHttpStatus(error), code: null, message: null, maxItems: null };
+  const context = (error as { context?: { clone?: () => { json: () => Promise<unknown> } } } | null)?.context;
+  if (typeof context?.clone !== "function") return info;
+
+  try {
+    const body = (await context.clone().json()) as { error?: unknown; message?: unknown; max_items?: unknown } | null;
+    return {
+      ...info,
+      code: typeof body?.error === "string" ? body.error : null,
+      message: typeof body?.message === "string" ? body.message : null,
+      maxItems: typeof body?.max_items === "number" ? body.max_items : null
+    };
+  } catch {
+    return info;
+  }
 }
 
 function toLibraryShareSummary(data: CreateLibraryShareResponse): LibraryShareSummary {
@@ -160,7 +195,7 @@ export async function getLibraryShare(id: string): Promise<LibraryShareDetail> {
     return getLibraryShareDirectly(id);
   }
 
-  if (error) throw new Error(toCreateShareErrorMessage(toFunctionErrorMessage(error)));
+  if (error) throw new Error(await toShareFunctionErrorMessage(error, "open"));
   if (!data) throw new Error("공유 목록 응답이 비어 있습니다.");
 
   return {

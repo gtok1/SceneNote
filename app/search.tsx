@@ -53,6 +53,7 @@ import { createSearchFilterDraft } from "@/utils/searchFilterDraft";
 import { partitionSearchResults } from "@/utils/searchResultVisibility";
 import { discoveryFilterKey, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
 import { shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
+import { formatPersonName } from "@/utils/japaneseName";
 import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
 import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
 import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus, type SimilaritySort } from "@/utils/similarSearchIntent";
@@ -365,7 +366,7 @@ export default function SearchScreen() {
 
   const addPerson = (person: PersonSearchResult) => {
     addFavoritePerson.mutate(person, {
-      onSuccess: () => addToast(`${person.name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openPersonDetail(person) }),
+      onSuccess: () => addToast(`${formatPersonName(person).name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openPersonDetail(person) }),
       onError: (error) => addToast(error.message || "등록하지 못했어요.", "error")
     });
   };
@@ -667,13 +668,13 @@ export default function SearchScreen() {
               const registered = favoritePersonKeys.has(`${person.source}:${person.external_id}`);
               return (
               <Pressable
-                accessibilityLabel={registered ? `${person.name} 상세 보기` : `${person.name} 좋아하는 인물로 등록`}
+                accessibilityLabel={registered ? `${formatPersonName(person).name} 상세 보기` : `${formatPersonName(person).name} 좋아하는 인물로 등록`}
                 accessibilityRole="button"
                 key={`${person.source}:${person.external_id}`}
                 onPress={() => (registered ? openPersonDetail(person) : addPerson(person))}
                 style={styles.personChip}
               >
-                <Text style={styles.personName}>{person.name}</Text>
+                <Text style={styles.personName}>{formatPersonName(person).name}</Text>
                 <Text style={styles.personMeta}>{registered ? "등록됨" : person.category === "voice_actor" ? "성우 등록" : "배우 등록"}</Text>
               </Pressable>
               );

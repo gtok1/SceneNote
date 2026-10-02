@@ -1,4 +1,5 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
+import { LIBRARY_SHARE_MAX_ITEMS, LIBRARY_SHARE_QUERY_CHUNK, chunk } from "../_shared/libraryShare.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 
 interface CreateLibraryShareRequest {
@@ -7,7 +8,6 @@ interface CreateLibraryShareRequest {
   content_ids?: string[];
 }
 
-const MAX_SHARED_ITEMS = 300;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (req: Request) => {
@@ -26,20 +26,24 @@ Deno.serve(async (req: Request) => {
 
   const contentIds = normalizeContentIds(body.value.content_ids);
   if (!contentIds.length) return jsonError(400, "INVALID_REQUEST", "content_ids are required");
-  if (contentIds.length > MAX_SHARED_ITEMS) {
-    return jsonError(400, "TOO_MANY_ITEMS", `Share up to ${MAX_SHARED_ITEMS} items at once`);
+  if (contentIds.length > LIBRARY_SHARE_MAX_ITEMS) {
+    return jsonError(400, "TOO_MANY_ITEMS", `Share up to ${LIBRARY_SHARE_MAX_ITEMS} items at once`, {
+      max_items: LIBRARY_SHARE_MAX_ITEMS
+    });
   }
 
   const adminClient = createAdminClient();
-  const { data: ownedRows, error: ownedError } = await adminClient
-    .from("user_library_items")
-    .select("content_id")
-    .eq("user_id", userId)
-    .in("content_id", contentIds);
-
+  const ownedResults = await Promise.all(
+    chunk(contentIds, LIBRARY_SHARE_QUERY_CHUNK).map((ids) =>
+      adminClient.from("user_library_items").select("content_id").eq("user_id", userId).in("content_id", ids)
+    )
+  );
+  const ownedError = ownedResults.find((result) => result.error)?.error;
   if (ownedError) return jsonError(500, "DB_ERROR", ownedError.message);
 
-  const ownedSet = new Set((ownedRows ?? []).map((row) => row.content_id as string));
+  const ownedSet = new Set(
+    ownedResults.flatMap((result) => (result.data ?? []).map((row) => row.content_id as string))
+  );
   const validatedContentIds = contentIds.filter((contentId) => ownedSet.has(contentId));
   if (!validatedContentIds.length) return jsonError(400, "INVALID_REQUEST", "No owned library items to share");
 

@@ -19,6 +19,7 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
+import { KoreanNameEditor } from "@/components/people/KoreanNameEditor";
 import { colors, radius, spacing } from "@/constants/theme";
 import {
   useAddToLibrary,
@@ -26,12 +27,15 @@ import {
   useLibrary,
   useUpdateLibraryStatus
 } from "@/hooks/useLibrary";
-import { usePersonDetail } from "@/hooks/usePeople";
+import { useFavoritePeople, usePersonDetail, useSetFavoriteKoreanName } from "@/hooks/usePeople";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useAuthStore } from "@/stores/authStore";
 import type { LibraryListItem } from "@/types/library";
 import type { PersonCategory, PersonCredit, PersonSource } from "@/types/people";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
+import { formatPersonName } from "@/utils/japaneseName";
+import { personKey } from "@/utils/peopleScreen";
+import { pickKoreanName } from "@/utils/personKoreanName";
 import {
   createPersonCreditKey,
   dedupeValidPersonCredits,
@@ -85,6 +89,8 @@ function PersonDetailScreen() {
   const parsed = parsePersonParams(params);
   const activeFilter = parsePersonCreditFilter(params.filter);
   const detail = usePersonDetail(parsed.source, parsed.externalId, parsed.category);
+  const favorites = useFavoritePeople();
+  const setKoreanName = useSetFavoriteKoreanName();
   const library = useLibrary("all");
   const addToLibrary = useAddToLibrary();
   const updateLibraryStatus = useUpdateLibraryStatus();
@@ -305,6 +311,22 @@ function PersonDetailScreen() {
   if (!detail.data) return <EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" />;
 
   const person = detail.data;
+  const favorite = favorites.data?.find((item) => personKey(item) === personKey(person));
+  const displayName = formatPersonName({
+    source: person.source,
+    name: person.name,
+    original_name: person.native_name ?? person.original_name,
+    ...pickKoreanName(person, favorite)
+  });
+  const saveKoreanName = async (nameKo: string | null) => {
+    if (!favorite) return;
+    try {
+      await setKoreanName.mutateAsync({ id: favorite.id, nameKo });
+      addToast(nameKo ? "한글 이름을 저장했어요." : "자동 표기로 되돌렸어요.", nameKo ? "success" : "info");
+    } catch {
+      addToast("한글 이름을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.", "error");
+    }
+  };
   const watchedPercent = credits.length ? Math.round((watchedCount / credits.length) * 100) : 0;
   const selectedStatus = selectedCredit ? statusForCredit(selectedCredit) : null;
 
@@ -332,16 +354,24 @@ function PersonDetailScreen() {
               <View style={styles.personDetails}>
                 <View style={styles.heading}>
                   <View style={styles.nameRow}>
-                    <Text style={styles.name}>{person.name}</Text>
+                    <Text style={styles.name}>{displayName.name}</Text>
                     <View style={styles.categoryBadge}>
                       <Text style={styles.categoryText}>
                         {person.category === "voice_actor" ? "성우" : "배우"}
                       </Text>
                     </View>
                   </View>
-                  {person.original_name && person.original_name !== person.name ? (
-                    <Text style={styles.original}>{person.original_name}</Text>
+                  {displayName.secondaryName ? (
+                    <Text style={styles.original}>{displayName.secondaryName}</Text>
                   ) : null}
+                  <KoreanNameEditor
+                    currentKoreanName={displayName.koreanName}
+                    favorited={Boolean(favorite)}
+                    onReset={() => void saveKoreanName(null)}
+                    onSave={(value) => void saveKoreanName(value)}
+                    saving={setKoreanName.isPending}
+                    status={displayName.readingStatus}
+                  />
                 </View>
 
                 <View style={styles.infoGrid}>

@@ -1,9 +1,10 @@
 import type { ContentType } from "@/types/content";
 
-export const CONTENT_TYPE_COLORS: Record<ContentType, string> = {
+export const CONTENT_TYPE_COLORS: Record<ContentType | "foreign_drama", string> = {
   anime: "#2563EB",
   kdrama: "#DB2777",
   jdrama: "#059669",
+  foreign_drama: "#7C3AED",
   movie: "#F59E0B",
   other: "#6B7280"
 };

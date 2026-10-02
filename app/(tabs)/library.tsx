@@ -1,4 +1,4 @@
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { EXTENDED_FEATURES_ENABLED, SHARE_FEATURES_ENABLED } from "@/constants/features";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { KeyboardAvoidingView, Platform ,
@@ -374,7 +374,7 @@ export default function LibraryScreen() {
             <LibraryStatusFilterBar compact onChange={(value) => commitFilters({ statusFilter: value })} value={statusFilter} />
             <View style={styles.mobileToolRow}>
               <View style={styles.mobileToolGroup}>
-                {EXTENDED_FEATURES_ENABLED ? (<Pressable
+                {SHARE_FEATURES_ENABLED ? (<Pressable
                   accessibilityLabel={isSharing ? "공유 중" : "라이브러리 공유"}
                   accessibilityRole="button"
                   disabled={isSharing || library.isLoading}
@@ -465,7 +465,7 @@ export default function LibraryScreen() {
           </ScrollView>
 
           <View style={styles.toolGroup}>
-            {EXTENDED_FEATURES_ENABLED ? (<Pressable
+            {SHARE_FEATURES_ENABLED ? (<Pressable
               accessibilityRole="button"
               disabled={isSharing || library.isLoading}
               onPress={shareCurrentView}

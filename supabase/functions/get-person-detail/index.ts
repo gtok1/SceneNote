@@ -1,6 +1,8 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
+import { hasHangul, resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
+import { anilistKoreanNameInput, tmdbKoreanNameInput, type TmdbPersonNameDetail } from "../_shared/personNames.ts";
 
 type PersonSource = "tmdb" | "anilist";
 type PersonCategory = "actor" | "voice_actor";
@@ -39,6 +41,8 @@ interface PersonDetail {
   gender?: string | null;
   biography: string | null;
   credits: PersonCredit[];
+  name_ko: string | null;
+  name_ko_source: Exclude<KoreanNameSource, "user"> | null;
 }
 
 interface TmdbPersonFallback {
@@ -98,7 +102,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
 
   const detailUrl = new URL(`https://api.themoviedb.org/3/person/${externalId}`);
   detailUrl.searchParams.set("language", TMDB_LANGUAGE);
-  detailUrl.searchParams.set("append_to_response", "combined_credits");
+  detailUrl.searchParams.set("append_to_response", "combined_credits,translations");
   const headers = applyTmdbAuth(detailUrl, apiKey);
 
   const detail = await fetchJson<{
@@ -111,6 +115,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
     place_of_birth?: string | null;
     gender?: number | null;
     biography?: string | null;
+    translations?: TmdbPersonNameDetail["translations"];
     combined_credits?: {
       cast?: {
         id: number;
@@ -147,6 +152,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
       role: item.character?.trim() || null
     }));
   const displayName = detail.name?.trim() || "Unknown";
+  const koreanName = resolveKoreanName(tmdbKoreanNameInput(detail));
 
   return {
     source: "tmdb",
@@ -154,6 +160,8 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
     category: inferPersonCategory(category, credits),
     name: displayName,
     original_name: pickTmdbAlias(displayName, detail.also_known_as),
+    name_ko: koreanName?.nameKo ?? null,
+    name_ko_source: koreanName?.source ?? null,
     profile_url: detail.profile_path ? `https://image.tmdb.org/t/p/w342${detail.profile_path}` : null,
     birthday: detail.birthday ?? null,
     deathday: detail.deathday ?? null,
@@ -170,6 +178,8 @@ const ANILIST_STAFF_DETAIL_QUERY = `
     Staff(id: $id) {
       id
       name {
+        first
+        last
         full
         native
         alternative
@@ -235,7 +245,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
     data?: {
       Staff?: {
         id: number;
-        name?: { full?: string | null; native?: string | null; alternative?: string[] | null } | null;
+        name?: { first?: string | null; last?: string | null; full?: string | null; native?: string | null; alternative?: string[] | null } | null;
         image?: { large?: string | null; medium?: string | null } | null;
         dateOfBirth?: { year?: number | null; month?: number | null; day?: number | null } | null;
         age?: number | null;
@@ -345,11 +355,16 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
     nativeName,
     alternatives: staff.name?.alternative
   });
+  const koreanName = koreanFallback?.name && hasHangul(koreanFallback.name)
+    ? { nameKo: koreanFallback.name.trim(), source: "tmdb" as const }
+    : resolveKoreanName(anilistKoreanNameInput(staff.name));
 
   return {
     source: "anilist",
     external_id: String(staff.id),
     category,
+    name_ko: koreanName?.nameKo ?? null,
+    name_ko_source: koreanName?.source ?? null,
     name: koreanFallback?.name ?? fullName ?? nativeName ?? "Unknown",
     original_name:
       koreanFallback?.original_name ??

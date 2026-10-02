@@ -36,6 +36,9 @@
 | `docs/33_kr_ott_availability_spec.md` | 추천 피드를 국내 OTT(정액제·무료·광고형) 시청 가능 작품으로 한정, "이번 달 인기 N위" 제거, 보러가기 광고형·해외 제공 안내·AniList 애니 조회·JustWatch 표기 | 추천 후보 수집·추천 카드·작품 상세 보러가기·TMDB 시청 제공처 작업 |
 | `docs/34_search_seasons_and_people_restore_spec.md` | 검색 시즌 카드가 같은 TMDB id로 합쳐지는 결함 정정(서버·클라이언트), 배우·성우 검색과 좋아하는 인물 기능 복원(`PEOPLE_FEATURES_ENABLED`, 인물 탭 6번째 탭). docs/11·19의 인물 제외 결정을 인물 기능에 한해 대체 | 검색 결과 병합·시즌 카드·인물 검색·좋아하는 인물·하단 탭 작업 |
 | `docs/35_search_completeness_and_deploy_drift_spec.md` | "TMDB에 있는데 검색 안 됨" 근본 정정: Edge Function 배포 불일치 점검(`npm run edge:drift`), 저장 필터가 결과를 조용히 버리지 않게(숨김 개수·모두 보기), 실사 일드 애니 오분류, 시즌 카드 시리즈명 표시, 검색 골든셋(`npm run search:golden`) | 검색 결과·검색 필터·Edge Function 배포 확인 작업 |
+| `docs/36_people_tab_saas_redesign_spec.md` | 인물 탭 SaaS 스타일 개편(`docs/32` 2단계 첫 화면). 기본 헤더 제거·단일 콘텐츠 컨테이너, 검색 결과·좋아하는 인물 공용 `PersonCard` 격자(1/2/3열), ♥ 빼기 + 되돌리기 토스트, 분류 세그먼트를 좋아하는 인물에도 적용, 인물 검색 300ms 디바운스, 인물별 추가 중 상태 | 인물 탭·좋아하는 인물 UI 작업 |
+| `docs/37_profile_dashboard_redesign_spec.md` | 프로필 탭 대시보드 개편. 기본 헤더 제거·단일 컨테이너, 숫자 카드 4개 + 타입·장르 2열 패널 + 연도 세로 막대(미상 묶음 각주), 해외 드라마 집계 정정(`libraryContentCategory`), 올해 본 작품 집계 일치, 장르 페이저 제거(TOP 5 + 그 외), 계정 목록 행·웹 회원 탈퇴 확인 | 프로필 탭·통계 패널·계정 행동 작업 |
+| `docs/38_japanese_person_korean_name_spec.md` | 일본 인물 한글 이름 채우기. 출처 우선순위(직접 입력 > TMDB ko 번역 > 한글 별칭 > 가나 읽기 > 로마자), 관용 표기 변환기(`_shared/japaneseReading.ts`), `favorite_people.name_ko` 3칸 마이그레이션(0023), `resolve-person-names` 백필, 인물 상세 한글 이름 입력 | 인물 이름 표기·좋아하는 인물 데이터·인물 Edge Function 작업 |
 
 **규칙**
 

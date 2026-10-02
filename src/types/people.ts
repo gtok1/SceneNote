@@ -2,6 +2,7 @@ import type { SearchResult } from "./content";
 
 export type PersonSource = "tmdb" | "anilist";
 export type PersonCategory = "actor" | "voice_actor";
+export type KoreanNameSource = "user" | "tmdb" | "alias" | "kana" | "romaji";
 
 export interface PersonSearchResult {
   source: PersonSource;
@@ -11,6 +12,8 @@ export interface PersonSearchResult {
   original_name: string | null;
   profile_url: string | null;
   known_for: string[];
+  name_ko?: string | null;
+  name_ko_source?: KoreanNameSource | null;
 }
 
 export interface PersonContentSearchResponse {
@@ -47,6 +50,8 @@ export interface PersonDetail {
   gender?: string | null;
   biography: string | null;
   credits: PersonCredit[];
+  name_ko?: string | null;
+  name_ko_source?: KoreanNameSource | null;
 }
 
 export interface FavoritePerson extends PersonSearchResult {
@@ -54,4 +59,5 @@ export interface FavoritePerson extends PersonSearchResult {
   user_id: string;
   created_at: string;
   updated_at: string;
+  name_ko_checked_at?: string | null;
 }

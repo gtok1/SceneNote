@@ -10,6 +10,7 @@ import { AppImage as Image } from "@/components/common/AppImage";
 import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
 import { colors, radius, spacing } from "@/constants/theme";
 import { getLibraryShare } from "@/services/libraryShare";
+import { extractShareId } from "@/utils/libraryShareErrors";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
@@ -24,10 +25,12 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
   const { width } = useWindowDimensions();
   const columns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 2;
   const cardWidth = `${100 / columns}%` as const;
-  const hasShareId = Boolean(shareId);
+  const normalizedShareId = extractShareId(shareId);
+  const hasShareId = Boolean(normalizedShareId);
+  const receivedShareId = shareId?.trim() ?? "";
   const share = useQuery({
-    queryKey: ["library-share", shareId],
-    queryFn: () => getLibraryShare(shareId ?? ""),
+    queryKey: ["library-share", normalizedShareId],
+    queryFn: () => getLibraryShare(normalizedShareId ?? ""),
     enabled: hasShareId,
     staleTime: 5 * 60_000
   });
@@ -62,7 +65,14 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
           <Ionicons color={colors.danger} name="warning-outline" size={22} />
           <View style={styles.errorTextBox}>
             <Text style={styles.errorTitle}>공유 목록을 열 수 없습니다</Text>
-            <Text style={styles.errorText}>공유 링크에 필요한 ID가 없습니다.</Text>
+            <Text style={styles.errorText}>
+              {receivedShareId
+                ? "링크 주소가 잘렸거나 바뀐 것 같아요. 공유한 사람에게 링크를 다시 받아 주세요."
+                : "공유 링크에 필요한 ID가 없습니다."}
+            </Text>
+            {receivedShareId ? (
+              <Text selectable style={styles.errorText}>{`받은 링크 ID: ${receivedShareId.slice(0, 60)}`}</Text>
+            ) : null}
           </View>
         </View>
       ) : null}

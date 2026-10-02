@@ -99,13 +99,16 @@ export function createLibraryShareTitle(filters: LibraryFilterState): string {
   return `${parts.join(" · ")} 공유`;
 }
 
+export type LibraryContentCategory = Exclude<ContentTypeFilter, "all">;
+
+export function libraryContentCategory(
+  item: Pick<LibraryListItem, "content_type" | "genres">
+): LibraryContentCategory {
+  if (item.content_type !== "other") return item.content_type;
+  return createDisplayGenreNames(item.genres).includes("드라마") ? "foreign_drama" : "other";
+}
+
 function matchesContentTypeFilter(item: LibraryListItem, filter: ContentTypeFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "foreign_drama") {
-    return item.content_type === "other" && createDisplayGenreNames(item.genres).includes("드라마");
-  }
-  if (filter === "other") {
-    return item.content_type === "other" && !createDisplayGenreNames(item.genres).includes("드라마");
-  }
-  return item.content_type === filter;
+  return libraryContentCategory(item) === filter;
 }

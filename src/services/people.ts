@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type {
   FavoritePerson,
+  KoreanNameSource,
   PersonCategory,
   PersonContentSearchResponse,
   PersonDetail,
@@ -79,6 +80,12 @@ export async function getFavoritePeople(): Promise<FavoritePerson[]> {
   return correctedPeople;
 }
 
+type FavoritePeopleTable = { from: (table: string) => unknown };
+type DbError = { message: string; code?: string };
+
+// 마이그레이션 0023 이전 DB에는 name_ko 칸이 없어 PostgREST가 PGRST204를 돌려준다.
+const MISSING_COLUMN_ERROR_CODE = "PGRST204";
+
 export async function addFavoritePerson(person: PersonSearchResult): Promise<FavoritePerson> {
   const {
     data: { user }
@@ -86,35 +93,106 @@ export async function addFavoritePerson(person: PersonSearchResult): Promise<Fav
 
   if (!user) throw new Error("로그인이 필요합니다");
 
-  const { data, error } = await ((supabase as never as { from: (table: string) => unknown }).from("favorite_people") as {
-    upsert: (
-      row: Record<string, unknown>,
-      options: { onConflict: string }
-    ) => {
-      select: (columns: string) => {
-        single: () => Promise<{ data: unknown | null; error: { message: string } | null }>;
-      };
-    };
-  })
-    .upsert(
-      {
-        user_id: user.id,
-        source: person.source,
-        external_id: person.external_id,
-        category: person.category,
-        name: person.name,
-        original_name: person.original_name,
-        profile_url: person.profile_url,
-        known_for: person.known_for
-      },
-      { onConflict: "user_id,source,external_id" }
-    )
-    .select("*")
-    .single();
+  const row: Record<string, unknown> = {
+    user_id: user.id,
+    source: person.source,
+    external_id: person.external_id,
+    category: person.category,
+    name: person.name,
+    original_name: person.original_name,
+    profile_url: person.profile_url,
+    known_for: person.known_for
+  };
 
+  const upsert = async (payload: Record<string, unknown>) =>
+    await ((supabase as never as FavoritePeopleTable).from("favorite_people") as {
+      upsert: (
+        row: Record<string, unknown>,
+        options: { onConflict: string }
+      ) => {
+        select: (columns: string) => {
+          single: () => Promise<{ data: unknown | null; error: DbError | null }>;
+        };
+      };
+    })
+      .upsert(payload, { onConflict: "user_id,source,external_id" })
+      .select("*")
+      .single();
+
+  const withKoreanName = person.name_ko
+    ? {
+        ...row,
+        name_ko: person.name_ko,
+        name_ko_source: person.name_ko_source ?? null,
+        name_ko_checked_at: new Date().toISOString()
+      }
+    : row;
+
+  let result = await upsert(withKoreanName);
+  if (result.error?.code === MISSING_COLUMN_ERROR_CODE && withKoreanName !== row) {
+    result = await upsert(row);
+  }
+
+  const { data, error } = result;
   if (error) throw new Error(error.message);
   if (!data) throw new Error("좋아하는 인물 저장 응답이 비어 있습니다");
   return data as FavoritePerson;
+}
+
+export type ResolvedKoreanName = {
+  source: PersonSource;
+  external_id: string;
+  name_ko: string | null;
+  name_ko_source: Exclude<KoreanNameSource, "user"> | null;
+};
+
+export async function resolvePersonNames(
+  people: Pick<PersonSearchResult, "source" | "external_id">[]
+): Promise<ResolvedKoreanName[]> {
+  const { data, error } = await supabase.functions.invoke<{ results: ResolvedKoreanName[] }>("resolve-person-names", {
+    body: { people: people.map(({ source, external_id }) => ({ source, external_id })) }
+  });
+
+  if (error) throw new Error(error.message);
+  return data?.results ?? [];
+}
+
+// 직접 입력(user) 행은 덮어쓰지 않는다. 마이그레이션 전(PGRST204)에는 조용히 건너뛴다.
+export async function applyResolvedKoreanName(
+  id: string,
+  resolved: Pick<ResolvedKoreanName, "name_ko" | "name_ko_source">
+): Promise<void> {
+  const { error } = await ((supabase as never as FavoritePeopleTable).from("favorite_people") as {
+    update: (row: Record<string, unknown>) => {
+      eq: (column: string, value: string) => {
+        or: (filter: string) => Promise<{ error: DbError | null }>;
+      };
+    };
+  })
+    .update({
+      name_ko_checked_at: new Date().toISOString(),
+      ...(resolved.name_ko ? { name_ko: resolved.name_ko, name_ko_source: resolved.name_ko_source } : {})
+    })
+    .eq("id", id)
+    .or("name_ko_source.is.null,name_ko_source.in.(kana,romaji)");
+
+  if (error && error.code !== MISSING_COLUMN_ERROR_CODE) throw new Error(error.message);
+}
+
+export async function setFavoriteKoreanName(id: string, nameKo: string | null): Promise<void> {
+  const { error } = await ((supabase as never as FavoritePeopleTable).from("favorite_people") as {
+    update: (row: Record<string, unknown>) => {
+      eq: (column: string, value: string) => Promise<{ error: DbError | null }>;
+    };
+  })
+    .update(
+      nameKo
+        ? { name_ko: nameKo, name_ko_source: "user", name_ko_checked_at: new Date().toISOString() }
+        : { name_ko: null, name_ko_source: null, name_ko_checked_at: null }
+    )
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteFavoritePerson(id: string): Promise<void> {

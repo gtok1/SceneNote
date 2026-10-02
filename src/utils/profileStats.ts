@@ -1,20 +1,27 @@
-import type { ContentType } from "@/types/content";
 import type { GenreStat } from "@/types/genre";
 import type { LibraryListItem, WatchStatus } from "@/types/library";
 import { getGenreDisplayName } from "@/utils/genre";
-import { CONTENT_TYPE_FILTERS, CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
+import {
+  CONTENT_TYPE_FILTERS,
+  CONTENT_TYPE_LABELS,
+  libraryContentCategory,
+  type LibraryContentCategory
+} from "@/utils/libraryFilters";
 
 export interface ContentTypeStat {
-  type: ContentType;
+  type: LibraryContentCategory;
   label: string;
   count: number;
   percent: number;
 }
 
-export interface CurrentYearSummary {
-  label: "올해 본 작품" | "올해 등록";
-  value: number;
-  source: "watched_at" | "added_at";
+/** 프로필 숫자 카드의 단일 출처. 등록 = 본 작품 + 보고 싶음, 완료 ⊂ 본 작품. */
+export interface LibraryStatusSummary {
+  total: number;
+  watched: number;
+  wishlistOnly: number;
+  completed: number;
+  watchedNotCompleted: number;
 }
 
 export const WATCHED_STATUSES = new Set<WatchStatus>([
@@ -26,15 +33,16 @@ export const WATCHED_STATUSES = new Set<WatchStatus>([
 ]);
 
 const CONTENT_TYPE_STAT_ORDER = CONTENT_TYPE_FILTERS.filter(
-  (type): type is ContentType => type !== "all"
+  (type): type is LibraryContentCategory => type !== "all"
 );
 
 export function createContentTypeStats(items: LibraryListItem[]): ContentTypeStat[] {
   const total = items.length;
-  const counts = new Map<ContentType, number>();
+  const counts = new Map<LibraryContentCategory, number>();
 
   items.forEach((item) => {
-    counts.set(item.content_type, (counts.get(item.content_type) ?? 0) + 1);
+    const category = libraryContentCategory(item);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
   });
 
   return CONTENT_TYPE_STAT_ORDER.map((type) => {
@@ -63,25 +71,22 @@ export function createDisplayGenreStats(stats: GenreStat[]): GenreStat[] {
   );
 }
 
-export function createCurrentYearSummary(
-  items: LibraryListItem[],
-  now = new Date()
-): CurrentYearSummary {
-  const currentYear = now.getFullYear();
-  const watchedDateItems = items.filter((item) => yearFromDate(item.last_watched_at));
+export function createLibraryStatusSummary(items: readonly LibraryListItem[]): LibraryStatusSummary {
+  let watched = 0;
+  let completed = 0;
 
-  if (watchedDateItems.length > 0) {
-    return {
-      label: "올해 본 작품",
-      source: "watched_at",
-      value: watchedDateItems.filter((item) => yearFromDate(item.last_watched_at) === currentYear).length
-    };
-  }
+  items.forEach((item) => {
+    if (!isWatchedLibraryItem(item)) return;
+    watched += 1;
+    if (item.statuses.includes("completed")) completed += 1;
+  });
 
   return {
-    label: "올해 등록",
-    source: "added_at",
-    value: items.filter((item) => yearFromDate(item.added_at) === currentYear).length
+    total: items.length,
+    watched,
+    wishlistOnly: items.length - watched,
+    completed,
+    watchedNotCompleted: watched - completed
   };
 }
 
@@ -93,11 +98,12 @@ export function countCurrentYearWatchedItems(
   if (watchedDateItems.length === 0) return null;
 
   const currentYear = now.getFullYear();
-  return watchedDateItems.filter((item) => yearFromDate(item.last_watched_at) === currentYear).length;
+  return countWatchedInYear(watchedDateItems, currentYear);
 }
 
-export function countItemsWithWatchedDate(items: LibraryListItem[]): number {
-  return items.filter((item) => yearFromDate(item.last_watched_at)).length;
+function countWatchedInYear(items: LibraryListItem[], year: number): number {
+  return items.filter((item) => isWatchedLibraryItem(item) && yearFromDate(item.last_watched_at) === year)
+    .length;
 }
 
 export function isWatchedLibraryItem(item: LibraryListItem): boolean {

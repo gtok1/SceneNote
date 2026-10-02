@@ -1,5 +1,5 @@
 import { Redirect , useLocalSearchParams } from "expo-router";
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { SHARE_FEATURES_ENABLED } from "@/constants/features";
 
 import { LibraryShareScreenContent } from "@/components/library/LibraryShareScreenContent";
 
@@ -10,4 +10,4 @@ function LibraryShareQueryScreen() {
   return <LibraryShareScreenContent shareId={shareId} />;
 }
 
-export default function MvpRoute() { return EXTENDED_FEATURES_ENABLED ? <LibraryShareQueryScreen /> : <Redirect href="/library" />; }
+export default function MvpRoute() { return SHARE_FEATURES_ENABLED ? <LibraryShareQueryScreen /> : <Redirect href="/library" />; }

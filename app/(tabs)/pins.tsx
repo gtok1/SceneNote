@@ -14,17 +14,17 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PinShareCard } from "@/components/pins/PinShareCard";
 import { EMOTION_LABELS, EMOTION_OPTIONS } from "@/constants/emotions";
-import { colors, spacing } from "@/constants/theme";
+import { colors, spacing, typography } from "@/constants/theme";
 import { useTags } from "@/hooks/useTags";
 import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER, createGenreFilterOptions, matchesGenreFilter } from "@/utils/genre";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { sharePinCardImage } from "@/utils/pinShare";
 import { shouldShowPinDetailPanel } from "@/utils/pinResponsive";
 import { formatSecondsToTimecode } from "@/utils/timecode";
 
 const DETAIL_PANEL_WIDTH = 360;
-const MAIN_CONTENT_MAX_WIDTH = 860;
 
 const emotionFilterOptions = EMOTION_OPTIONS.map((value) => ({
   label: EMOTION_LABELS[value],
@@ -36,7 +36,8 @@ type ViewMode = "list" | "timeline";
 export default function PinsScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const showDetailPanel = shouldShowPinDetailPanel(width, width - spacing.xl * 3);
+  const layout = getHomeLayout(width);
+  const showDetailPanel = shouldShowPinDetailPanel(width, layout.contentWidth - spacing.xl);
   const [sortMode, setSortMode] = useState<PinSortMode>("latest");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -153,7 +154,7 @@ export default function PinsScreen() {
       {isError && sortedPins.length ? <ErrorState message="저장된 기록을 표시합니다. 연결 후 다시 시도해 주세요." onRetry={() => selectedTagId ? taggedPins.refetch() : allPins.refetch()} /> : null}
       <View style={[styles.header, width < 768 ? { flexDirection: "column", alignItems: "stretch" } : null]}>
         <View style={styles.headerCopy}>
-          <Text style={styles.title}>핀</Text>
+          <Text accessibilityRole="header" style={styles.title}>핀</Text>
           <Text style={styles.subtitle}>감동적인 장면과 기억하고 싶은 대사를 모아보세요.</Text>
         </View>
         <View style={[styles.headerTools, { maxWidth: "100%" }]}>
@@ -228,14 +229,17 @@ export default function PinsScreen() {
 
   return (
     <View style={[styles.shell, { paddingTop: insets.top }]}>
-      <View style={styles.page}>
+      <View style={[styles.page, { paddingHorizontal: layout.gutter }]}>
         <View style={styles.contentGrid}>
           <View style={styles.mainColumn}>
             <FlashList
+              showsVerticalScrollIndicator={false}
               ListEmptyComponent={
                 <View style={styles.listEmpty}>
                   {isLoading ? (
-                    <LoadingSkeleton variant="pin-item" count={5} />
+                    <View style={styles.sharedInset}>
+                      <LoadingSkeleton variant="pin-item" count={5} />
+                    </View>
                   ) : isError ? (
                     <ErrorState onRetry={() => (selectedTagId ? taggedPins.refetch() : allPins.refetch())} />
                   ) : (
@@ -696,27 +700,26 @@ function formatDate(value: string): string {
 
 const styles = StyleSheet.create({
   shell: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.background,
     flex: 1
   },
   page: {
+    alignSelf: "center",
     flex: 1,
-    paddingBottom: 24,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xl
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
+    paddingTop: spacing.md,
+    width: "100%"
   },
   contentGrid: {
     alignSelf: "center",
     flex: 1,
     flexDirection: "row",
     gap: spacing.xl,
-    maxWidth: 1260,
     width: "100%"
   },
   mainColumn: {
     flex: 1,
     gap: spacing.lg,
-    maxWidth: MAIN_CONTENT_MAX_WIDTH,
     minWidth: 0
   },
   listHeader: {
@@ -734,14 +737,12 @@ const styles = StyleSheet.create({
     gap: spacing.xs
   },
   title: {
-    color: "#0F172A",
-    fontSize: 30,
-    fontWeight: "900"
+    ...typography.display,
+    color: colors.text
   },
   subtitle: {
-    color: "#475569",
-    fontSize: 14,
-    fontWeight: "600"
+    ...typography.body,
+    color: colors.textMuted
   },
   headerTools: {
     alignItems: "center",
@@ -930,10 +931,13 @@ const styles = StyleSheet.create({
     flex: 1
   },
   pinFlashContent: {
-    paddingBottom: 24
+    paddingBottom: spacing.xxl
   },
   listEmpty: {
     paddingTop: spacing.md
+  },
+  sharedInset: {
+    marginHorizontal: -spacing.lg
   },
   pinSeparator: {
     height: spacing.md

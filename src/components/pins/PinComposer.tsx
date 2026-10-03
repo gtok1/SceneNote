@@ -8,17 +8,19 @@ import { getPinContext } from "@/services/pinContext";
 import { confirmDiscard } from "@/utils/confirmDiscard";
 import { useNetworkState } from "expo-network";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { useAtom } from "jotai";
 
 import { initialPinFormDraft, pinFormDraftAtom } from "@/atoms/pinFormAtom";
 import { EMOTION_LABELS, EMOTION_OPTIONS } from "@/constants/emotions";
+import { FORM_CONTENT_MAX_WIDTH } from "@/constants/layout";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useCreatePin, useDeletePin, useUpdatePin } from "@/hooks/useTimelinePins";
 import type { TimelinePin } from "@/types/pins";
 import { createPinSchema } from "@/utils/validation";
 import { resolveTimecodeInput, formatSecondsToTimecode } from "@/utils/timecode";
+import { getHomeLayout } from "@/utils/homeLayout";
 import { SpoilerToggle } from "./SpoilerToggle";
 import { TagChip } from "./TagChip";
 import { TimecodeInput } from "./TimecodeInput";
@@ -47,6 +49,8 @@ export function PinComposer({
   const context = usePinContext(contentId, episodeId);
   const episodeDurationSeconds = context.data?.duration ?? null;
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
   const headerHeight = useHeaderHeight();
   const navigation = useNavigation();
   const network = useNetworkState();
@@ -207,15 +211,14 @@ export function PinComposer({
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
-    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView showsVerticalScrollIndicator={false} ref={scrollRef} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right) }]} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
-        <Text style={styles.title}>{mode === "create" ? "핀 추가" : "핀 편집"}</Text>
+        <Text style={[styles.label, { flex: 1 }]}>{context.data ? `${context.data.title} · ${context.data.label}` : context.isError ? context.error.message : "작품·회차 확인 중"}</Text>
         <Pressable accessibilityRole="button" disabled={isSaving} onPress={cancel} style={{ minWidth: 48, minHeight: 48, justifyContent: "center", alignItems: "center" }}>
           <Text style={styles.cancel}>취소</Text>
         </Pressable>
       </View>
 
-      <Text style={styles.label}>{context.data ? `${context.data.title} · ${context.data.label}` : context.isError ? context.error.message : "작품·회차 확인 중"}</Text>
       {context.isError ? <Pressable accessibilityRole="button" style={{ minHeight: 48, justifyContent: "center" }} onPress={() => context.refetch()}><Text>다시 확인</Text></Pressable> : null}
       <View style={styles.field}>
         <Text style={styles.label}>시간</Text>
@@ -322,7 +325,8 @@ export function PinComposer({
         </Pressable>
       ) : null}
     </ScrollView>
-    <View style={{ padding: 12, paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.surface }}>
+    <View style={styles.footer}>
+    <View style={[styles.footerContent, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: spacing.xl + insets.bottom }]}>
       <Pressable
         accessibilityRole="button"
         disabled={isSaving || context.isPending || context.isError}
@@ -334,24 +338,33 @@ export function PinComposer({
       </Pressable>
 
     </View>
+    </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     gap: spacing.lg,
-    padding: spacing.lg
+    maxWidth: FORM_CONTENT_MAX_WIDTH,
+    paddingVertical: spacing.lg,
+    width: "100%"
+  },
+  footer: {
+    backgroundColor: colors.surface
+  },
+  footerContent: {
+    alignSelf: "center",
+    maxWidth: FORM_CONTENT_MAX_WIDTH,
+    paddingTop: spacing.md,
+    width: "100%"
   },
   header: {
     alignItems: "center",
     flexDirection: "row",
+    gap: spacing.md,
     justifyContent: "space-between"
-  },
-  title: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "800"
   },
   cancel: {
     color: colors.textMuted,

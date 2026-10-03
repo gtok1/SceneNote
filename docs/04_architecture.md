@@ -17,11 +17,13 @@
 | 영역 | 코드에서 확인한 위치·심볼 | 수정 시 함께 확인할 영역 |
 |---|---|---|
 | 앱 진입·인증 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`; `src/providers/AppProviders.tsx`: `AppProviders` | 인증 링크 처리 `src/utils/authLinks.ts`, 세션 초기화, 비밀번호 재설정·공유 경로의 리다이렉트 예외 |
-| 화면·공통 UI | `app/`, `src/components/`; 실제 검색 본체는 `app/search.tsx`: `SearchScreen` | `(tabs)` 화면, 상세/핀 라우트, 공통 디자인 값 `src/constants/theme.ts` |
+| 화면·공통 UI | `app/`, `src/components/`; 실제 검색 본체는 `app/search.tsx`: `SearchScreen`; 공통 Stack 헤더는 `src/components/common/ScreenHeader.tsx` | `(tabs)` 화면, 상세/핀 라우트, 공통 디자인 값 `src/constants/theme.ts`, 본문 폭 `src/utils/homeLayout.ts`·`src/constants/layout.ts` |
 | 서버 상태·요청 | `src/hooks/` → `src/services/` → `src/lib/supabase.ts`; `src/lib/query.ts`: `queryClient`, `queryKeys` | 캐시 키와 mutation 후 갱신, 사용자 전환 시 캐시 정리, 서버 응답 타입 `src/types/` |
 | UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. `watchProvidersAtom`의 서버 응답 저장은 서버 상태 분리 원칙과 다른 현황이며 일반 규칙으로 확대하지 않는다. |
 | 외부 콘텐츠 호출 | `supabase/functions/*/index.ts`; `_shared/externalContent.ts`; `search-content/adapters/` | `search-content/adapters/types.ts`, `_shared/types.ts`, 클라이언트 `src/types/content.ts` 및 응답 변환 서비스 |
 | DB·권한 | `supabase/migrations/`의 순서별 SQL, `src/types/database.ts` | 후속 migration까지 읽어 최종 제약 확인. 로컬 파일 존재만으로 원격 적용을 단정하지 않는다. |
+
+2026-10-03 공통 화면 프레임 코드 확인: 루트·인증 Stack은 `ScreenHeader`를 navigator의 `header` 슬롯에 두며, 헤더와 본문은 같은 최대 폭과 `getHomeLayout`의 좌우 여백을 사용한다. 탭은 기본 헤더를 숨기고 본문 안에 제목을 둔다. 입력·로딩·오류 화면의 프레임 및 안전 영역 책임은 [08의 공통 헤더·본문 프레임](08_frontend_architecture.md#공통-헤더본문-프레임-2026-10-03)을 따른다. 이 설명은 코드 구조이며 플랫폼별 실행 검증 범위는 [작업 재개 기록](development_next_steps.md#헤더본문-정렬-2026-10-03-미커밋-작업)에 별도로 남긴다.
 
 ### 기능별 호출 흐름
 

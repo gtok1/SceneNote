@@ -33,7 +33,7 @@ import {
 } from "@/components/library/LibraryFilterBottomSheet";
 import { LibraryStatusFilter as LibraryStatusFilterBar } from "@/components/library/LibraryStatusFilter";
 import { normalizeWatchStatuses, WATCH_STATUS_LABEL } from "@/constants/status";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } from "@/hooks/useLibrary";
 import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
@@ -41,6 +41,7 @@ import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/
 import type { DateSortOrder } from "@/utils/contentSort";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import {
   CONTENT_TYPE_FILTERS,
   CONTENT_TYPE_LABELS,
@@ -92,7 +93,17 @@ export default function LibraryScreen() {
   const loadMoreQueuedRef = useRef(false);
   const viewMode = useLibraryUiStore((state) => state.viewMode);
   const setViewMode = useLibraryUiStore((state) => state.setViewMode);
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
+  const galleryLayoutKey = `${width}:${fontScale}`;
+  const [galleryBody, setGalleryBody] = useState({ key: galleryLayoutKey, height: 0 });
+  const galleryBodyMinHeight = galleryBody.key === galleryLayoutKey ? galleryBody.height : 0;
+  const measureGalleryBody = useCallback((height: number) => {
+    setGalleryBody((current) => {
+      const previousHeight = current.key === galleryLayoutKey ? current.height : 0;
+      return height > previousHeight ? { key: galleryLayoutKey, height } : current;
+    });
+  }, [galleryLayoutKey]);
+  const layout = getHomeLayout(width);
   const { galleryColumns, isDesktop, isMobile } = getLibraryResponsiveLayout(width);
   const library = useLibrary(statusFilter);
   const updateManualProgress = useUpdateLibraryManualProgress();
@@ -361,6 +372,10 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={[styles.page, { paddingHorizontal: layout.gutter }]}>
+      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing.md }]}>
+        <Text accessibilityRole="header" style={styles.pageTitle}>라이브러리</Text>
+      </View>
       <View style={styles.filterSection}>
         <TextInput
           accessibilityLabel="라이브러리 검색"
@@ -658,7 +673,7 @@ export default function LibraryScreen() {
         ) : null}
       </View>
 
-      {library.isLoading ? <LoadingSkeleton /> : null}
+      {library.isLoading ? <View style={styles.sharedInset}><LoadingSkeleton /></View> : null}
       {library.isError ? <ErrorState onRetry={() => library.refetch()} /> : null}
       {!library.isLoading && !filteredItems.length ? (
         <EmptyState
@@ -673,7 +688,7 @@ export default function LibraryScreen() {
         />
       ) : null}
 
-      <FlashList
+      <FlashList showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={isGallery ? undefined : () => <View style={{ height: spacing.md }} />}
         ListFooterComponent={
           filteredItems.length > pageSize ? (
@@ -685,7 +700,9 @@ export default function LibraryScreen() {
           ) : null
         }
         contentContainerStyle={styles.listContent}
+        style={{ marginHorizontal: -(isGallery ? spacing.sm : spacing.lg) }}
         data={visibleItems}
+        extraData={galleryBodyMinHeight}
         key={viewMode}
         keyExtractor={(item) => item.library_item_id}
         numColumns={isGallery ? galleryColumns : 1}
@@ -695,6 +712,8 @@ export default function LibraryScreen() {
         renderItem={({ item }) => (
           isGallery ? (
             <ContentGalleryCard
+              bodyMinHeight={galleryBodyMinHeight}
+              onBodyHeight={measureGalleryBody}
               item={item}
               onOpenEpisodes={() =>
                 router.push({
@@ -730,6 +749,7 @@ export default function LibraryScreen() {
           )
         )}
       />
+      </View>
       {isMobile ? (
         <LibraryFilterBottomSheet
           filters={filters}
@@ -831,12 +851,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     flex: 1
   },
+  page: {
+    alignSelf: "center",
+    flex: 1,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
+    width: "100%"
+  },
+  pageHeader: {
+    paddingBottom: spacing.xs
+  },
+  pageTitle: {
+    ...typography.display,
+    color: colors.text
+  },
+  sharedInset: {
+    marginHorizontal: -spacing.lg
+  },
   listContent: {
-    paddingBottom: 24
+    paddingBottom: spacing.xxl
   },
   filterSection: {
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
     zIndex: 1000

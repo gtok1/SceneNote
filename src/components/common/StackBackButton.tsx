@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Platform, Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePathname, useRouter } from "expo-router";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 
 export function StackBackButton() {
   const router = useRouter();
@@ -42,9 +42,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
     justifyContent: "center",
-    // Native Stack supplies its own safe-area margin; the web header does not.
-    marginLeft: Platform.OS === "web" ? spacing.lg : 0,
-    marginRight: spacing.md,
     minHeight: 44,
     minWidth: 44,
     paddingHorizontal: spacing.md,
@@ -52,9 +49,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "600",
-    lineHeight: 20
+    ...typography.label
   },
   hovered: { backgroundColor: colors.surfaceMuted },
   pressed: { backgroundColor: colors.primarySoft, borderColor: colors.primary },

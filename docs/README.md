@@ -12,6 +12,7 @@
 | DB·외부 API 수정 | [05 ERD/RLS](05_erd_rls.md), [07 Edge Functions](07_edge_functions.md), [04 현황](04_architecture.md) | `supabase/migrations/`, `supabase/functions/`, `src/types/database.ts` |
 | 작업 재개·출시 판단 | [development_next_steps](development_next_steps.md) | 마지막 실제 검증의 날짜·리비전·플랫폼·미실행 사유 |
 | 새 명세·작업 지시 작성 | [00 작성 패턴](00_codex_doc_pattern.md) | 명세 파일 + 응답 본문 실행 프롬프트; AGENTS 표도 갱신 |
+| 화면·컴포넌트·UI 명세 | [00 UI 스타일 규칙](00_ui_style_rules.md) (웹·앱 공통, AI 작업용) | 토큰·레이아웃 함수·`Alert` 금지·검증 절차·완료 체크리스트 |
 
 ## 요구사항과 설계 문서
 
@@ -40,6 +41,8 @@
 | [36 인물 탭 SaaS 개편](36_people_tab_saas_redesign_spec.md) | 32의 토큰·격자 구간으로 인물 탭 재구성, 공용 인물 카드, 빼기 되돌리기, 분류 세그먼트, 검색 디바운스 | 신규: 미구현 |
 | [37 프로필 대시보드 개편](37_profile_dashboard_redesign_spec.md) | 32·36의 토큰·격자로 프로필 재구성, 해외 드라마·올해 본 작품 집계 정정, 연도 그래프 미상 묶음 제외, 장르 TOP 5, 계정 행·웹 탈퇴 확인 | 신규: 미구현 |
 | [38 일본 인물 한글 이름](38_japanese_person_korean_name_spec.md) | 한글 이름 출처 우선순위·관용 표기 변환·저장 칸(0023)·기존 좋아하는 인물 백필·직접 입력 | 신규: 미구현 |
+| [39 작품 상세 SaaS 개편](39_content_detail_saas_redesign_spec.md) | 히어로 + 2열 배치, 상태 세그먼트, 삭제 확인(31 U-2)·상태 위치(31 U-5), 한국어 메타, 웹 피드백 토스트 | 신규: 미구현 |
+| [40 작품 상세 삭제 영역 정정](40_content_detail_delete_zone_fixes_spec.md) | 39의 삭제 버튼을 "목록 관리" 카드 + 빨간 테두리 버튼으로, 설명·실패 문구 | 신규: 미구현 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

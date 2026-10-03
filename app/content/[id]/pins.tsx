@@ -1,20 +1,23 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useContent } from "@/hooks/useLibrary";
 import { useCallback } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSetAtom } from "jotai";
 
 import { revealedSpoilerPinIdsAtom } from "@/atoms/spoilerAtom";
 import { PinTimelineList } from "@/components/pins/PinTimelineList";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { usePinsByContent, usePinsByEpisode } from "@/hooks/useTimelinePins";
 
 export default function ContentPinsScreen() {
   const { id, episodeId } = useLocalSearchParams<{ id: string; episodeId?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
   const content = useContent(id);
   const setRevealedIds = useSetAtom(revealedSpoilerPinIdsAtom);
   const contentPins = usePinsByContent(episodeId ? undefined : id);
@@ -24,9 +27,10 @@ export default function ContentPinsScreen() {
   useFocusEffect(useCallback(() => () => setRevealedIds(new Set()), [setRevealedIds]));
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
+    <View style={[styles.container, { paddingBottom: spacing.xl + insets.bottom, paddingLeft: Math.max(gutter, insets.left) - spacing.lg, paddingRight: Math.max(gutter, insets.right) - spacing.lg }]}>
+      <Stack.Screen options={{ title: episodeId ? "에피소드 핀" : "작품 핀" }} />
       <View style={styles.header}>
-        <Text style={styles.title}>{episodeId ? "에피소드 핀" : "작품 핀"}</Text>
+        <Text numberOfLines={2} style={styles.title}>{content.data?.title_primary ?? "작품 정보 확인 중"}</Text>
         <Pressable
           accessibilityRole="button"
           onPress={() =>
@@ -53,19 +57,23 @@ export default function ContentPinsScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
-    flex: 1
+    flex: 1,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
+    width: "100%"
   },
   header: {
     alignItems: "center",
     flexDirection: "row",
+    gap: spacing.md,
     justifyContent: "space-between",
     padding: spacing.lg
   },
   title: {
+    ...typography.title,
     color: colors.text,
-    fontSize: 22,
-    fontWeight: "900"
+    flex: 1,
   },
   addButton: {
     minHeight: 48,
@@ -76,7 +84,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm
   },
   addText: {
+    ...typography.label,
     color: colors.surface,
-    fontWeight: "800"
   }
 });

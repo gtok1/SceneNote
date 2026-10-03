@@ -6,7 +6,7 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 01_product_requirements.md, 03_screen_flow.md, 04_architecture.md, 07_edge_functions.md, 09_timeline_pin_ux.md
 
-> **문서 해석:** 번호 절의 라우트·코드 블록은 초기 설계와 구현 예제다. 실제 파일명·API·완료 여부를 보장하지 않는다. 확정 요구사항은 유지하며, 화면 변경 전 [11 화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 명세를 읽는다. 아래 현황은 2026-09-26 정적 코드 확인이며 UI 동작 검증 결과가 아니다.
+> **문서 해석:** 번호 절의 라우트·코드 블록은 초기 설계와 구현 예제다. 실제 파일명·API·완료 여부를 보장하지 않는다. 확정 요구사항은 유지하며, 화면 변경 전 [11 화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 명세를 읽는다. 아래 현황은 별도 날짜가 표시된 절을 제외하면 2026-09-26 정적 코드 확인이며 UI 동작 검증 결과가 아니다.
 
 ## 현재 구현과 설계 예제의 구분
 
@@ -14,7 +14,7 @@
 
 | 기능 | 실제 파일·심볼 | 초기 설계와의 차이·확인 조건 |
 |---|---|---|
-| 공통 레이아웃·인증 경계 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`, `GlobalBottomNav`; `src/providers/AppProviders.tsx`: `AppProviders` | Provider가 QueryClient와 Supabase 세션을 연결한다. `(tabs)/_layout.tsx`의 기본 탭 바는 숨기며 하단 메뉴 5개는 `GlobalBottomNav`에 있다. |
+| 공통 레이아웃·인증 경계 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`, `GlobalBottomNav`; `src/providers/AppProviders.tsx`: `AppProviders`; `src/components/common/ScreenHeader.tsx` | Provider가 QueryClient와 Supabase 세션을 연결한다. `(tabs)/_layout.tsx`의 기본 헤더·탭 바는 숨기며 하단 메뉴는 `GlobalBottomNav`가 기능 플래그에 맞춰 표시한다. |
 | 이메일 인증 | `app/(auth)/onboarding.tsx`, `sign-in.tsx`, `sign-up.tsx`, `forgot-password.tsx`, `reset-password.tsx`; `src/hooks/useAuth.ts`: `useAuth` | 설계의 `login.tsx`는 없다. 소셜 로그인은 아래 우선순위 표에 있는 계획이며 현재 hook은 이메일 인증·비밀번호 재설정·로그아웃·탈퇴를 구현한다. |
 | 홈·라이브러리 | `app/(tabs)/index.tsx`, `app/(tabs)/library.tsx`; `src/hooks/useLibrary.ts`: `useLibrary` | 홈과 라이브러리가 별도 화면이다. `src/stores/libraryUiStore.ts`와 `src/utils/libraryRouteParams.ts`에서 필터·복귀 파라미터 확인 |
 | 검색·추천 | `app/search.tsx`: `SearchScreen`; `app/(tabs)/search.tsx`는 이를 재노출 | 검색 UI 수정 본체는 `app/search.tsx`. 일반 검색은 `useContentSearch`, 추천은 `usePersonalizedRecommendations`, 유사 검색은 `useSimilarContent`이며 각각 다른 캐시/추가 로딩 흐름을 갖는다. |
@@ -24,6 +24,24 @@
 | 보존된 확장 라우트 | `app/(tabs)/people.tsx`, `app/people/[id].tsx`, `app/library/import.tsx`, `app/library/photo-import.tsx`, `app/share/index.tsx`, `app/share/[id].tsx` | `src/constants/features.ts`의 플래그와 각 파일의 분기를 확인한다. `app/share/[id].tsx`에는 동일한 플래그 guard가 없으므로 전체 확장 경로가 차단됐다고 단정하지 않는다. |
 
 검색의 `ContentSearchBar` 필터 시트는 상단과 추천 헤더에서 공통으로 연다. 유형·장르·제작 국가를 텍스트 칩으로 여러 개 켜고 끄며, 배경·테두리·글자색으로 선택을 구분한다. 시각적인 체크 아이콘은 생략하고 접근성 `checked`는 유지한다. `useSearchFilterPreferences`가 현재 계정의 `profiles.search_filters` 저장에 성공한 뒤 `searchUiStore`에 반영한다. 서버 설정은 계정별 TanStack Query가 소유하고 시트의 미적용 선택은 로컬 draft다. 최초 설정 복원 전에는 제목 검색·추천을 막으며, 계정 전환과 늦은 응답을 구분한다. 선택 조건은 제목 검색과 빈 검색어 추천에 적용하고 유사 검색은 별도 조건을 유지한다. Query key·추천 요청 수명·FlashList key에는 정규화한 배열을 포함해 이전 조건의 페이지와 스크롤 위치를 섞지 않는다. 최근 검색어는 기기 저장소에서 계정별로 분리한다.
+
+### 공통 헤더·본문 프레임 (2026-10-03)
+
+[공통 UI 규칙](00_ui_style_rules.md)을 적용한 현재 코드다. 루트 Stack과 인증 Stack의 `header` 슬롯은 `ScreenHeader`를 사용한다. `StackBackButton`과 화면별 한국어 제목을 같은 가운데 프레임에 놓고 상단 inset은 헤더가 처리한다. navigator가 헤더 높이를 측정하므로 `KeyboardScreen`·`PinComposer`·작품 상세의 `useHeaderHeight()` 키보드 offset을 유지한다.
+
+`ScreenHeader`·`KeyboardScreen`·`ScreenStateFrame`은 좌우 여백을 각각 `Math.max(gutter, insets.left/right)` 기준으로 맞춘다. `ScreenStateFrame`은 상태 컴포넌트가 가진 16pt 여백만 빼서 중복을 보정한다.
+
+| 화면 | 헤더·본문의 최대 외곽 폭 | 제목·여백 책임 |
+|---|---|---|
+| 탭·작품/인물 상세·에피소드·작품 핀·공유·가져오기·추천 제외 | `HOME_CONTENT_MAX_WIDTH` 1200 | `getHomeLayout(width)`의 gutter(600 미만 16, 이상 24). 탭은 본문 제목과 상단 inset을 처리하고, Stack 본문은 헤더가 처리한 상단 inset을 다시 더하지 않는다. |
+| 핀 상세·작성/편집·인증 폼 | `FORM_CONTENT_MAX_WIDTH` 720 (`src/constants/layout.ts`) | 헤더·본문·핀 저장 footer에 같은 폭과 gutter를 적용한다. footer는 레이아웃 흐름 안에서 하단 inset을 처리한다. |
+| 온보딩 | `ONBOARDING_CONTENT_MAX_WIDTH` 560 (`src/constants/layout.ts`) | 인증 헤더와 `KeyboardScreen`에 같은 폭을 전달한다. |
+
+검색 본체는 탭과 독립 Stack 경로에서 재사용된다. `useSegments()`로 탭 여부를 확인해 본문 제목·상단 inset을 탭에서만 추가하고, 독립 경로는 루트 헤더를 쓴다. 기존 카드·선택기의 자체 여백은 바깥 프레임에서 보정해 제목·컨트롤·목록의 시작선을 맞춘다. 작품·인물·핀 상세 등의 초기 로딩·오류·빈 상태는 `ScreenStateFrame`이 같은 최대 폭 안에 놓으며, 상태 컴포넌트의 자체 16pt 여백을 중복하지 않는다. 실제 웹·앱 검증은 [작업 재개 기록](development_next_steps.md#헤더본문-정렬-2026-10-03-미커밋-작업)에서 확인한다.
+
+핀 상세의 `Stack.Screen`은 읽기/편집 상태에 따라 헤더 제목을 "핀 상세"/"핀 편집"으로 바꾼다. `PinComposer` 본문 첫 줄은 작품·회차 맥락과 취소 행동을 표시하며 화면 제목을 반복하지 않는다. 작품 핀 화면도 `episodeId`에 따라 헤더를 "작품 핀"/"에피소드 핀"으로 구분하고 본문에는 작품명을 표시한다.
+
+가져오기·사진 가져오기·추천 제외 화면도 Stack 헤더의 화면 제목을 본문에서 반복하지 않고 목적 설명·"제외 목록"을 표시한다. 공유 본문 제목은 사용자가 설정한 `share.title`을 보존하며 값이 없을 때만 "공유 목록"으로 표시한다. 기능 플래그로 숨겨진 화면과 인증/공유 화면의 실제 UI 확인 범위는 구조 구현과 별도로 기록한다.
 
 ### 실제 상태 소유권
 

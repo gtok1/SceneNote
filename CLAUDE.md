@@ -100,6 +100,8 @@ Expo App
 
 작성 방식의 단일 기준은 [docs/00_codex_doc_pattern.md](docs/00_codex_doc_pattern.md)다. 구현 명세·작업 지시를 쓰기 전에 읽고 마지막 체크리스트까지 적용한다.
 
+UI(화면·컴포넌트·스타일) 작업과 UI 명세·프롬프트는 [docs/00_ui_style_rules.md](docs/00_ui_style_rules.md)를 따른다. 웹과 iOS·Android 앱을 모두 고려하며, 명세·프롬프트에는 이 문서를 READ FIRST로 넣고 규칙을 반복하지 않는다.
+
 - 사람용 명세 파일과 Codex 실행 프롬프트를 짝으로 만든다. 새 프롬프트는 파일 대신 **응답 본문에 4중 백틱 펜스**로 제공한다.
 - 기존 `codex_prompt_*.md`는 보존하며 후속 명세·현재 코드와 대조한 뒤 사용한다.
 - 새 명세는 `AGENTS.md`의 해당 작업 표와 [문서 목차](docs/README.md)에 연결한다.

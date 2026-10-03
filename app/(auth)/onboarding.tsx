@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Link } from "expo-router";
 
+import { ONBOARDING_CONTENT_MAX_WIDTH } from "@/constants/layout";
 import { colors, radius, spacing } from "@/constants/theme";
 
 const slides: readonly [
@@ -33,7 +34,7 @@ export default function OnboardingScreen() {
   const isLast = index === slides.length - 1;
 
   return (
-    <KeyboardScreen contentContainerStyle={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container} maxWidth={ONBOARDING_CONTENT_MAX_WIDTH}>
       <View style={styles.dots}>
         {slides.map((item, itemIndex) => (
           <View

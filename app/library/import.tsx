@@ -1,7 +1,8 @@
-import { Redirect , useRouter } from "expo-router";
+import { Redirect } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
@@ -11,6 +12,7 @@ import { colors, radius, spacing } from "@/constants/theme";
 import { useNetflixBulkImport } from "@/hooks/useBulkImport";
 import type { BulkImportReport, BulkImportRowResult, BulkImportSummary, NetflixBulkImportRow } from "@/types/bulkImport";
 import { parseNetflixBulkWorkbook } from "@/utils/netflixBulkWorkbook";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
 const EXCEL_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -34,7 +36,9 @@ const SUMMARY_ITEMS: { key: keyof BulkImportSummary; label: string }[] = [
 ];
 
 function LibraryImportScreen() {
-  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
+  const insets = useSafeAreaInsets();
   const bulkImport = useNetflixBulkImport();
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<NetflixBulkImportRow[]>([]);
@@ -153,15 +157,7 @@ function LibraryImportScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons color={colors.text} name="chevron-back" size={18} />
-          <Text style={styles.backText}>라이브러리</Text>
-        </Pressable>
-        <Text style={styles.title}>엑셀 대량 등록</Text>
-      </View>
-
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.uploadPanel}>
         <View style={styles.uploadTextBox}>
           <Text style={styles.uploadTitle}>{fileName || "Netflix/TMDB 등록 엑셀"}</Text>
@@ -535,30 +531,13 @@ function labelStatusResult(value: string): string {
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
     gap: spacing.lg,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
     minHeight: "100%",
-    padding: spacing.lg,
-    paddingBottom: 112
-  },
-  header: {
-    gap: spacing.md
-  },
-  backButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    gap: spacing.xs,
-    paddingVertical: spacing.xs
-  },
-  backText: {
-    color: colors.text,
-    fontWeight: "800"
-  },
-  title: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "900"
+    paddingTop: spacing.lg,
+    width: "100%"
   },
   uploadPanel: {
     alignItems: "center",

@@ -1,23 +1,21 @@
 import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
-import { KeyboardAvoidingView, Platform, useWindowDimensions , Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, useWindowDimensions, ScrollView, View } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNetworkState } from "expo-network";
 
-import { GenreBadgeList } from "@/components/GenreBadge";
-import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
+import { ScreenStateFrame } from "@/components/common/ScreenStateFrame";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentReviewEditor } from "@/components/content/ContentReviewEditor";
 import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import { WatchProviderList } from "@/components/content/WatchProviderList";
-import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
-import { normalizeWatchStatuses, WATCH_STATUS_LABEL, WATCH_STATUS_OPTIONS } from "@/constants/status";
-import { colors, radius, spacing } from "@/constants/theme";
+import { normalizeWatchStatuses } from "@/constants/status";
+import { colors, spacing } from "@/constants/theme";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
 import {
   useAddToLibrary,
@@ -34,18 +32,24 @@ import { useWatchProviders } from "@/hooks/useWatchProviders";
 import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
-import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
+import { createAirDateLabel, createEpisodeCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 import { resolveContentLibraryItem } from "@/utils/seasonLibraryMatch";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
-import {
-  describeWatchCountSaveState,
-  resolveWatchCountSaveState
-} from "@/utils/watchCountInput";
-
-const PRIMARY_WATCH_STATUSES: WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
-const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(PRIMARY_WATCH_STATUSES);
+import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { getContentDetailLayout, createContentDetailMetaItems, createWatchStatusControlModel, contentDetailSections, type ContentDetailSection } from "@/utils/contentDetailView";
+import { createNextWatchStatuses, areSameWatchStatuses } from "@/utils/watchStatusSelection";
+import { createLibraryDeleteConfirmCopy, LIBRARY_DELETE_ZONE_COPY } from "@/utils/libraryFeedbackCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { confirmDestructive } from "@/utils/confirmDestructive";
+import { ContentDetailHero } from "@/components/content/ContentDetailHero";
+import { WatchStatusControl } from "@/components/content/WatchStatusControl";
+import { ContentActionBar } from "@/components/content/ContentActionBar";
+import { WatchCountCard } from "@/components/content/WatchCountCard";
+import { ContentOverviewCard } from "@/components/content/ContentOverviewCard";
+import { CastSection } from "@/components/content/CastSection";
+import { LibraryDangerZone } from "@/components/content/LibraryDangerZone";
 
 function parseSeasonParam(value: string | undefined): number | null {
   if (!value) return null;
@@ -84,7 +88,9 @@ export default function ContentDetailScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
-  const [overviewExpanded, setOverviewExpanded] = useState(false);
+  const layout = getContentDetailLayout(width);
+  const [columnsY, setColumnsY] = useState<number | null>(null);
+  const [progressY, setProgressY] = useState<number | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const didFocusProgress = useRef(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -222,7 +228,7 @@ export default function ContentDetailScreen() {
           statuses: nextStatuses,
           ...(completedRemoved ? { watchCount: 0 } : {})
         },
-        { onError: (error) => Alert.alert("상태 변경 실패", error.message) }
+        { onError: () => addToast("상태를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.", "error") }
       );
       return;
     }
@@ -233,7 +239,7 @@ export default function ContentDetailScreen() {
       { result: resultToAdd, status, ...(requestedSeason !== null ? { seasonNumber: requestedSeason } : {}) },
       {
         onSuccess: (response) => router.replace({ pathname: "/content/[id]", params: { id: response.content_id, ...(params.season ? { season: params.season } : {}) } }),
-        onError: (error) => Alert.alert("추가 실패", error.message)
+        onError: () => addToast("내 목록에 추가하지 못했어요. 잠시 후 다시 시도해 주세요.", "error")
       }
     );
   };
@@ -244,8 +250,8 @@ export default function ContentDetailScreen() {
     deleteLibraryItem.mutate(
       { libraryItemId: libraryItem.library_item_id },
       {
-        onSuccess: openLibraryList,
-        onError: (error) => Alert.alert("삭제 실패", error.message)
+        onSuccess: () => { addToast("내 목록에서 삭제했어요.", "success"); openLibraryList(); },
+        onError: (error) => addToast(userFacingErrorMessage(error, LIBRARY_DELETE_ZONE_COPY.errorFallback), "error")
       }
     );
   };
@@ -288,9 +294,23 @@ export default function ContentDetailScreen() {
     });
   };
 
-  if (content.isLoading) return <LoadingSkeleton />;
-  if (content.isError) return <ErrorState message={content.error.message} onRetry={() => content.refetch()} />;
-  if (!view) return <EmptyState title="콘텐츠를 찾을 수 없습니다" />;
+  const focusProgressCard = useCallback((y: number) => {
+    if (params.focus !== "progress" || didFocusProgress.current) return;
+    didFocusProgress.current = true;
+    setProgressHighlighted(true);
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - spacing.xl), animated: true });
+    });
+    highlightTimer.current = setTimeout(() => setProgressHighlighted(false), 1500);
+  }, [params.focus]);
+
+  useEffect(() => {
+    if (columnsY !== null && progressY !== null) focusProgressCard(columnsY + progressY);
+  }, [columnsY, progressY, focusProgressCard]);
+
+  if (content.isLoading) return <ScreenStateFrame><LoadingSkeleton /></ScreenStateFrame>;
+  if (content.isError) return <ScreenStateFrame><ErrorState message={content.error.message} onRetry={() => content.refetch()} /></ScreenStateFrame>;
+  if (!view) return <ScreenStateFrame><EmptyState title="콘텐츠를 찾을 수 없습니다" /></ScreenStateFrame>;
 
   const favoritePersonKeys = new Set(
     favoritePeople.data?.map((person) => `${person.source}:${person.external_id}`) ?? []
@@ -305,17 +325,12 @@ export default function ContentDetailScreen() {
     : null;
   const airDateLabel = createAirDateLabel(view.airDate, view.airYear);
   const episodeLabel = createEpisodeCountLabel(resolvedEpisodeCount);
-  const watchCountLabel = createWatchCountLabel(libraryItem?.watch_count, {
-    includeZero: Boolean(libraryItem)
-  });
 
   const saveWatchCount = (watchCount: number) => {
     if (!libraryItem) return;
     updateWatchCount.mutate(
       { libraryItemId: libraryItem.library_item_id, watchCount },
       {
-        // Alert.alert is an empty function on react-native-web, so failures here used to
-        // be completely invisible on the web build. Toasts render on every platform.
         onError: (error) => addToast(error.message || "본 횟수를 저장하지 못했습니다.", "error"),
         onSuccess: () => addToast(`본 횟수를 ${watchCount}회로 저장했어요.`, "success")
       }
@@ -347,252 +362,62 @@ export default function ContentDetailScreen() {
             totalEpisodes: resolvedEpisodeCount,
           });
           if (suggestion === "mark_completed") {
-            Alert.alert("모든 화를 시청했습니다", "완료로 표시할까요?", [
-              { text: "나중에", style: "cancel" },
-              { text: "완료로 표시", onPress: () => toggleStatus("completed") },
-            ]);
+            addToast("모든 화를 봤어요. 완료로 표시할까요?", "info", { actionLabel: "완료로 표시", onAction: () => toggleStatus("completed"), durationMs: 8000 });
           } else if (suggestion === "mark_watching") {
-            Alert.alert("시청을 시작했습니다", "보는 중으로 바꿀까요?", [
-              { text: "유지", style: "cancel" },
-              { text: "보는 중으로 변경", onPress: () => toggleStatus("watching") },
-            ]);
+            toggleStatus("watching");
           }
         },
-        onError: (error) => Alert.alert("시청 진행 저장 실패", error.message),
+        onError: () => addToast("시청 진행을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.", "error"),
       },
     );
   };
 
-  const focusProgressCard = (y: number) => {
-    if (params.focus !== "progress" || didFocusProgress.current) return;
-    didFocusProgress.current = true;
-    setProgressHighlighted(true);
-    requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - spacing.xl), animated: true });
-    });
-    highlightTimer.current = setTimeout(() => setProgressHighlighted(false), 1500);
+
+
+  const confirmRemoveFromLibrary = () => {
+    if (!libraryItem || deleteLibraryItem.isPending) return;
+    const copy = createLibraryDeleteConfirmCopy(view.title);
+    confirmDestructive({ title: copy.title, message: copy.message, confirmLabel: copy.confirmLabel, onConfirm: removeFromLibrary });
+  };
+  const statusPending = addToLibrary.isPending || updateStatuses.isPending || deleteLibraryItem.isPending;
+  const sections = contentDetailSections({ columns: layout.columns, inLibrary: Boolean(libraryItem), isSeries: view.contentType !== "movie", hasCast: view.cast.length > 0, peopleEnabled: PEOPLE_FEATURES_ENABLED });
+  const renderSection = (key: ContentDetailSection) => {
+    switch (key) {
+      case "progress": return libraryItem ? <View key={key} onLayout={event => setProgressY(event.nativeEvent.layout.y)}>
+        <EpisodeProgressCard highlighted={progressHighlighted}
+          isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
+          isSaving={updateManualProgress.isPending} isUnavailable={!libraryItem.manual_progress_available}
+          item={progressLibraryItem ?? libraryItem} onOpenEpisodes={openEpisodes} onSave={saveManualProgress} totalEpisodes={resolvedEpisodeCount} />
+      </View> : null;
+      case "watchCount": return libraryItem ? <WatchCountCard key={key} watchCount={libraryItem.watch_count} isCompleted={selectedStatuses.includes("completed")} isSaving={updateWatchCount.isPending} onSave={saveWatchCount} /> : null;
+      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} providers={watchProviders.data.providers} otherRegions={watchProviders.data.other_regions ?? []} />;
+      case "review": return libraryItem ? <ContentReviewEditor key={key} contentId={libraryItem.content_id} contentAirDate={view.airDate} contentEndDate={view.endDate} contentAirYear={view.airYear} firstWatchedAt={libraryItem.first_watched_at} lastWatchedAt={libraryItem.last_watched_at} libraryItemId={libraryItem.library_item_id} onSaved={() => addToast("내 감상을 저장했어요.", "success")} /> : null;
+      case "overview": return <ContentOverviewCard key={key} overview={view.overview} />;
+      case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} pending={addFavoritePerson.isPending} columns={layout.mainWidth >= 520 ? 2 : 1} onAdd={addCastMember} onOpen={openCastMember} />;
+      case "danger": return <LibraryDangerZone key={key} pending={deleteLibraryItem.isPending} onDelete={confirmRemoveFromLibrary} />;
+    }
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.container, { paddingBottom: 24 + insets.bottom }]} ref={scrollViewRef}>
-      <Image source={view.posterUrl ? { uri: view.posterUrl } : null} style={[styles.poster, width < 768 ? { height: 144 } : null]} contentFit="cover" />
-      <View style={styles.body}>
-        <Text style={styles.title}>{view.title}</Text>
-        {view.originalTitle ? <Text style={styles.original}>{view.originalTitle}</Text> : null}
-        <Text style={styles.meta}>
-          {[airDateLabel, view.contentType, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
-        </Text>
-        {externalDetail.isError ? (
-          <Text style={styles.warning}>상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다.</Text>
-        ) : null}
-
-        {selectedStatuses.length > 0 ? (
-          <View style={styles.badgeRow}>
-            {selectedStatuses.map((status) => (
-              <WatchStatusBadge key={status} status={status} />
-            ))}
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight} style={{ flex: 1 }}>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" ref={scrollViewRef} style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 24 + insets.bottom }}>
+        <View style={{ width: "100%", maxWidth: HOME_CONTENT_MAX_WIDTH, alignSelf: "center", paddingLeft: Math.max(layout.gutter, insets.left), paddingRight: Math.max(layout.gutter, insets.right), paddingTop: spacing.lg, gap: layout.gap }}>
+          <ContentDetailHero title={view.title} originalTitle={view.originalTitle} posterUrl={view.posterUrl}
+            metaItems={createContentDetailMetaItems({ contentType: view.contentType, airDateLabel, episodeLabel })}
+            genres={view.genres} poster={layout.poster} warning={externalDetail.isError ? "상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다." : null}>
+            {externalResult || libraryItem ? <WatchStatusControl model={createWatchStatusControlModel(selectedStatuses, Boolean(libraryItem))} pending={statusPending} onSelect={toggleStatus} /> : null}
+            {!externalResult || libraryItem ? <ContentActionBar isMovie={view.contentType === "movie"} pinCount={libraryItem?.pin_count}
+              onOpenEpisodes={() => router.push({ pathname: "/content/[id]/episodes", params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) } })}
+              onAddMoviePin={() => router.push({ pathname: "/pins/new", params: { contentId: libraryItem?.content_id ?? params.id } })}
+              onOpenPins={() => router.push({ pathname: "/content/[id]/pins", params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) } })}
+              onOpenList={openLibraryList} /> : null}
+          </ContentDetailHero>
+          <View onLayout={event => setColumnsY(event.nativeEvent.layout.y)} style={{ flexDirection: layout.columns === 2 ? "row" : "column", alignItems: layout.columns === 2 ? "flex-start" : "stretch", gap: layout.gap }}>
+            <View style={{ width: layout.mainWidth, gap: layout.gap }}>{sections.main.map(renderSection)}</View>
+            {sections.side.length ? <View style={{ width: layout.sideWidth, gap: layout.gap }}>{sections.side.map(renderSection)}</View> : null}
           </View>
-        ) : null}
-
-        {!externalResult || libraryItem ? (
-          <View style={styles.actions}>
-            {view.contentType !== "movie" ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push({
-                    pathname: "/content/[id]/episodes",
-                    params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) }
-                  })
-                }
-                style={styles.primaryButton}
-              >
-                <Text style={styles.primaryText}>에피소드 보기</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push({
-                    pathname: "/pins/new",
-                    params: { contentId: libraryItem?.content_id ?? params.id }
-                  })
-                }
-                style={styles.primaryButton}
-              >
-                <Text style={styles.primaryText}>영화 핀 추가</Text>
-              </Pressable>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                router.push({
-                  pathname: "/content/[id]/pins",
-                  params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) }
-                })
-              }
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryText}>핀 목록</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={openLibraryList}
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryText}>목록</Text>
-            </Pressable>
-          </View>
-        ) : null}
-        <GenreBadgeList genres={view.genres} maxVisible={view.genres.length} />
-
-        {libraryItem ? (
-          <WatchCountInput
-            isCompleted={selectedStatuses.includes("completed")}
-            isSaving={updateWatchCount.isPending}
-            onSave={saveWatchCount}
-            watchCount={libraryItem.watch_count}
-          />
-        ) : null}
-
-        {libraryItem && view.contentType !== "movie" ? (
-          <View onLayout={(event) => focusProgressCard(event.nativeEvent.layout.y)}>
-            <EpisodeProgressCard
-              highlighted={progressHighlighted}
-              isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
-              isSaving={updateManualProgress.isPending}
-              isUnavailable={!libraryItem.manual_progress_available}
-              item={progressLibraryItem ?? libraryItem}
-              onOpenEpisodes={openEpisodes}
-              onSave={saveManualProgress}
-              totalEpisodes={resolvedEpisodeCount}
-            />
-          </View>
-        ) : null}
-
-        {libraryItem ? (
-          <ContentReviewEditor
-            contentId={libraryItem.content_id}
-            contentAirDate={view.airDate}
-            contentEndDate={view.endDate}
-            contentAirYear={view.airYear}
-            firstWatchedAt={libraryItem.first_watched_at}
-            lastWatchedAt={libraryItem.last_watched_at}
-            libraryItemId={libraryItem.library_item_id}
-            onSaved={() => addToast("내 감상을 저장했어요.", "success")}
-          />
-        ) : null}
-
-        <Text numberOfLines={overviewExpanded ? undefined : 3} style={styles.overview}>{view.overview || "줄거리 정보가 없습니다."}</Text>
-        {view.overview ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: overviewExpanded }} onPress={() => setOverviewExpanded(value => !value)} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: colors.primary }}>{overviewExpanded ? "줄거리 접기" : "줄거리 더보기"}</Text></Pressable> : null}
-
-        <WatchProviderList
-          error={watchProviders.error}
-          isLoading={watchProviders.isLoading}
-          providers={watchProviders.data.providers}
-          otherRegions={watchProviders.data.other_regions ?? []}
-        />
-
-        {PEOPLE_FEATURES_ENABLED && view.cast.length ? (
-          <View style={styles.castSection}>
-            <Text style={styles.sectionTitle}>{view.contentType === "anime" ? "성우" : "출연 배우"}</Text>
-            <Text style={styles.castHint}>처음 누르면 좋아하는 인물에 등록되고, 등록된 인물은 상세 화면으로 이동합니다.</Text>
-            <View style={styles.castGrid}>
-              {view.cast.slice(0, 8).map((member) => {
-                const source = view.contentType === "anime" ? "anilist" : "tmdb";
-                const registered = favoritePersonKeys.has(`${source}:${member.id}`);
-
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: registered }}
-                    disabled={addFavoritePerson.isPending}
-                    key={`${member.id}:${member.character ?? ""}`}
-                    onPress={() => (registered ? openCastMember(member) : addCastMember(member))}
-                    style={[
-                      styles.castCard,
-                      registered ? styles.castCardRegistered : null,
-                      addFavoritePerson.isPending ? styles.statusButtonDisabled : null
-                    ]}
-                  >
-                    <Image
-                      contentFit="cover"
-                      source={member.profile_url ? { uri: member.profile_url } : null}
-                      style={styles.castImage}
-                    />
-                    <View style={styles.castTextBox}>
-                      <View style={styles.castNameRow}>
-                        <Text numberOfLines={1} style={styles.castName}>
-                          {member.name}
-                        </Text>
-                        {registered ? <Text style={styles.registeredBadge}>등록됨</Text> : null}
-                      </View>
-                      {member.original_name && member.original_name !== member.name ? (
-                        <Text numberOfLines={1} style={styles.castOriginalName}>
-                          {member.original_name}
-                        </Text>
-                      ) : null}
-                      {member.character ? (
-                        <Text numberOfLines={1} style={styles.castCharacter}>
-                          {member.character}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        {externalResult || libraryItem ? (
-          <View style={styles.addPanel}>
-            <Text style={styles.addTitle}>
-              {libraryItem ? "내 목록 상태" : "내 목록에 추가"}
-            </Text>
-            <View style={styles.statusGrid}>
-              {WATCH_STATUS_OPTIONS.map((status) => {
-                const active = selectedStatuses.includes(status);
-                const pending = addToLibrary.isPending || updateStatuses.isPending || deleteLibraryItem.isPending;
-
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ checked: active }}
-                    disabled={pending}
-                    key={status}
-                    onPress={() => toggleStatus(status)}
-                    style={[
-                      styles.statusButton,
-                      active ? styles.statusButtonActive : null,
-                      pending ? styles.statusButtonDisabled : null
-                    ]}
-                  >
-                    <Text style={[styles.statusButtonText, active ? styles.statusButtonTextActive : null]}>
-                      {pending ? "저장 중" : WATCH_STATUS_LABEL[status]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {libraryItem ? (
-              <Pressable
-                accessibilityRole="button"
-                disabled={deleteLibraryItem.isPending}
-                onPress={removeFromLibrary}
-                style={[styles.deleteButton, deleteLibraryItem.isPending ? styles.statusButtonDisabled : null]}
-              >
-                <Text style={styles.deleteButtonText}>
-                  {deleteLibraryItem.isPending ? "삭제 중" : "삭제"}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -608,354 +433,3 @@ function normalizeContentTypeFromCast(
 
   return contentType;
 }
-
-function createNextWatchStatuses(currentStatuses: WatchStatus[], targetStatus: WatchStatus): WatchStatus[] {
-  const current = normalizeWatchStatuses(currentStatuses);
-  const active = current.includes(targetStatus);
-
-  if (PRIMARY_WATCH_STATUS_SET.has(targetStatus)) {
-    if (active) return current;
-    return normalizeWatchStatuses([
-      targetStatus,
-      ...current.filter((status) => !PRIMARY_WATCH_STATUS_SET.has(status))
-    ]);
-  }
-
-  if (active) {
-    const next = current.filter((status) => status !== targetStatus);
-    return next.length ? normalizeWatchStatuses(next) : current;
-  }
-
-  return normalizeWatchStatuses([...current, targetStatus]);
-}
-
-function areSameWatchStatuses(left: WatchStatus[], right: WatchStatus[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((status) => rightSet.has(status));
-}
-
-function WatchCountInput({
-  watchCount,
-  isCompleted,
-  isSaving,
-  onSave
-}: {
-  watchCount: number;
-  isCompleted: boolean;
-  isSaving: boolean;
-  onSave: (watchCount: number) => void;
-}) {
-  const [value, setValue] = useState(String(watchCount));
-  const saveState = resolveWatchCountSaveState(value, watchCount, isCompleted);
-  const blockedReason = describeWatchCountSaveState(saveState);
-  const canSave = saveState.kind === "savable";
-
-  useEffect(() => {
-    setValue(String(watchCount));
-  }, [watchCount]);
-
-  const submit = () => {
-    if (saveState.kind !== "savable") return;
-    onSave(saveState.value);
-  };
-
-  return (
-    <View style={styles.progressPanel}>
-      <View style={styles.progressHeader}>
-        <Text style={styles.progressTitle}>본 횟수</Text>
-        <Text style={styles.progressMeta}>
-          {watchCount}회
-        </Text>
-      </View>
-      <View style={styles.progressInputRow}>
-        <TextInput
-          accessibilityLabel="작품을 본 횟수 입력"
-          editable={!isSaving}
-          inputMode="numeric"
-          keyboardType="number-pad"
-          onChangeText={(text) => setValue(text.replace(/\D/g, ""))}
-          onSubmitEditing={submit}
-          selectTextOnFocus
-          style={styles.progressInput}
-          value={value}
-        />
-        <Text style={styles.progressDivider}>회</Text>
-        <Pressable
-          accessibilityRole="button"
-          disabled={isSaving || !canSave}
-          onPress={submit}
-          style={[
-            styles.progressSaveButton,
-            isSaving || !canSave ? styles.progressSaveButtonDisabled : null
-          ]}
-        >
-          <Text style={styles.progressSaveText}>{isSaving ? "저장 중" : "저장"}</Text>
-        </Pressable>
-      </View>
-      {blockedReason ? (
-        <Text style={styles.progressHint}>{blockedReason}</Text>
-      ) : null}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    paddingBottom: 24
-  },
-  poster: {
-    alignSelf: "center",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
-    height: 300,
-    marginTop: spacing.lg,
-    width: 200
-  },
-  body: {
-    gap: spacing.md,
-    padding: spacing.lg
-  },
-  title: {
-    color: colors.text,
-    fontSize: 26,
-    fontWeight: "900"
-  },
-  original: {
-    color: colors.textMuted,
-    fontSize: 14
-  },
-  meta: {
-    color: colors.textMuted,
-    fontSize: 13
-  },
-  warning: {
-    color: colors.warning,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  badgeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs
-  },
-  progressPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: spacing.sm,
-    padding: spacing.md
-  },
-  progressHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
-  },
-  progressTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "900"
-  },
-  progressMeta: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  progressInputRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm
-  },
-  progressInput: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "900",
-    minWidth: 88,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    textAlign: "center"
-  },
-  progressDivider: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "800"
-  },
-  progressSaveButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    marginLeft: "auto",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm
-  },
-  progressSaveButtonDisabled: {
-    opacity: 0.5
-  },
-  progressHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: spacing.xs
-  },
-  progressSaveText: {
-    color: colors.surface,
-    fontWeight: "900"
-  },
-  overview: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 22
-  },
-  castSection: {
-    gap: spacing.sm
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  castHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  castGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm
-  },
-  castCard: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.sm,
-    minWidth: 220,
-    padding: spacing.sm
-  },
-  castCardRegistered: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary
-  },
-  castImage: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.sm,
-    height: 48,
-    width: 36
-  },
-  castTextBox: {
-    flex: 1
-  },
-  castNameRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.xs
-  },
-  castName: {
-    color: colors.text,
-    flexShrink: 1,
-    fontSize: 13,
-    fontWeight: "800"
-  },
-  registeredBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.sm,
-    color: colors.surface,
-    fontSize: 10,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 5,
-    paddingVertical: 2
-  },
-  castOriginalName: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  castCharacter: {
-    color: colors.textMuted,
-    fontSize: 12
-  },
-  actions: {
-    gap: spacing.md
-  },
-  addPanel: {
-    gap: spacing.sm
-  },
-  addTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "800"
-  },
-  statusGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm
-  },
-  statusButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    flexGrow: 1,
-    minWidth: 140,
-    padding: spacing.md
-  },
-  statusButtonActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-    borderWidth: StyleSheet.hairlineWidth
-  },
-  statusButtonDisabled: {
-    opacity: 0.6
-  },
-  statusButtonText: {
-    color: colors.text,
-    fontWeight: "800"
-  },
-  statusButtonTextActive: {
-    color: colors.surface
-  },
-  deleteButton: {
-    alignItems: "center",
-    backgroundColor: colors.dangerSoft,
-    borderColor: colors.danger,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.md
-  },
-  deleteButtonText: {
-    color: colors.danger,
-    fontWeight: "900"
-  },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    padding: spacing.lg
-  },
-  primaryText: {
-    color: colors.surface,
-    fontWeight: "800"
-  },
-  secondaryButton: {
-    alignItems: "center",
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.lg
-  },
-  secondaryText: {
-    color: colors.text,
-    fontWeight: "800"
-  }
-});

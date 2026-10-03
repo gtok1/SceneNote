@@ -45,6 +45,7 @@ export function EpisodeSelector({
         </View>
       ) : null}
       <FlashList
+        showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         data={episodes}
         keyExtractor={(item) => item.id}

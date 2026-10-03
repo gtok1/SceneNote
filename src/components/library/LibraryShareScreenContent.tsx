@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDi
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
@@ -15,6 +16,7 @@ import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
 import { createReviewLabel } from "@/utils/reviewDisplay";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
 interface LibraryShareScreenContentProps {
   shareId?: string;
@@ -23,6 +25,8 @@ interface LibraryShareScreenContentProps {
 export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContentProps) {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
+  const insets = useSafeAreaInsets();
   const columns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 2;
   const cardWidth = `${100 / columns}%` as const;
   const normalizedShareId = extractShareId(shareId);
@@ -47,7 +51,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
   }, [share.data?.filters]);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.header}>
         <Pressable accessibilityRole="button" onPress={() => router.replace("/")} style={styles.homeButton}>
           <Ionicons color={colors.text} name="home-outline" size={18} />
@@ -55,7 +59,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
         </Pressable>
         <View style={styles.titleBox}>
           <Text style={styles.eyebrow}>{share.data?.ownerDisplayName ?? "SceneNote"}님의 공유 목록</Text>
-          <Text style={styles.title}>{share.data?.title ?? "공유 라이브러리"}</Text>
+          <Text style={styles.title}>{share.data?.title ?? "공유 목록"}</Text>
           {filterLabel ? <Text style={styles.meta}>{filterLabel}</Text> : null}
         </View>
       </View>
@@ -148,11 +152,13 @@ function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWid
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
     gap: spacing.lg,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
     minHeight: "100%",
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl
+    paddingTop: spacing.lg,
+    width: "100%"
   },
   header: {
     gap: spacing.lg

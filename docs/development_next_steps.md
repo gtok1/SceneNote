@@ -2,6 +2,16 @@
 
 작성일: 2026-05-02
 
+## 라이브러리 기본 갤러리·카드 높이 정렬 (2026-10-03)
+
+사용자 첨부 화면은 Underbar가 아닌 SceneNote 라이브러리와 일치해 이 저장소에서 수정했다. 기존 미커밋 변경은 보존했다.
+
+- `src/stores/libraryUiStore.ts`: 기본 갤러리, 저장 설정 version 1로 이전 설정을 갤러리로 한 번 이관. 이후 사용자가 고른 상세/갤러리 보기는 기존 방식으로 저장한다. URL의 명시적 보기 선택은 유지한다.
+- `src/components/content/ContentGalleryCard.tsx`, `app/(tabs)/library.tsx`: 정보 영역의 자연 높이(여백 포함)를 측정해 현재 폭·글자 배율에서 관측한 최대값을 모든 갤러리 카드의 최소 높이에 적용한다. 창 폭·글자 배율 변경 시 재측정하며 새로 렌더되는 더 큰 카드도 반영한다. 제목 두 줄 공간, 포스터 2:3, 기존 장르/상태 배지와 회차 이동 계약을 유지하고 이어보기 버튼의 중첩 Pressable을 제거했다. 기존 토큰·AppImage를 재사용하며 API/DB 변경은 없다.
+- 실제 검사: `npm run typecheck`, `npm run lint`, `npm run build`, `git diff --check` 통과. `npm test`는 843개 중 842개 통과, 미변경 추천 엔진의 `uses latest-popular fallback ordering with an empty library` 1건 실패(추천 이유에 `최신`을 기대). 해당 테스트 파일 단독 실행에서도 재현됐으며 추천 엔진/테스트는 HEAD와 동일하다. 관련 라이브러리 반응형·URL·이어보기 테스트 24개 통과. 로그는 `/tmp/scenenote-gallery-{test,focused,existing-failure,typecheck,lint,build}.log`.
+- 기존 8081 서버의 로그인된 Chrome에서 375·768·1440 및 기본 데스크톱 폭을 확인했다. 375의 카드 높이 438.25, 768의 445, 기본 데스크톱의 약 461로 각 폭에서 같은 행의 하단선이 일치했고 카드 좌우가 콘텐츠 범위 안에 있다. 회차 버튼 → 에피소드 목록 이동, URL 보기 파라미터 없는 `/library` 진입의 갤러리 선택을 확인했다. viewport 임시 설정을 해제했다. 서버 재시작·배포·개인 기록 변경은 하지 않았다.
+- 미검증: iOS/Android 실기기·시뮬레이터, 시스템 글자 1.3배·스크린리더, 저장 설정 이관의 모든 기기 조합. Web build는 Native 동작 검증이 아니다. 각 기기에서 갤러리 기본 진입·큰 글자·긴 장르/상태 배지·회차 버튼·스크롤을 확인하고 기존 추천 테스트 실패는 별도 후속 작업으로 조사한다.
+
 ## 현재 작업 재개 기준 (2026-09-26)
 
 코드 대조 기준: `main`, `198a064`의 작업 트리. 이번 작업은 Markdown 문서만 점검·보완했다. 아래의 **코드 확인**은 정적 조사 결과이며 실행·배포·실기기 검증 완료를 의미하지 않는다. 초기 5월 기록은 뒤에 별도로 보존한다.
@@ -83,12 +93,31 @@
 - ① 전에도 좋아하는 인물 등록은 동작한다(PGRST204 재시도). ② 전에는 새 필드가 오지 않아 표시가 지금과 같다.
 - 배포 후 수동 확인: docs/38 10장 M-1~M-7.
 
+### 헤더·본문 정렬 (2026-10-03, 미커밋 작업)
+
+- 루트·인증 Stack에 공통 `ScreenHeader`를 적용하고 화면별 한국어 제목과 본문 최대 폭을 맞췄다. 탭의 기본 헤더는 숨기고 검색·라이브러리에 본문 제목을 추가했다. 검색·라이브러리·핀 및 상세/보조 화면은 1200 가운데 프레임과 `getHomeLayout` gutter를 사용하며, 핀 상세·폼·인증은 720, 온보딩은 560으로 제한한다. `KeyboardScreen`, 핀 저장 footer, `ScreenStateFrame`도 해당 본문 폭을 공유한다. 구조 설명은 [04](04_architecture.md)·[08](08_frontend_architecture.md#공통-헤더본문-프레임-2026-10-03)에 있다.
+- 실행 검사: `npm test` **840개 중 839개 통과**. `supabase/functions/_shared/recommendationEngine.test.ts`의 `uses latest-popular fallback ordering with an empty library` 1건은 작업 전부터 존재한 실패다. 마지막 UI 변경 뒤 `npm run typecheck`, `npm run lint`, `npm run build`(웹 정적 export·`dist` 생성) 최종 실행은 모두 종료 코드 0이며 `git diff --check`도 통과했다. UI 프레임 변경은 순수 함수 테스트만으로 화면 동작을 보장하지 않는다.
+
+| 플랫폼·범위 | 확인한 결과 | 남은 확인·이유 |
+|---|---|---|
+| Chrome 웹 8081, 폭 375·1440 | 여섯 탭(홈·검색·라이브러리·핀·인물·프로필), 인물 상세, 핀 상세/편집의 헤더·본문 표시 확인 | 해당 화면의 다른 폭은 이번에 확인하지 않았다. |
+| Chrome 웹 8081, 목록 보기 | 검색·라이브러리의 리스트/갤러리 보기 1440, 라이브러리 갤러리 375 확인 | 검색 갤러리 375 등 나머지 조합은 별도 확인 필요. |
+| Chrome 웹 8081, 작품 상세 | 폭 375·768·1440의 헤더·본문 정렬 확인 | 실제 저장·삭제 흐름의 재검증을 뜻하지 않는다. |
+| Chrome 웹 8081, 에피소드 목록 | 폭 375·768 표시 확인 | 다른 폭은 이번에 확인하지 않았다. |
+| Chrome 웹 8081, 핀 추가 375 | 작품·회차 맥락과 저장 footer의 정렬, 미변경 취소 후 복귀 확인 | 실제 핀 저장은 실행하지 않았다. |
+| Chrome 웹 8081, 작품 핀 목록 375·1440 | 네비게이션 제목 "작품 핀"·본문 작품명·빈 상태 정렬 확인 | 핀이 있는 목록과 에피소드별 핀 진입 전체를 재검증한 것은 아니다. |
+| 가져오기·사진 가져오기·이전 추천 제외 목록 | 코드 프레임·웹 빌드만 확인 | `EXTENDED_FEATURES_ENABLED=false`이므로 실제 화면 진입·조작은 확인하지 않았다. |
+| 유효 공유 링크·로그아웃 상태의 인증 화면 | 실제 UI 미확인 | 사용자 기록·로그인 세션을 변경하지 않는 범위에서 QA했다. 별도 환경에서 확인 필요. |
+| iOS·Android | 실행하지 않음 | `xcrun simctl`을 사용할 수 없어 네이티브 안전 영역·키보드·글자 크기 1.3배를 확인하지 못했다. 시뮬레이터 또는 실기기에서 별도 검증 필요. |
+
+이번 웹 QA에서는 사용자 기록의 저장·삭제와 로그인 세션 변경을 실행하지 않았다. 코드·빌드 확인을 실제 화면 조작이나 네이티브 검증 완료로 간주하지 않는다.
+
 ### 먼저 처리할 미완료·충돌
 
 | 중요도 | 상태 | 항목과 근거 | 다음 작업 |
 |--------|------|-------------|-----------|
 | P0 | 명세 미충족·코드 확인 | [31 U-1](31_usability_review_fixes_spec.md): `app/(tabs)/pins.tsx`의 모바일 카드/타임라인 선택이 `setSelectedPinId`만 수행 | 명세 D-2의 데스크톱 선택 동작을 유지하며 모바일 열기 수정·검증 |
-| P0 | 명세 미충족·코드 확인 | [31 U-2](31_usability_review_fixes_spec.md): `app/content/[id].tsx`의 `removeFromLibrary`가 확인 없이 mutation 호출 | D-5의 실제 삭제 범위와 확인 문구를 보존해 수정 |
+| P0 | 코드 구현 확인·실제 삭제 검증 남음 | [31 U-2](31_usability_review_fixes_spec.md)·[39](39_content_detail_saas_redesign_spec.md): `app/content/[id].tsx`가 `confirmDestructive`로 확인 후 `removeFromLibrary` 호출 | 실제 삭제 성공·관련 기록 제거 범위·실패 피드백·이동을 별도 테스트 기록으로 재검증 |
 | P0 | 명세 미충족·코드 확인 | [31 U-3](31_usability_review_fixes_spec.md): `src/services/pins.ts`의 `getPinsByContent`는 초→작성 시각 정렬이며 `PIN_SELECT`에 시즌 정보 없음 | D-3·D-4의 시즌→회차→초 정렬과 표기 적용. U-4~U-11도 구현·테스트 표 전체를 별도 대조 |
 | 높음 | 보안 원칙과 구현 관계 판단 필요 | `supabase/functions/add-to-library/index.ts`가 `requireUser` 후 관리자 클라이언트로 사용자 기록 저장. [04](04_architecture.md)의 RLS 경유 원칙과 차이 | 인증 검증·소유권 지정·RLS 우회 범위를 검토하고 계약을 결정. 취약점이 입증됐다는 뜻은 아님 |
 | 높음 | 환경 구성 개선 필요 | `.env.example`, `backend:serve`, `scripts/backfill-content-air-date.ts`, `scripts/smoke-edge-functions.ts`가 앱/서버 변수 및 관리자 키 사용을 섞음 | AGENTS의 서버 secret 경계 유지. 별도 작업에서 서버/관리용 환경 분리; 앱용 env에 관리자 키를 추가하는 우회 금지 |

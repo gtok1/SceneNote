@@ -1,19 +1,21 @@
 import { Redirect , useRouter } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { Image } from "expo-image";
 
 import { EmptyState } from "@/components/common/EmptyState";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAddToLibrary } from "@/hooks/useLibrary";
 import { searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import { extractPhotoTitleCandidates } from "@/utils/photoTitleCandidates";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
 const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
@@ -26,6 +28,9 @@ const MEDIA_FILTERS: { label: string; value: MediaTypeFilter }[] = [
 
 function LibraryPhotoImportScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
+  const insets = useSafeAreaInsets();
   const addToLibrary = useAddToLibrary();
   const [imageName, setImageName] = useState("");
   const [imageUri, setImageUri] = useState("");
@@ -160,14 +165,8 @@ function LibraryPhotoImportScreen() {
   const progressLabel = ocrProgress === null ? "" : `${Math.round(ocrProgress * 100)}%`;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons color={colors.text} name="chevron-back" size={18} />
-          <Text style={styles.backText}>라이브러리</Text>
-        </Pressable>
-        <Text style={styles.title}>사진으로 보고 싶음 등록</Text>
-      </View>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: spacing.xl + insets.bottom }]}>
+      <Text style={styles.intro}>찾은 작품을 보고 싶음 목록에 추가해요.</Text>
 
       <View style={styles.uploadPanel}>
         <View style={styles.uploadTextBox}>
@@ -367,30 +366,17 @@ function ErrorPanel({ message }: { message: string }) {
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
     gap: spacing.lg,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
     minHeight: "100%",
-    padding: spacing.lg,
-    paddingBottom: 112
+    paddingTop: spacing.lg,
+    width: "100%"
   },
-  header: {
-    gap: spacing.md
-  },
-  backButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    gap: spacing.xs,
-    paddingVertical: spacing.xs
-  },
-  backText: {
-    color: colors.text,
-    fontWeight: "800"
-  },
-  title: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "900"
+  intro: {
+    ...typography.body,
+    color: colors.textMuted
   },
   uploadPanel: {
     alignItems: "center",

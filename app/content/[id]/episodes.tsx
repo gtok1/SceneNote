@@ -1,15 +1,17 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
+import { ScreenStateFrame } from "@/components/common/ScreenStateFrame";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { EpisodeSelector } from "@/components/content/EpisodeSelector";
 import { SeasonSelector } from "@/components/content/SeasonSelector";
-import { colors, spacing } from "@/constants/theme";
+import { colors, spacing, typography } from "@/constants/theme";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import {
   useEpisodeProgress,
   useEpisodes,
@@ -23,6 +25,8 @@ export default function EpisodesScreen() {
   const { id, libraryItemId, season: requestedSeason } = useLocalSearchParams<{ id: string; libraryItemId?: string; season?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
   const [selectedSeasonId, setSeason] = useState<string | null>(null);
   const seasons = useSeasons(id);
   const episodes = useEpisodes(id, selectedSeasonId);
@@ -38,19 +42,21 @@ export default function EpisodesScreen() {
     if (!validSelection) setSeason(seasons.data?.find(season => season.season_number === Number(requestedSeason ?? libraryItem?.season_number))?.id ?? seasons.data?.[0]?.id ?? null);
   }, [seasons.data, selectedSeasonId, setSeason, requestedSeason, libraryItem?.season_number]);
 
-  if (seasons.isLoading) return <LoadingSkeleton variant="episode-row" />;
-  if (seasons.isError) return <ErrorState message={seasons.error.message} onRetry={() => seasons.refetch()} />;
+  if (seasons.isLoading) return <ScreenStateFrame><LoadingSkeleton variant="episode-row" /></ScreenStateFrame>;
+  if (seasons.isError) return <ScreenStateFrame><ErrorState message={seasons.error.message} onRetry={() => seasons.refetch()} /></ScreenStateFrame>;
   if (!seasons.data?.length) {
     return (
+      <ScreenStateFrame>
       <EmptyState
         description="외부 API에서 아직 시즌 정보를 찾지 못했거나, 이 작품은 에피소드 정보가 없는 형식입니다."
         title="시즌 정보가 없습니다"
       />
+      </ScreenStateFrame>
     );
   }
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
+    <View style={[styles.container, { paddingBottom: spacing.xl + insets.bottom, paddingLeft: Math.max(gutter, insets.left) - spacing.lg, paddingRight: Math.max(gutter, insets.right) - spacing.lg }]}>
       <Text style={styles.notice}>{libraryItem?.title_primary ?? "에피소드"} · {selectedSeason ? `시즌 ${selectedSeason.season_number}` : "시즌 선택"}</Text>
       <SeasonSelector seasons={seasons.data} selectedSeasonId={selectedSeasonId} onSelect={setSeason} />
       {episodes.isLoading ? <LoadingSkeleton variant="episode-row" /> : null}
@@ -110,12 +116,15 @@ export default function EpisodesScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
-    flex: 1
+    flex: 1,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
+    width: "100%"
   },
   notice: {
+    ...typography.caption,
     color: colors.textMuted,
-    fontSize: 12,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg
   }

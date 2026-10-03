@@ -14,10 +14,12 @@ import {
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
+import { ScreenStateFrame } from "@/components/common/ScreenStateFrame";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { KoreanNameEditor } from "@/components/people/KoreanNameEditor";
 import { colors, radius, spacing } from "@/constants/theme";
@@ -34,6 +36,7 @@ import type { LibraryListItem } from "@/types/library";
 import type { PersonCategory, PersonCredit, PersonSource } from "@/types/people";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import { formatPersonName } from "@/utils/japaneseName";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { personKey } from "@/utils/peopleScreen";
 import { pickKoreanName } from "@/utils/personKoreanName";
 import {
@@ -69,6 +72,8 @@ const STATUS_OPTIONS: {
 function PersonDetailScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
+  const insets = useSafeAreaInsets();
   const isWide = width >= WIDE_LAYOUT_MIN_WIDTH;
   const user = useAuthStore((state) => state.user);
   const addToast = useAppUIStore((state) => state.addToast);
@@ -303,12 +308,12 @@ function PersonDetailScreen() {
   };
 
   if (!parsed.source || !parsed.externalId || !parsed.category) {
-    return <EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" />;
+    return <ScreenStateFrame><EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" /></ScreenStateFrame>;
   }
-  if (detail.isLoading) return <LoadingSkeleton count={4} />;
+  if (detail.isLoading) return <ScreenStateFrame><LoadingSkeleton count={4} /></ScreenStateFrame>;
   if (detail.isError)
-    return <ErrorState message={detail.error.message} onRetry={() => detail.refetch()} />;
-  if (!detail.data) return <EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" />;
+    return <ScreenStateFrame><ErrorState message={detail.error.message} onRetry={() => detail.refetch()} /></ScreenStateFrame>;
+  if (!detail.data) return <ScreenStateFrame><EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" /></ScreenStateFrame>;
 
   const person = detail.data;
   const favorite = favorites.data?.find((item) => personKey(item) === personKey(person));
@@ -332,17 +337,8 @@ function PersonDetailScreen() {
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.page}>
-        <View style={styles.container}>
-          <Pressable
-            accessibilityLabel="뒤로 가기"
-            accessibilityRole="button"
-            onPress={() => router.back()}
-            style={styles.backButton}
-          >
-            <Ionicons color={colors.text} name="chevron-back" size={22} />
-          </Pressable>
-
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.page, { paddingBottom: spacing.xl + insets.bottom }]}>
+        <View style={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right) }]}>
           <View style={[styles.hero, isWide ? styles.heroWide : null]}>
             <View style={[styles.identity, isWide ? styles.identityWide : null]}>
               <Image
@@ -885,20 +881,9 @@ const styles = StyleSheet.create({
   page: {
     backgroundColor: colors.background,
     minHeight: "100%",
-    padding: spacing.lg,
-    paddingBottom: 112
+    paddingTop: spacing.lg
   },
-  container: { alignSelf: "center", gap: spacing.lg, maxWidth: 1120, width: "100%" },
-  backButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 44,
-    justifyContent: "center",
-    width: 44
-  },
+  container: { alignSelf: "center", gap: spacing.lg, maxWidth: HOME_CONTENT_MAX_WIDTH, width: "100%" },
   hero: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

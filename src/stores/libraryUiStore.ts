@@ -20,11 +20,13 @@ const noopStorage = {
 export const useLibraryUiStore = create<LibraryUiState>()(
   persist(
     (set) => ({
-      viewMode: "detail",
+      viewMode: "gallery",
       setViewMode: (viewMode) => set({ viewMode })
     }),
     {
       name: "scenenote-library-ui",
+      version: 1,
+      migrate: () => ({ viewMode: "gallery" as const }),
       storage: createJSONStorage(() => (canUsePersistentStorage ? AsyncStorage : noopStorage))
     }
   )

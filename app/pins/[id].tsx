@@ -1,19 +1,22 @@
 import { useCallback, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
+import { ScreenStateFrame } from "@/components/common/ScreenStateFrame";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { PinComposer } from "@/components/pins/PinComposer";
 import { EMOTION_LABELS } from "@/constants/emotions";
+import { FORM_CONTENT_MAX_WIDTH } from "@/constants/layout";
 import { usePinContext } from "@/hooks/usePinContext";
 import { formatSecondsToTimecode } from "@/utils/timecode";
 import { TagChip } from "@/components/pins/TagChip";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing } from "@/constants/theme";
 import { usePin } from "@/hooks/useTimelinePins";
+import { getHomeLayout } from "@/utils/homeLayout";
 
 export default function PinDetailScreen() {
   const { id } = useLocalSearchParams<{
@@ -23,18 +26,21 @@ export default function PinDetailScreen() {
   const pin = usePin(id);
   const context = usePinContext(pin.data?.content_id ?? "", pin.data?.episode_id ?? null);
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
   const [isSpoilerRevealed, setSpoilerRevealed] = useState(false);
   const [isEditing, setEditing] = useState(false);
 
   useFocusEffect(useCallback(() => { setSpoilerRevealed(false); return () => setSpoilerRevealed(false); }, []));
 
-  if (pin.isLoading) return <LoadingSkeleton variant="pin-item" />;
-  if (pin.isError) return <ErrorState message={pin.error.message} onRetry={() => pin.refetch()} />;
-  if (!pin.data) return <EmptyState title="핀을 찾을 수 없습니다" />;
+  if (pin.isLoading) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><LoadingSkeleton variant="pin-item" /></ScreenStateFrame>;
+  if (pin.isError) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><ErrorState message={pin.error.message} onRetry={() => pin.refetch()} /></ScreenStateFrame>;
+  if (!pin.data) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><EmptyState title="핀을 찾을 수 없습니다" /></ScreenStateFrame>;
   const currentPin = pin.data;
 
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ title: isEditing ? "핀 편집" : "핀 상세" }} />
       {isEditing ? (
         <PinComposer
           contentId={currentPin.content_id}
@@ -48,7 +54,7 @@ export default function PinDetailScreen() {
           }}
         />
       ) : (
-        <ScrollView contentContainerStyle={[styles.detailBody, { paddingBottom: insets.bottom + spacing.lg }]}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.detailBody, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: insets.bottom + spacing.xl }]}>
           <Text style={styles.memo}>{context.data?.title ?? currentPin.content_title ?? "작품"}</Text>
           <Text style={styles.detailLabel}>{context.data?.label ?? (currentPin.episode_id ? `${currentPin.episode_number ?? ""}화` : "영화")} · {currentPin.timestamp_seconds === null ? "시간 없음" : formatSecondsToTimecode(currentPin.timestamp_seconds)}</Text>
           <Text style={styles.detailLabel}>메모</Text>
@@ -106,7 +112,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0
   },
-  detailBody: { gap: spacing.md, padding: spacing.lg },
+  detailBody: { alignSelf: "center", gap: spacing.md, maxWidth: FORM_CONTENT_MAX_WIDTH, paddingTop: spacing.lg, width: "100%" },
   detailLabel: { color: colors.textMuted, fontSize: 13, fontWeight: "800" },
   memo: { color: colors.text, fontSize: 16, lineHeight: 25 },
   spoilerGate: { alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, justifyContent: "center", minHeight: 56 },

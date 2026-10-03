@@ -3,7 +3,7 @@ import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, useW
 
 import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { StackBackButton } from "@/components/common/StackBackButton";
+import { ScreenHeader } from "@/components/common/ScreenHeader";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
@@ -17,6 +17,8 @@ import {
   UserSettingsIcon
 } from "@/components/icons/FooterIcons";
 import { colors, elevation, radius, typography } from "@/constants/theme";
+import { FORM_CONTENT_MAX_WIDTH } from "@/constants/layout";
+import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
 import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
@@ -29,13 +31,25 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.root}>
       <AppProviders>
         <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: true, title: "SceneNote", headerBackVisible: false, headerLeft: () => <StackBackButton /> }}>
+        <Stack screenOptions={{
+          headerShown: true,
+          header: ({ options, route }) => <ScreenHeader title={options.title ?? "SceneNote"} maxWidth={route.name.startsWith("pins/") ? FORM_CONTENT_MAX_WIDTH : HOME_CONTENT_MAX_WIDTH} />,
+          contentStyle: { backgroundColor: colors.background }
+        }}>
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="share/index" />
-          <Stack.Screen name="share/[id]" />
-          <Stack.Screen name="people/[id]" />
-          <Stack.Screen name="settings/excluded-recommendations" />
+          <Stack.Screen name="content/[id]" options={{ title: "작품 상세" }} />
+          <Stack.Screen name="content/[id]/episodes" options={{ title: "에피소드" }} />
+          <Stack.Screen name="content/[id]/pins" options={{ title: "작품 핀" }} />
+          <Stack.Screen name="pins/new" options={{ title: "핀 추가" }} />
+          <Stack.Screen name="pins/[id]" options={{ title: "핀 상세" }} />
+          <Stack.Screen name="search" options={{ title: "검색" }} />
+          <Stack.Screen name="share/index" options={{ title: "공유 라이브러리" }} />
+          <Stack.Screen name="share/[id]" options={{ title: "공유 라이브러리" }} />
+          <Stack.Screen name="people/[id]" options={{ title: "인물 상세" }} />
+          <Stack.Screen name="library/import" options={{ title: "감상 기록 가져오기" }} />
+          <Stack.Screen name="library/photo-import" options={{ title: "사진에서 작품 찾기" }} />
+          <Stack.Screen name="settings/excluded-recommendations" options={{ title: "추천에서 제외한 작품" }} />
         </Stack>
         <AuthRedirect />
         <AuthLinkHandler />

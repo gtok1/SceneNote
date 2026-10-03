@@ -1,15 +1,19 @@
-import { Redirect , useRouter } from "expo-router";
+import { Redirect } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 
 import { EmptyState } from "@/components/common/EmptyState";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
 function ExcludedRecommendationsScreen() {
-  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const { gutter } = getHomeLayout(width);
+  const insets = useSafeAreaInsets();
   const excludedRecommendations = useRecommendationUiStore((state) => state.excludedRecommendations);
   const removeExclusion = useRecommendationUiStore((state) => state.removeExclusion);
   const clearExclusions = useRecommendationUiStore((state) => state.clearExclusions);
@@ -32,18 +36,10 @@ function ExcludedRecommendationsScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.header}>
-        <Pressable
-          accessibilityLabel="뒤로 가기"
-          accessibilityRole="button"
-          onPress={() => router.back()}
-          style={styles.iconButton}
-        >
-          <Ionicons color={colors.text} name="chevron-back" size={22} />
-        </Pressable>
         <View style={styles.headerCopy}>
-          <Text style={styles.title}>추천에서 제외한 작품</Text>
+          <Text style={styles.title}>제외 목록</Text>
           <Text style={styles.subtitle}>{sortedItems.length}개</Text>
         </View>
         <Pressable
@@ -103,35 +99,26 @@ function formatExcludedAt(value: string): string {
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: "center",
     backgroundColor: colors.background,
     gap: spacing.lg,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
     minHeight: "100%",
-    padding: spacing.lg,
-    paddingBottom: 104
+    paddingTop: spacing.lg,
+    width: "100%"
   },
   header: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md
   },
-  iconButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 44,
-    justifyContent: "center",
-    width: 44
-  },
   headerCopy: {
     flex: 1,
     gap: 2
   },
   title: {
+    ...typography.title,
     color: colors.text,
-    fontSize: 20,
-    fontWeight: "900"
   },
   subtitle: {
     color: colors.textMuted,

@@ -36,6 +36,7 @@ export function PinTimelineList({
 
   return (
     <FlashList
+      showsVerticalScrollIndicator={false}
       ListHeaderComponent={hasError && onRetry ? <ErrorState message="저장된 핀을 표시합니다. 다시 불러와 주세요." onRetry={onRetry} /> : null}
       ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
       ListEmptyComponent={<EmptyState title={emptyTitle} description={emptyDescription} />}

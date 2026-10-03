@@ -4,7 +4,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensi
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useIsFocused } from "@react-navigation/native";
 import { useNetworkOnline } from "@/hooks/useNetworkOnline";
@@ -22,7 +23,7 @@ import { SearchResultGalleryCard } from "@/components/content/SearchResultGaller
 import { SearchResultItem } from "@/components/content/SearchResultItem";
 import { SimilarContentQuickViewModal } from "@/components/content/SimilarContentQuickViewModal";
 import { ThemeReductionSheet } from "@/components/content/ThemeReductionSheet";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { useContentSearch } from "@/hooks/useContentSearch";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
@@ -45,6 +46,7 @@ import type { LibraryListItem } from "@/types/library";
 import type { PersonSearchResult } from "@/types/people";
 import { normalizeYearFilter, sortByYear } from "@/utils/contentSort";
 import { getCountryFilterLabel } from "@/utils/countryFilter";
+import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
 import { getSearchResultActions } from "@/utils/searchResultActions";
 import { filterVisibleRecommendationCandidates, summarizeRecommendationVisibility } from "@/utils/recommendationVisibility";
@@ -65,6 +67,9 @@ export default function SearchScreen() {
   const router = useRouter();
   const urlParams = useLocalSearchParams<Record<string, string | string[]>>();
   const { width, fontScale } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const layout = getHomeLayout(width);
+  const isTabScreen = useSegments()[0] === "(tabs)";
   const focused = useIsFocused();
   const online = useNetworkOnline();
   const user = useAuthStore(state => state.user);
@@ -216,7 +221,7 @@ export default function SearchScreen() {
   const error = isSimilarityMode ? similarSearch.error : search.error ?? personSearch.error;
   const searchFilterLimited = Boolean(search.data?.country_filter_limited || search.data?.genre_filter_limited);
   const isGallery = viewMode === "gallery";
-  const galleryColumns = getResponsiveRecommendationColumns(width, fontScale);
+  const galleryColumns = getResponsiveRecommendationColumns(Math.min(width, 1280), fontScale);
   const showRecommendationFeed = SEARCH_RECOMMENDATIONS_ENABLED && !isSimilarityMode && shouldShowRecommendationFeed(query);
   useEffect(() => {
     recommendationScrollState.current = { previousOffsetY: null, lastRequestedCursor: null };
@@ -580,6 +585,13 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={[styles.page, { paddingHorizontal: layout.gutter, paddingTop: isTabScreen ? 0 : spacing.sm }]}>
+      {isTabScreen ? (
+      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing.md }]}>
+        <Text accessibilityRole="header" style={styles.pageTitle}>검색</Text>
+      </View>
+      ) : null}
+      <View style={styles.searchTools}>
       <ContentSearchBar
         key={user?.id ?? "anonymous"}
         ref={searchBarRef}
@@ -595,6 +607,7 @@ export default function SearchScreen() {
         genreOptions={genreOptions}
         value={query}
       />
+      </View>
       {searchFilterPreferences.isReady && !isSimilarityMode && (hasDiscoveryFilters || statusFilter !== "all" || Boolean(year)) ? (
         <View style={styles.discoverySummary}>
           <Text accessibilityLiveRegion="polite" style={styles.discoverySummaryText}>
@@ -621,12 +634,12 @@ export default function SearchScreen() {
           ) : (
             <View>
               <Text accessibilityLiveRegion="polite" style={styles.resultsHint}>이 계정의 검색 조건을 불러오는 중이에요.</Text>
-              <LoadingSkeleton count={3} variant="search-result" />
+              <View style={styles.sharedInset}><LoadingSkeleton count={3} variant="search-result" /></View>
             </View>
           )
         ) : (
-        <FlashList
-          ListHeaderComponent={<>
+        <FlashList showsVerticalScrollIndicator={false}
+          ListHeaderComponent={<View style={{ paddingHorizontal: displayedAsGallery ? spacing.sm : spacing.lg }}>
 
       {!isSimilarityMode && !hasSearchQuery && searchHistory.length > 0 ? (
         <View style={styles.historySection}>
@@ -700,7 +713,7 @@ export default function SearchScreen() {
             accessibilityState={{ busy: search.isFetching, disabled: search.isFetching || !online || !focused }}
             disabled={search.isFetching || !online || !focused}
             onPress={() => void search.refetch()}
-            style={[styles.recommendationFilterButton, { alignSelf: "flex-start", marginHorizontal: spacing.lg, marginBottom: spacing.sm }, (search.isFetching || !online || !focused) && styles.refreshButtonDisabled]}
+            style={[styles.recommendationFilterButton, { alignSelf: "flex-start", marginBottom: spacing.sm }, (search.isFetching || !online || !focused) && styles.refreshButtonDisabled]}
           >
             <Text style={styles.recommendationFilterButtonText}>{search.isFetching ? "확인 중…" : "다시 시도"}</Text>
           </Pressable>
@@ -831,7 +844,7 @@ export default function SearchScreen() {
 
       {!online ? <Text accessibilityLiveRegion="polite" style={styles.partial}>오프라인이에요. 저장된 결과를 표시하며, 연결 후 다시 시도할 수 있어요.</Text> : null}
       {showRecommendationFeed && personalizedRecommendations.data?.partial ? <Text style={styles.partial}>일부 추천 제공처의 결과를 불러오지 못했습니다. 현재 가능한 작품을 표시합니다.</Text> : null}
-      {hasSearchQuery && isLoading ? <LoadingSkeleton count={5} variant="search-result" /> : null}
+      {hasSearchQuery && isLoading ? <View style={styles.sharedInset}><LoadingSkeleton count={5} variant="search-result" /></View> : null}
       {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
       {showRecommendationFeed && recommendationLoadingMessage ? (
         <View
@@ -850,11 +863,13 @@ export default function SearchScreen() {
         </View>
       ) : null}
       {recommendationIsLoading || recommendationIsContinuing ? (
-        <LoadingSkeleton
-          columns={displayedAsGallery ? galleryColumns : 1}
-          count={PERSONALIZED_RECOMMENDATION_LIMIT}
-          variant="recommendation-card"
-        />
+        <View style={styles.sharedInset}>
+          <LoadingSkeleton
+            columns={displayedAsGallery ? galleryColumns : 1}
+            count={PERSONALIZED_RECOMMENDATION_LIMIT}
+            variant="recommendation-card"
+          />
+        </View>
       ) : null}
       {showRecommendationFeed && library.isError ? (
         <ErrorState
@@ -978,8 +993,9 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-          </>}
+          </View>}
           contentContainerStyle={styles.resultsList}
+          style={{ marginHorizontal: -(displayedAsGallery ? spacing.sm : spacing.lg) }}
           data={displayedResults}
           extraData={`${pendingSearchKey ?? ""}:${Array.from(pendingAddIds).join(",")}:${Array.from(addedSearchKeys).join(",")}:${(library.data ?? []).map((row) => `${row.library_item_id}:${row.statuses.join(",")}`).join(";")}:${personalizedRecommendations.isLoadingMore}`}
           ItemSeparatorComponent={displayedAsGallery ? undefined : () => <View style={{ height: spacing.md }} />}
@@ -1139,6 +1155,7 @@ export default function SearchScreen() {
           }}
         />
         )}
+      </View>
       </View>
       <RecommendationQuickViewModal
         addLabel={selectedRecommendation ? getRecommendationAddState(selectedRecommendation).label : "추가"}
@@ -1341,21 +1358,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     flex: 1
   },
+  page: {
+    alignSelf: "center",
+    flex: 1,
+    maxWidth: HOME_CONTENT_MAX_WIDTH,
+    width: "100%"
+  },
+  pageHeader: {
+    paddingBottom: spacing.xs
+  },
+  pageTitle: {
+    ...typography.display,
+    color: colors.text
+  },
+  searchTools: {
+    marginHorizontal: -spacing.lg,
+    zIndex: 1000
+  },
+  sharedInset: {
+    marginHorizontal: -spacing.lg
+  },
   partial: {
     color: colors.warning,
     fontSize: 12,
     fontWeight: "700",
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   peopleSection: {
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   historySection: {
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   historyHeaderRow: {
@@ -1398,7 +1432,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   viewButton: { minHeight: 44,
@@ -1452,7 +1485,6 @@ const styles = StyleSheet.create({
   },
   resultsHeader: {
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   hiddenResultsNotice: {
@@ -1460,7 +1492,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm
   },
   hiddenResultsButton: {
@@ -1471,7 +1502,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: spacing.md
   },
-  similarHeader: { gap: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.lg },
+  similarHeader: { gap: spacing.sm, paddingBottom: spacing.sm },
   similarFilters: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   similarChip: { minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   similarChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -1479,7 +1510,7 @@ const styles = StyleSheet.create({
   similarChipTextSelected: { color: colors.surface },
   appliedChip: { minHeight: 44, justifyContent: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   appliedChipText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
-  anchorDialog: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, marginBottom: spacing.sm, marginHorizontal: spacing.lg, padding: spacing.md },
+  anchorDialog: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, marginBottom: spacing.sm, padding: spacing.md },
   anchorOptions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   anchorOption: { minHeight: 44, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, minWidth: 180, padding: spacing.sm },
   anchorTitle: { color: colors.text, fontSize: 13, fontWeight: "900" },
@@ -1505,7 +1536,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xs
   },
   discoverySummaryText: {
@@ -1585,7 +1615,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.md,
     marginBottom: spacing.md,
-    marginHorizontal: spacing.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
@@ -1617,7 +1646,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     justifyContent: "space-between",
     marginBottom: spacing.sm,
-    marginHorizontal: spacing.lg,
     padding: spacing.sm
   },
   inlineErrorText: {
@@ -1648,7 +1676,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   resultsList: {
-    paddingBottom: 24
+    paddingBottom: spacing.xxl
   },
   loadMoreFooter: {
     alignItems: "center",

@@ -16,6 +16,7 @@
 | 문서 | 내용 | 언제 읽나 |
 |------|------|-----------|
 | `docs/00_codex_doc_pattern.md` | 명세서 + Codex 프롬프트 짝의 작성 패턴·스켈레톤·체크리스트 | 새 명세서나 작업 지시문을 **쓰기 전에** |
+| `docs/00_ui_style_rules.md` | **웹·앱 공통 UI 규칙(AI 작업용).** 토큰, 반응형 구간·레이아웃 함수, 안전 영역·하단 탭, 44pt·접근성, 키보드, `Alert.alert` 금지(토스트·`confirmDestructive`), 오류 문구, 공용 컴포넌트, 웹·앱 검증 절차, 완료 체크리스트 | 화면·컴포넌트를 만들거나 고칠 때, UI 명세·프롬프트를 쓸 때 **항상** |
 | `docs/11_screen_implementation_spec.md` | MVP 전체 화면 구현·QA 기준안. 화면 명세 포맷의 원본 | 화면을 만들거나 고칠 때 항상 |
 | `docs/12_episode_progress_spec.md` | 시청 진행 위치(몇 화까지 봤는지) 설정 기능 전체 명세 | 라이브러리·진행률·이어보기 관련 작업 |
 | `docs/13_codex_prompt_episode_progress.md` | 위 기능의 Codex 작업 지시문 (복붙용 단일 프롬프트) | 위 기능을 구현할 때 |
@@ -39,9 +40,12 @@
 | `docs/36_people_tab_saas_redesign_spec.md` | 인물 탭 SaaS 스타일 개편(`docs/32` 2단계 첫 화면). 기본 헤더 제거·단일 콘텐츠 컨테이너, 검색 결과·좋아하는 인물 공용 `PersonCard` 격자(1/2/3열), ♥ 빼기 + 되돌리기 토스트, 분류 세그먼트를 좋아하는 인물에도 적용, 인물 검색 300ms 디바운스, 인물별 추가 중 상태 | 인물 탭·좋아하는 인물 UI 작업 |
 | `docs/37_profile_dashboard_redesign_spec.md` | 프로필 탭 대시보드 개편. 기본 헤더 제거·단일 컨테이너, 숫자 카드 4개 + 타입·장르 2열 패널 + 연도 세로 막대(미상 묶음 각주), 해외 드라마 집계 정정(`libraryContentCategory`), 올해 본 작품 집계 일치, 장르 페이저 제거(TOP 5 + 그 외), 계정 목록 행·웹 회원 탈퇴 확인 | 프로필 탭·통계 패널·계정 행동 작업 |
 | `docs/38_japanese_person_korean_name_spec.md` | 일본 인물 한글 이름 채우기. 출처 우선순위(직접 입력 > TMDB ko 번역 > 한글 별칭 > 가나 읽기 > 로마자), 관용 표기 변환기(`_shared/japaneseReading.ts`), `favorite_people.name_ko` 3칸 마이그레이션(0023), `resolve-person-names` 백필, 인물 상세 한글 이름 입력 | 인물 이름 표기·좋아하는 인물 데이터·인물 Edge Function 작업 |
+| `docs/39_content_detail_saas_redesign_spec.md` | 작품 상세 SaaS 개편. 히어로(포스터 왼쪽·제목·한국어 메타·상태 세그먼트·행동 버튼) + 넓은 화면 2열(주: 진행·감상·줄거리·출연 / 옆: 보러가기·본 횟수·삭제), `docs/31` U-2 삭제 확인·U-5 상태 위치 흡수, 웹 `Alert` → 토스트 | 작품 상세 화면·상태 변경·삭제 작업 |
+| `docs/40_content_detail_delete_zone_fixes_spec.md` | 작품 상세 "내 목록에서 삭제"를 다른 섹션과 같은 "목록 관리" 카드 + 빨간 테두리 알약 버튼으로 정정, 설명 문구·실패 토스트 한국어화 | 작품 상세 삭제 영역 작업 |
 
 **규칙**
 
+- UI 작업(화면·컴포넌트·스타일)은 [docs/00_ui_style_rules.md](docs/00_ui_style_rules.md)를 따른다. 웹과 iOS·Android 앱을 함께 만족해야 완료다. UI 명세·프롬프트는 이 문서를 READ FIRST에 넣고 규칙을 다시 풀어 쓰지 않는다(다른 점만 쓴다).
 - 명세 작성 방식의 기준은 [docs/00_codex_doc_pattern.md](docs/00_codex_doc_pattern.md)다. 새 명세는 **명세 파일 + 응답 본문의 Codex 프롬프트**를 짝으로 제공한다. 기존 `NN_codex_prompt_*.md` 파일은 보존하되, 새 프롬프트 파일 생성은 요구하지 않는다. 기존 프롬프트를 사용할 때는 후속 명세와 현재 코드를 먼저 대조한다.
 - 명세서의 **설계 결정(D-N) 항목은 임의로 바꾸지 않는다.** 바꿔야 한다고 판단되면 구현하지 말고 이유를 보고한다.
 - 명세서에 테스트 표가 있으면 표의 모든 행을 테스트로 옮긴다. 임의로 줄이지 않는다.

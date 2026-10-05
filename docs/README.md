@@ -43,6 +43,13 @@
 | [38 일본 인물 한글 이름](38_japanese_person_korean_name_spec.md) | 한글 이름 출처 우선순위·관용 표기 변환·저장 칸(0023)·기존 좋아하는 인물 백필·직접 입력 | 신규: 미구현 |
 | [39 작품 상세 SaaS 개편](39_content_detail_saas_redesign_spec.md) | 히어로 + 2열 배치, 상태 세그먼트, 삭제 확인(31 U-2)·상태 위치(31 U-5), 한국어 메타, 웹 피드백 토스트 | 신규: 미구현 |
 | [40 작품 상세 삭제 영역 정정](40_content_detail_delete_zone_fixes_spec.md) | 39의 삭제 버튼을 "목록 관리" 카드 + 빨간 테두리 버튼으로, 설명·실패 문구 | 신규: 미구현 |
+| [41 추천 취향 보충 레인](41_taste_fill_recommendations_spec.md) | 빈 추천 원인 실측, 최신 레인 뒤 취향·필터·국내 OTT 보충, 결합 커서 | 신규: 미구현 |
+| [42 추천 추가 지연 개선](42_recommendation_add_latency_spec.md) | 카드 단위 잠금·즉시 토스트·일괄 보충·라이브러리 재조회 디바운스·서버 빠른 경로/병렬/응답 뒤 작업 | 신규: 미구현 |
+| [43 추천 추가 오입력 방지](43_recommendation_add_misclick_fixes_spec.md) | 클릭한 카드 위치 유지·identity 검증·동기 중복 잠금·자동 보충 경쟁 방지 | 구현 및 격리 웹 검사, 실제 계정·네이티브 미검증 |
+| [44 핀 탭 SaaS 개편](44_pins_tab_saas_redesign_spec.md) | 감정 개수 칩·접히는 필터 카드·포스터 카드·960 미리보기 패널, 좁은 화면 카드 → 상세, 31 U-1·U-7 흡수 | 신규: 미구현 |
+| [45 추천 연도 필터 배포 어긋남](45_recommendation_year_filter_deploy_skew_fixes_spec.md) | 연도 선택 시 빈 추천 원인 실측(운영 v20 연도 미지원), 재배포 + `applied_filters` 감지·전용 빈 상태 | 구현, `personalized-recommendations` v21 배포(2026-10-05 11:30). 웹 M-1은 사용자 캡처로 2025년 추천 표시 확인, iOS(M-3) 남음 |
+| [46 추천 카드 완료 버튼](46_recommendation_complete_action_spec.md) | 추천 카드·빠른 보기에 "완료"(바로 완료 등록), "추가"는 그대로, 상태별 문구·잠금 공유 | 구현(코드 확인), 수동 미검증 |
+| [47 추천 추가 묶음 12개 채우기](47_recommendation_batch_topup_spec.md) | 스크롤 묶음 목표(보이는 개수+12)까지 자동 이어 찾기, 스크롤 판정 목표 기준, 원인 분해 개발 기록 | 신규: 미구현 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

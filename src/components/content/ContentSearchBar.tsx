@@ -345,7 +345,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
               ))}
             </View>
             <Text style={styles.filterDescription}>
-              아래 목록 상태·연도·정렬은 제목 검색에만 적용돼요.
+              연도는 검색과 추천에 함께 적용돼요. 목록 상태·정렬은 제목 검색에만 적용돼요.
             </Text>
             <View style={styles.filters}>
               {STATUS_FILTERS.map((filter) => {

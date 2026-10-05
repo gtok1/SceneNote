@@ -23,7 +23,7 @@
 | 프로필·추천 제외 | `app/(tabs)/profile.tsx`, `app/settings/excluded-recommendations.tsx` | 프로필 갱신은 `src/services/profile.ts`, 제외 상태는 `src/hooks/useRecommendationPreferences.ts`에서 추적 |
 | 보존된 확장 라우트 | `app/(tabs)/people.tsx`, `app/people/[id].tsx`, `app/library/import.tsx`, `app/library/photo-import.tsx`, `app/share/index.tsx`, `app/share/[id].tsx` | `src/constants/features.ts`의 플래그와 각 파일의 분기를 확인한다. `app/share/[id].tsx`에는 동일한 플래그 guard가 없으므로 전체 확장 경로가 차단됐다고 단정하지 않는다. |
 
-검색의 `ContentSearchBar` 필터 시트는 상단과 추천 헤더에서 공통으로 연다. 유형·장르·제작 국가를 텍스트 칩으로 여러 개 켜고 끄며, 배경·테두리·글자색으로 선택을 구분한다. 시각적인 체크 아이콘은 생략하고 접근성 `checked`는 유지한다. `useSearchFilterPreferences`가 현재 계정의 `profiles.search_filters` 저장에 성공한 뒤 `searchUiStore`에 반영한다. 서버 설정은 계정별 TanStack Query가 소유하고 시트의 미적용 선택은 로컬 draft다. 최초 설정 복원 전에는 제목 검색·추천을 막으며, 계정 전환과 늦은 응답을 구분한다. 선택 조건은 제목 검색과 빈 검색어 추천에 적용하고 유사 검색은 별도 조건을 유지한다. Query key·추천 요청 수명·FlashList key에는 정규화한 배열을 포함해 이전 조건의 페이지와 스크롤 위치를 섞지 않는다. 최근 검색어는 기기 저장소에서 계정별로 분리한다.
+검색의 `ContentSearchBar` 필터 시트는 상단과 추천 헤더에서 공통으로 연다. 유형·장르·제작 국가를 텍스트 칩으로 여러 개 켜고 끄며, 배경·테두리·글자색으로 선택을 구분한다. 시각적인 체크 아이콘은 생략하고 접근성 `checked`는 유지한다. `useSearchFilterPreferences`가 현재 계정의 `profiles.search_filters` 저장에 성공한 뒤 `searchUiStore`에 반영한다. 서버 설정은 계정별 TanStack Query가 소유하고 시트의 미적용 선택은 로컬 draft다. 최초 설정 복원 전에는 제목 검색·추천을 막으며, 계정 전환과 늦은 응답을 구분한다. 선택 조건은 제목 검색과 빈 검색어 추천에 적용하고 유사 검색은 별도 조건을 유지한다. Query key·추천 요청 수명·FlashList key에는 정규화한 배열을 포함해 이전 조건의 페이지와 스크롤 위치를 섞지 않는다. 최근 검색어는 기기 저장소에서 계정별로 분리한다. 연도는 제목 검색과 추천에 함께 적용한다(41 D-9). 추천 요청·캐시·요청 수명·유지 슬롯·목록 key·표시/보충 개수에도 정규화한 연도를 포함하며, 목록 상태와 정렬은 제목 검색 전용이다.
 
 ### 공통 헤더·본문 프레임 (2026-10-03)
 
@@ -44,6 +44,8 @@
 가져오기·사진 가져오기·추천 제외 화면도 Stack 헤더의 화면 제목을 본문에서 반복하지 않고 목적 설명·"제외 목록"을 표시한다. 공유 본문 제목은 사용자가 설정한 `share.title`을 보존하며 값이 없을 때만 "공유 목록"으로 표시한다. 기능 플래그로 숨겨진 화면과 인증/공유 화면의 실제 UI 확인 범위는 구조 구현과 별도로 기록한다.
 
 ### 실제 상태 소유권
+
+검색·라이브러리의 목록 복귀 위치는 `src/stores/listScrollStore.ts`의 세션 전용 Zustand 상태가 소유한다. 계정·검색어·필터·정렬·보기/열 수별로 마지막 offset과 표시 개수를 최대 20개 문맥까지 보관한다. `useListScrollRestoration`은 화면 활성화·목록 레이아웃 준비 후 복원하고, 비활성 화면의 0 offset 이벤트와 복원 스크롤을 사용자 탐색으로 기록하지 않는다. 라이브러리는 저장된 표시 개수까지 먼저 펼치며 새 조건은 0부터 시작한다. 서버 응답·검색 페이지는 기존 Query 캐시를 사용하며 스크롤 상태를 디스크나 DB에 저장하지 않는다.
 
 | 상태 | 현재 소유 위치 | 변경 시 주의사항 |
 |---|---|---|
@@ -67,7 +69,7 @@
 | 핀 삭제 | `useDeletePin`이 `["pins"]` 전체 취소·snapshot 후 `src/utils/pinCache.ts`: `removePinFromCachedValue`로 낙관적 삭제, 실패 시 복구, 종료 시 핀·태그·통계·라이브러리 무효화 | 단건이 null이 되면 상세가 폼을 언마운트할 수 있다. [31 명세 U-4](31_usability_review_fixes_spec.md)의 삭제 후 이동 결함을 해결 완료로 간주하지 않는다. |
 | 추천 제외·피드 | `useRecommendationPreferences.ts`가 선호 캐시와 `["recommendations", userId]`를 무효화; `usePersonalizedRecommendations.ts`가 취소·보충·피드 상태 관리 | [28 스크롤 추가 로딩](28_recommendation_scroll_pagination_fixes_spec.md), [30 보충·카드 행동](30_recommendation_fill_and_action_consistency_fixes_spec.md), query identity에 영향을 주는 필터·사용자 변경 |
 
-개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 원시 응답 수가 아니라 등록·제외·중복을 뺀 실제 표시 가능한 작품으로 빈자리 보충 성공 여부를 판단한다.
+개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 추천 묶음의 표시 수는 등록·제외·중복을 뺀 후보와 현재 문맥의 추가/완료 보존 슬롯을 합쳐 센다. 스크롤 및 추가/완료 성공 그룹은 최신 표시 수 + 12를 목표로 하는 공통 묶음 로딩을 사용한다([47 §15](47_recommendation_batch_topup_spec.md#15-2026-10-05-후속-정정-추가완료-성공-후에도-다음-12개-묶음)). 성공 그룹은 800ms 예약으로 모으고, 진행 중 요청이 끝난 뒤 목록 끝에 붙인다. 부족분 이어 찾기는 같은 목표와 요청 6회·45초·무진전 3회 한도를 사용한다.
 
 일반 검색은 `useInfiniteQuery`와 `src/utils/searchPagination.ts`: `mergeSearchPages`를 사용한다. 핀 목록 조회는 현재 `useQuery`이며 cursor 기반 페이지네이션 구현 완료로 표시하지 않는다. 공유 타입·정렬·시간값 처리 수정 시 `src/types/pins.ts`, `src/utils/timecode.ts`, `src/utils/validation.ts`, `src/components/pins/`, 핀 서비스와 관련 순수 함수 테스트까지 영향 범위를 추적한다.
 

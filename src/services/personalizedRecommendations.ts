@@ -1,4 +1,4 @@
-import { normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
+import { detectUnsupportedDiscoveryFilter, normalizeDiscoveryFilters, type DiscoveryFilterInput, type UnsupportedDiscoveryFilter } from "../../supabase/functions/_shared/discoveryFilters";
 import { recommendationProviderError } from "@/utils/searchRecommendationPolicy";
 import { supabase } from "@/lib/supabase";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
@@ -57,6 +57,7 @@ export async function recordPersonalizedRecommendationFeedback(
 }
 
 export interface PersonalizedRecommendationsResponse {
+  unsupported_filter?: UnsupportedDiscoveryFilter | null;
   items: PersonalizedRecommendation[];
   next_cursor: string | null;
   has_more: boolean;
@@ -80,6 +81,7 @@ export interface PersonalizedRecommendationsRequest extends DiscoveryFilterInput
 }
 
 interface PersonalizedRecommendationsApiResponse {
+  applied_filters?: unknown;
   items?: PersonalizedRecommendation[];
   next_cursor?: string | null;
   has_more?: boolean;
@@ -96,6 +98,7 @@ interface PersonalizedRecommendationsApiResponse {
 
 interface PersonalizedRecommendationPage
   extends RecommendationContinuationPage<PersonalizedRecommendation> {
+  unsupportedFilter: UnsupportedDiscoveryFilter | null;
   scanBudgetReached: boolean;
   broadened: boolean;
   profileMode: RecommendationProfileMode;
@@ -114,6 +117,7 @@ export async function getPersonalizedRecommendations(
   let broadened = false;
   let partial = false;
   let filterLimited = false;
+  let unsupportedFilter: UnsupportedDiscoveryFilter | null = null;
   let scanBudgetReached = false;
   let profileMode: RecommendationProfileMode = "cold_start";
 
@@ -135,6 +139,7 @@ export async function getPersonalizedRecommendations(
       broadened ||= page.broadened;
       partial ||= page.partial;
       filterLimited ||= page.filterLimited;
+      unsupportedFilter = page.unsupportedFilter;
       scanBudgetReached ||= page.scanBudgetReached;
       profileMode = page.profileMode;
       return page;
@@ -159,6 +164,7 @@ export async function getPersonalizedRecommendations(
     profile_mode: profileMode,
     partial: partial || failedSources.size > 0,
     filter_limited: filterLimited,
+    unsupported_filter: unsupportedFilter,
     failed_sources: [...failedSources],
     warnings: [...warnings]
   };
@@ -194,11 +200,12 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
   signal?: AbortSignal;
 }): Promise<PersonalizedRecommendationPage> {
   const startedAt = Date.now();
+  const requested = normalizeDiscoveryFilters(input);
   const body: Record<string, unknown> = {
     action: "recommend",
     limit: Math.min(12, Math.max(1, Math.floor(input.limit))),
     media_type: input.mediaType,
-    ...normalizeDiscoveryFilters(input),
+    ...requested,
     exclude_ids: Array.from(new Set(input.excludeIds))
   };
   if (input.cursor) body.cursor = input.cursor;
@@ -227,6 +234,10 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
     count: data.items.length, elapsedMs: Date.now() - startedAt, hasMore: data.has_more, partial: data.partial,
     failedSources: (data.failed_sources ?? []).filter(source => ["tmdb", "anilist", "tmdb_kr", "tmdb_jp", "tmdb_movie"].includes(source))
   }));
+  const unsupportedFilter = detectUnsupportedDiscoveryFilter(requested, data.applied_filters);
+  if (__DEV__ && unsupportedFilter) {
+    console.warn("recommendation filter not applied by server", { unsupported: unsupportedFilter, requested });
+  }
   const providerError = recommendationProviderError(Boolean(data.providers_blocked), data.items.length);
   if (providerError) throw new Error(providerError);
   const exhausted = Boolean(data.is_exhausted);
@@ -246,6 +257,7 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
     profileMode: data.profile_mode ?? "cold_start",
     partial: Boolean(data.partial),
     filterLimited: Boolean(data.filter_limited),
+    unsupportedFilter,
     failedSources: data.failed_sources ?? [],
     warnings: data.warnings ?? [],
     providersBlocked: Boolean(data.providers_blocked)

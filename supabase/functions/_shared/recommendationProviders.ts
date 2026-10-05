@@ -1,3 +1,4 @@
+import { TASTE_FILL_TREND_SOURCE, type TasteFillQuery } from "./recommendationTasteFill.ts";
 import type {
   RecommendationProviderPage,
   RecommendationProviderRequest
@@ -434,7 +435,7 @@ async function getCachedProviderPage(
   options: RecommendationProviderOptions
 ): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
   const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
-  const discoveryKey = !discovery.genres.length && !discovery.countries.length && !discovery.mediaTypes.length ? "" : `:${discoveryFilterKey(discovery)}`;
+  const discoveryKey = !discovery.genres.length && !discovery.countries.length && !discovery.mediaTypes.length && discovery.year === undefined ? "" : `:${discoveryFilterKey(discovery)}`;
   const cacheVersion = request.provider === "anilist" ? ANILIST_PROVIDER_CACHE_VERSION : PROVIDER_CACHE_VERSION;
   const key = `${cacheVersion}:${request.provider}:${request.month}:${request.page}:${request.asOfDate}:${recommendationProviderFilterKey(options.filters)}${discoveryKey}`;
   const source = request.provider === "anilist" ? "anilist" : "tmdb";
@@ -1189,4 +1190,97 @@ function hasHangul(value: string | null | undefined): boolean {
 function sumPositiveAmounts(values: { amount?: number | null }[] | null | undefined): number | null {
   const total = (values ?? []).reduce((sum, value) => sum + Math.max(0, finiteOr(value.amount, 0)), 0);
   return total > 0 ? total : null;
+}
+
+/** Period-independent discovery for the supplemental taste lane. */
+export function buildTasteFillDiscoverUrl(query: TasteFillQuery, page: number, filters?: UserRecommendationFilters, discoveryFilters?: DiscoveryFilterInput): URL {
+  const url = new URL(`https://api.themoviedb.org/3/discover/${query.kind}`);
+  setCommonTmdbParams(url, page);
+  applyKrOttDiscoverFilter(url);
+  url.searchParams.set("sort_by", "popularity.desc");
+  url.searchParams.set("vote_count.gte", "50");
+  const year = normalizeDiscoveryFilters(discoveryFilters).year;
+  if (year !== undefined) {
+    const date = query.kind === "tv" ? "first_air_date" : "primary_release_date";
+    url.searchParams.set(`${date}.gte`, `${year}-01-01`);
+    url.searchParams.set(`${date}.lte`, `${year}-12-31`);
+  }
+  setTmdbKeywordExclusions(url, filters);
+  const genres = [...new Set(query.genres.map(genre => tmdbIncludedGenreId(genre, query.kind)).filter((id): id is number => typeof id === "number"))];
+  let excluded = tmdbExcludedGenreIds(filters);
+  if (query.group === "anime") {
+    const firstGenre = tmdbIncludedGenreId(query.genres[0], "tv");
+    url.searchParams.set("with_genres", [16, ...(typeof firstGenre === "number" ? [firstGenre] : [])].join(","));
+    url.searchParams.set("with_origin_country", "JP");
+  } else {
+    if (query.kind === "tv") {
+      url.searchParams.set("with_genres", (genres.length ? genres : [18]).join("|"));
+      // 예능(Reality 10764·Talk 10767)도 코미디 장르를 달고 있어 드라마 취향 레인에서 뺀다.
+      excluded = [...new Set([16, 10764, 10767, ...excluded])];
+    } else if (genres.length) url.searchParams.set("with_genres", genres.join("|"));
+    if (query.countries.length) url.searchParams.set("with_origin_country", query.countries.join("|"));
+  }
+  if (excluded.length) url.searchParams.set("without_genres", excluded.join(","));
+  return url;
+}
+
+export async function fetchTasteFillPage(
+  query: TasteFillQuery,
+  page: number,
+  options: RecommendationProviderOptions & { asOfDate: string }
+): Promise<{ items: CatalogRecommendationCandidate[]; hasMore: boolean }> {
+  const key = `taste-fill-v2:${query.key}:${page}:${recommendationProviderFilterKey(options.filters)}:${discoveryFilterKey(options.discoveryFilters)}`;
+  const cached = await readPersisted<{ items: CatalogRecommendationCandidate[]; hasMore: boolean }>(options.cache, key, "tmdb", options.deadlineMs);
+  if (cached) return cached;
+  const url = buildTasteFillDiscoverUrl(query, page, options.filters, options.discoveryFilters);
+  const headers = applyTmdbAuth(url, requireTmdbApiKey());
+  const payload = await fetchJson<TmdbPage<TmdbTvItem & TmdbMovieItem>>(url.toString(), { headers }, 5_000, options.deadlineMs);
+  const request: RecommendationProviderRequest = {
+    provider: query.kind === "movie" ? "tmdb_movie" : "tmdb_kr",
+    month: options.asOfDate.slice(0, 7), page, asOfDate: options.asOfDate
+  };
+  const items = (payload.results ?? []).map((item, index) => {
+    const candidate = query.kind === "movie" ? normalizeTmdbMovie(item, request, index, query.countries)
+      : query.group === "anime" ? normalizeTasteFillAnime(item, request, index)
+      : normalizeTmdbDrama(item, request, index, query.group === "drama", query.genres.length > 0);
+    return candidate ? { ...candidate, trend_source: TASTE_FILL_TREND_SOURCE } : null;
+  }).filter((candidate): candidate is CatalogRecommendationCandidate => candidate !== null);
+  const result = { items, hasMore: page < Math.min(500, payload.total_pages ?? 0) };
+  await writePersisted(options.cache, key, "tmdb", result, 24 * 60 * 60_000, options.deadlineMs);
+  return result;
+}
+
+function normalizeTasteFillAnime(
+  item: TmdbTvItem,
+  request: RecommendationProviderRequest,
+  index: number
+): CatalogRecommendationCandidate | null {
+  if (!item.id || !item.name?.trim() || inferTmdbTvContentType({ originCountry: item.origin_country, genreIds: item.genre_ids }) !== "anime") return null;
+  const providerRank = (request.page - 1) * TMDB_PAGE_SIZE + index + 1;
+  return {
+    external_source: "tmdb",
+    external_id: String(item.id),
+    content_type: "anime",
+    title_primary: item.name.trim(),
+    title_original: item.original_name?.trim() || null,
+    poster_url: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+    overview: cleanText(item.overview),
+    air_year: yearFromDate(item.first_air_date),
+    air_date: dateOnly(item.first_air_date),
+    has_seasons: true,
+    episode_count: null,
+    genres: genreNamesFromIds(item.genre_ids),
+    category: "anime",
+    rank: providerRank,
+    trend_source: TASTE_FILL_TREND_SOURCE,
+    release_month: monthFromDate(item.first_air_date),
+    popularity: normalizedProviderPopularity(providerRank, item.popularity),
+    vote_count: finiteOr(item.vote_count, 0),
+    countries: item.origin_country ?? [],
+    languages: item.original_language ? [item.original_language] : [],
+    rating_score: positiveFiniteOrNull(item.vote_average),
+    rating_scale: 10,
+    rating_count: positiveFiniteOrNull(item.vote_count),
+    release_status: inferReleaseStatus(item.first_air_date, request.asOfDate)
+  };
 }

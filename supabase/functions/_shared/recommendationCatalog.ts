@@ -107,8 +107,9 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
 ): Promise<RecommendationCatalogScanResult<T>> {
   const limit = clampInteger(options.limit ?? 12, 1, 12);
   const now = toDate(options.now) ?? new Date();
-  const currentMonth = getKstMonthKey(now);
-  const minimumMonth = isMonthKey(options.minimumMonth) ? options.minimumMonth : RECOMMENDATION_CATALOG_MINIMUM_MONTH;
+  const year = normalizeDiscoveryFilters(options.discoveryFilters).year;
+  const currentMonth = initialRecommendationMonth(now, options.discoveryFilters);
+  const minimumMonth = year !== undefined ? `${year}-01` : isMonthKey(options.minimumMonth) ? options.minimumMonth : RECOMMENDATION_CATALOG_MINIMUM_MONTH;
   let state = decodeRecommendationCursor(options.cursor, options.mediaType, now, options.discoveryFilters);
   if (compareMonths(state.month, currentMonth) > 0) {
     state = createInitialCursorState(options.mediaType, now, options.discoveryFilters);
@@ -410,13 +411,19 @@ export function previousMonth(month: string): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function initialRecommendationMonth(now: Date, discoveryFilters?: DiscoveryFilterInput): string {
+  const month = getKstMonthKey(now);
+  const year = normalizeDiscoveryFilters(discoveryFilters).year;
+  return year !== undefined && year !== Number(month.slice(0, 4)) ? `${year}-12` : month;
+}
+
 function createInitialCursorState(mediaType: RecommendationMediaType, now: Date, discoveryFilters?: DiscoveryFilterInput): RecommendationCursorState {
   return {
     version: 2,
     sortVersion: RECOMMENDATION_SORT_VERSION,
     mediaType,
     ...(catalogDiscoveryKey(discoveryFilters) !== discoveryFilterKey() ? { discoveryFilterKey: catalogDiscoveryKey(discoveryFilters) } : {}),
-    month: getKstMonthKey(now),
+    month: initialRecommendationMonth(now, discoveryFilters),
     asOfDate: getKstDateKey(now),
     offset: 0,
     providers: createProviderStates(getProvidersForMediaType(mediaType, discoveryFilters))

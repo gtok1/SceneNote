@@ -235,6 +235,8 @@ export async function attachKrOttProviders<T extends KrOttLookupTarget>(
 
 **`createProviderLink`** — `get-watch-providers/index.ts`의 기존 함수를 **그대로 옮긴다**(동작 불변).
 
+2026-10-03 링크 오류 정정: Disney+의 기존 `/search?q=작품명`은 없는 페이지로 연결된다. Disney+(`provider_id=337` 또는 Disney/디즈니 이름)는 한국어 공식 홈 `https://www.disneyplus.com/ko-kr`으로 연결하고, 화면에 로그인 후 작품명을 검색하라는 안내를 표시한다. 작품 상세 URL을 추측해 생성하지 않는다. `_shared/watchProviderLinks.ts`의 `normalizeWatchProviderLink`를 클라이언트 클릭에도 적용해 기존 서버 응답·캐시의 Disney 검색 URL을 교정한다. 실제 작품 URL과 다른 제공처의 주소, 분류·정렬·JustWatch 표기는 보존한다. 링크 열기 실패는 한국어 토스트로 알린다.
+
 **`listOtherAvailableRegions(results, limit = 5)`**
 1. `results`가 없으면 `[]`
 2. `KR`을 뺀 지역 중 `flatrate`·`free`·`ads` 중 하나라도 비어 있지 않은 지역 코드

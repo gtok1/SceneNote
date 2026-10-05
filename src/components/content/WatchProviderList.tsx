@@ -5,7 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { radius, spacing } from "@/constants/theme";
-import { describeNoKrProviders, pickInitialWatchCategory } from "@/utils/watchProviderDisplay";
+import { describeNoKrProviders, DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink, pickInitialWatchCategory } from "@/utils/watchProviderDisplay";
+import { useAppUIStore } from "@/stores/appUIStore";
 import {
   WATCH_PROVIDER_CATEGORIES,
   WATCH_PROVIDER_CATEGORY_LABEL,
@@ -22,6 +23,7 @@ interface WatchProviderListProps {
 }
 
 export function WatchProviderList({ providers, isLoading = false, error = null, otherRegions = [] }: WatchProviderListProps) {
+  const addToast = useAppUIStore(state => state.addToast);
   const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategory(providers));
   const providerIds = WATCH_PROVIDER_CATEGORIES.map(category =>
     `${category}:${providers[category].map(provider => provider.provider_id).join(",")}`
@@ -34,8 +36,11 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
   const activeProviders = providers[selectedCategory];
 
   const openProvider = (provider: WatchProvider) => {
-    if (!provider.link) return;
-    void Linking.openURL(provider.link);
+    const link = normalizeWatchProviderLink(provider.link);
+    if (!link) return;
+    void Linking.openURL(link).catch(() => {
+      addToast("시청 플랫폼을 열지 못했어요. 잠시 후 다시 시도해 주세요.", "error");
+    });
   };
 
   return (
@@ -81,7 +86,7 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
           {activeProviders.map((provider) => (
             <Pressable
               accessibilityRole="link"
-              disabled={!provider.link}
+              disabled={!normalizeWatchProviderLink(provider.link)}
               key={`${provider.service_type}:${provider.provider_id}`}
               onPress={() => openProvider(provider)}
               style={styles.item}
@@ -101,6 +106,9 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
             </Pressable>
           ))}
         </View>
+      ) : null}
+      {!isLoading && !error && activeProviders.some(provider => normalizeWatchProviderLink(provider.link) === DISNEY_PLUS_HOME_URL) ? (
+        <Text style={styles.emptyText}>디즈니+ 홈으로 연결돼요. 로그인 후 작품명을 검색해 주세요.</Text>
       ) : null}
       <Text style={styles.attribution}>시청 정보 제공: JustWatch</Text>
     </View>

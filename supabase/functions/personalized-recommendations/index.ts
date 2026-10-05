@@ -1,9 +1,13 @@
+import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, selectTasteFillItems, shouldRunTasteFill, type TasteFillQuery } from "../_shared/recommendationTasteFill.ts";
 import {
   hasKoreanDisplayTitle,
   scanRecommendationCatalog,
-  type RecommendationProvider
+  type RecommendationProvider,
+  type RecommendationCatalogScanResult
 } from "../_shared/recommendationCatalog.ts";
 import {
+  buildPreferenceProfile,
+  rankCandidates,
   createRecommendationIdentityAliases,
   type RecommendationCandidate,
   type RecommendationLibraryItem,
@@ -19,11 +23,13 @@ import {
 import {
   enrichTmdbRecommendationCandidates,
   fetchKrWatchRegion,
+  fetchTasteFillPage,
+  type CatalogRecommendationCandidate,
   fetchRecommendationProviderPage
 } from "../_shared/recommendationProviders.ts";
 import { attachKrOttProviders } from "../_shared/watchProviders.ts";
 import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
-import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../_shared/discoveryFilters.ts";
+import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, toAppliedDiscoveryFilters, type DiscoveryFilterInput } from "../_shared/discoveryFilters.ts";
 import {
   filterRecommendationsForUser,
   isRecommendationExcludedForUser,
@@ -229,6 +235,11 @@ Deno.serve(async (req: Request) => {
     const keywordLookupBudget = { remaining: 16 };
     const scanStartedAt = Date.now();
     const discoveryFilters = validated.value.discoveryFilters;
+    const needsKeywordLookup = (candidate: RecommendationCandidate) =>
+      createRecommendationIdentityAliases(candidate)
+        .every((identity) => !keywordLookupExclusions.has(normalizeRecommendationIdentityKey(identity)));
+    const candidateFilter = (candidate: RecommendationCandidate) =>
+      hasKoreanDisplayTitle(candidate) && matchesDiscoveryFilters(candidate, discoveryFilters) && !isRecommendationExcludedForUser(candidate, filters);
     const providerFetcher = async (request: Parameters<typeof fetchRecommendationProviderPage>[0]) => {
       const rawPage = await fetchRecommendationProviderPage(request, { filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline });
       const page = { ...rawPage, items: rawPage.items.filter((candidate) => matchesDiscoveryFilters(candidate, discoveryFilters)) };
@@ -237,9 +248,6 @@ Deno.serve(async (req: Request) => {
         excludedThemeKeys: [],
         excludedGenres: filters.excludedGenres
       }).filter(hasKoreanDisplayTitle);
-      const needsKeywordLookup = (candidate: RecommendationCandidate) =>
-        createRecommendationIdentityAliases(candidate)
-          .every((identity) => !keywordLookupExclusions.has(normalizeRecommendationIdentityKey(identity)));
       let pendingVerification = false;
       const enriched = await enrichTmdbRecommendationCandidates(
         visibleGenres,
@@ -257,15 +265,20 @@ Deno.serve(async (req: Request) => {
       }
       return { ...page, items: enriched, pendingVerification };
     };
-    const result = await scanRecommendationCatalog(providerFetcher, {
+    const cursorState = decodeTasteFillCursor(validated.value.cursor);
+    const profile = buildPreferenceProfile(libraryItems, feedback);
+    const result: RecommendationCatalogScanResult<CatalogRecommendationCandidate> = cursorState.catalogDone ? {
+      items: [], nextCursor: null, hasMore: false, exhausted: true,
+      scanBudgetReached: false, broadened: false, warnings: [], failedProviders: [],
+      allProvidersFailed: false, providersBlocked: false, profileMode: profile.mode
+    } : await scanRecommendationCatalog(providerFetcher, {
       limit: validated.value.limit,
       mediaType: validated.value.mediaType,
       discoveryFilters,
-      cursor: validated.value.cursor,
+      cursor: cursorState.catalog,
       excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
-      candidateFilter: (candidate) =>
-        hasKoreanDisplayTitle(candidate) && matchesDiscoveryFilters(candidate, discoveryFilters) && !isRecommendationExcludedForUser(candidate, filters),
+      candidateFilter,
       maxMonthsPerRequest: 3,
       maxProviderRoundsPerRequest: 3,
       // Fast cache hits may fill the batch in this call. Reserve the full
@@ -274,14 +287,55 @@ Deno.serve(async (req: Request) => {
       feedback
     });
 
-    if (result.allProvidersFailed) {
+    const taste = { ...cursorState.taste };
+    let queries: TasteFillQuery[] = [];
+    let fill: typeof result.items = [];
+    if (shouldRunTasteFill({ itemCount: result.items.length, limit: validated.value.limit, remainingMs: requestDeadline - Date.now() })) {
+      queries = deriveTasteFillQueries({ profile, discoveryFilters, mediaType: validated.value.mediaType, userFilters: filters });
+      const pending = queries.filter(query => !taste[query.key]?.done);
+      const asOfDate = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10);
+      const pages = await Promise.allSettled(pending.map(query => fetchTasteFillPage(query, taste[query.key]?.page ?? 1, {
+        filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, asOfDate
+      })));
+      let candidates: CatalogRecommendationCandidate[] = [];
+      pages.forEach((page, index) => {
+        if (page.status !== "fulfilled") return;
+        const key = pending[index].key;
+        taste[key] = { page: (taste[key]?.page ?? 1) + 1, done: !page.value.hasMore };
+        candidates.push(...page.value.items);
+      });
+      candidates = candidates.filter(candidate => matchesDiscoveryFilters(candidate, discoveryFilters));
+      if (filters.excludedThemeKeys.length) {
+        candidates = filterRecommendationsForUser(candidates, {
+          excludedThemeKeys: [], excludedGenres: filters.excludedGenres
+        }).filter(hasKoreanDisplayTitle);
+        let pendingVerification = false;
+        candidates = await enrichTmdbRecommendationCandidates(candidates, needsKeywordLookup, {
+          cache: providerCache, deadlineMs: requestDeadline, lookupBudget: keywordLookupBudget,
+          onDeferred: () => { pendingVerification = true; }
+        });
+        if (pendingVerification || candidates.some(candidate => candidate.external_source === "tmdb" &&
+          needsKeywordLookup(candidate) && !candidate.keywords?.length)) keywordLookupLimited = true;
+      }
+      const ranked = rankCandidates(profile, candidates.filter(candidateFilter), { mediaType: validated.value.mediaType, libraryItems });
+      fill = selectTasteFillItems({
+        ranked, existing: result.items, blockedIdentities: keywordLookupExclusions,
+        need: validated.value.limit - result.items.length,
+        identities: item => createRecommendationIdentityAliases(item).map(normalizeRecommendationIdentityKey)
+      });
+    }
+    const items = [...result.items, ...fill];
+    if (result.allProvidersFailed && items.length === 0) {
       return jsonError(503, "ALL_PROVIDERS_FAILED", "Recommendation data providers are unavailable");
     }
 
     const failedSources = normalizeFailedSources(result.failedProviders);
     const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
+    if (includeDebug) console.info("personalized-recommendations taste fill", { catalogItems: result.items.length, tasteFill: fill.length, queries: queries.length });
+    const catalogDone = cursorState.catalogDone || !result.nextCursor || !result.hasMore;
+    const nextCursor = encodeTasteFillCursor({ catalog: catalogDone ? null : result.nextCursor, catalogDone, taste });
     const itemsWithProviders = await attachKrOttProviders(
-      result.items,
+      items,
       (kind, tmdbId) => fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline }),
       { deadlineMs: requestDeadline }
     );
@@ -291,15 +345,17 @@ Deno.serve(async (req: Request) => {
         const { candidate_score: _candidateScore, ...publicItem } = item;
         return { ...publicItem, origin_country: item.countries ?? [] };
       }),
-      next_cursor: result.nextCursor,
-      has_more: result.hasMore,
-      is_exhausted: result.exhausted,
+      next_cursor: nextCursor,
+      has_more: nextCursor !== null,
+      is_exhausted: nextCursor === null,
+      taste_fill_count: fill.length,
       scan_budget_reached: result.scanBudgetReached,
       providers_blocked: result.providersBlocked,
       broadened: result.broadened,
       profile_mode: result.profileMode,
       warnings: result.warnings,
       filter_limited: keywordLookupLimited,
+      applied_filters: toAppliedDiscoveryFilters(discoveryFilters),
       failed_sources: failedSources,
       partial: result.providersBlocked && failedSources.length > 0 && result.items.length < validated.value.limit
     });
@@ -370,6 +426,9 @@ function validateRequest(
   if (value.mediaTypes !== undefined && (!Array.isArray(value.mediaTypes) || value.mediaTypes.length > 3 || !value.mediaTypes.every((type) => ["anime", "drama", "movie"].includes(type)))) {
     return { ok: false, message: "mediaTypes must contain anime, drama, or movie" };
   }
+  if (value.year !== undefined && value.year !== null && (!Number.isInteger(value.year) || value.year < 1900 || value.year > 2100)) {
+    return { ok: false, message: "year must be an integer between 1900 and 2100 or null" };
+  }
   const discoveryFilters = normalizeDiscoveryFilters(value);
   if (discoveryFilterKey(discoveryFilters).length > 1000) return { ok: false, message: "discovery filters are too long" };
   const excludeIds = validateIdArray(value.exclude_ids);
@@ -388,6 +447,7 @@ function validateRequest(
       limit,
       mediaType,
       discoveryFilters: {
+        ...(discoveryFilters.year !== undefined ? { year: discoveryFilters.year } : {}),
         genres: discoveryFilters.genres,
         countries: discoveryFilters.countries,
         ...(value.mediaTypes !== undefined ? { mediaTypes: discoveryFilters.mediaTypes } : {})

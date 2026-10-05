@@ -1,12 +1,13 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
+import { createRecommendationPressGuard, RECOMMENDATION_ADD_HINT, RECOMMENDATION_COMPLETE_HINT } from "@/utils/recommendationAddFlow";
 import type { RecommendationPresentation } from "@/utils/recommendationPresentation";
 
 interface PersonalizedRecommendationGalleryCardProps {
@@ -14,6 +15,8 @@ interface PersonalizedRecommendationGalleryCardProps {
   presentation: RecommendationPresentation;
   onOpenQuickView: () => void;
   onAddToLibrary: () => void;
+  onMarkCompleted: () => void;
+  completeLabel: string;
   addLabel: string;
   isAddDisabled: boolean;
   onNotInterested: () => void;
@@ -27,12 +30,15 @@ export const PersonalizedRecommendationGalleryCard = memo(
     presentation,
     onOpenQuickView,
     onAddToLibrary,
+    onMarkCompleted,
+    completeLabel,
     addLabel,
     isAddDisabled,
     onNotInterested,
     onMoreLikeThis,
     onReduceTheme
   }: PersonalizedRecommendationGalleryCardProps) {
+    const addPressGuard = useRef(createRecommendationPressGuard());
     const reactionLabel = presentation.ratingLabel ?? presentation.popularityLabel;
 
     return (
@@ -119,16 +125,36 @@ export const PersonalizedRecommendationGalleryCard = memo(
                 <Text style={styles.quickText}>빠른 보기</Text>
               </Pressable>
             </View>
-            <Pressable
-              accessibilityLabel={`${result.title_primary} ${addLabel}`}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
-              disabled={isAddDisabled}
-              onPress={onAddToLibrary}
-              style={[styles.addButton, isAddDisabled ? styles.disabled : null]}
-            >
-              <Text style={styles.addText}>{addLabel}</Text>
-            </Pressable>
+            <View style={styles.addActions}>
+              <Pressable
+                accessibilityHint={RECOMMENDATION_ADD_HINT}
+                accessibilityLabel={`${result.title_primary} ${addLabel}`}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
+                disabled={isAddDisabled}
+                onPressIn={() => addPressGuard.current.begin(result.canonical_id)}
+                onPress={() => {
+                  if (addPressGuard.current.consume(result.canonical_id) && !isAddDisabled) onAddToLibrary();
+                }}
+                style={[styles.addButton, isAddDisabled ? styles.disabled : null]}
+              >
+                <Text numberOfLines={1} style={styles.addText}>{addLabel}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel={`${result.title_primary} ${completeLabel}`}
+                accessibilityRole="button"
+                accessibilityHint={RECOMMENDATION_COMPLETE_HINT}
+                accessibilityState={{ disabled: isAddDisabled, busy: completeLabel === "기록 중" }}
+                disabled={isAddDisabled}
+                onPressIn={() => addPressGuard.current.begin(result.canonical_id)}
+                onPress={() => {
+                  if (addPressGuard.current.consume(result.canonical_id) && !isAddDisabled) onMarkCompleted();
+                }}
+                style={[styles.completeButton, isAddDisabled ? styles.disabled : null]}
+              >
+                <Text numberOfLines={1} style={styles.completeText}>{completeLabel}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </View>
@@ -209,7 +235,10 @@ const styles = StyleSheet.create({
   iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
   disabledThemeIcon: { opacity: 0.4 },
   quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
-  addButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.sm },
+  addActions: { flexDirection: "row", gap: spacing.xs, alignItems: "stretch" },
+  completeButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm },
+  completeText: { ...typography.label, color: colors.primary },
+  addButton: { flex: 1, alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.sm },
   disabled: { opacity: 0.55 },
-  addText: { color: colors.surface, fontSize: 11, fontWeight: "900" }
+  addText: { ...typography.label, color: colors.surface }
 });

@@ -870,3 +870,18 @@ describe("multiselect catalog boundaries", () => {
     assert.doesNotThrow(() => decodeRecommendationCursor(unicodeCursor, "drama", NOW, unicode));
   });
 });
+
+it("Y-4 year catalog starts in December and ends in January, retaining real as-of date", async () => {
+  const requests: { month: string; asOfDate: string }[] = [];
+  const result = await scanRecommendationCatalog(async request => {
+    requests.push(request);
+    return { items: [], hasMore: false };
+  }, { mediaType: 'anime', now: NOW, discoveryFilters: { year: 2025 }, maxMonthsPerRequest: 20, maxProviderRoundsPerRequest: 20 });
+  assert.equal(requests[0]?.month, '2025-12');
+  assert.equal(requests.at(-1)?.month, '2025-01');
+  assert.equal(requests.length, 12);
+  assert.ok(requests.every(request => request.asOfDate === '2026-07-10'));
+  assert.equal(result.exhausted, true);
+  const cursor = encodeRecommendationCursor(decodeRecommendationCursor(null, 'anime', NOW, { year: 2025 }));
+  assert.throws(() => decodeRecommendationCursor(cursor, 'anime', NOW, { year: 2026 }), /INVALID_RECOMMENDATION_CURSOR/);
+});

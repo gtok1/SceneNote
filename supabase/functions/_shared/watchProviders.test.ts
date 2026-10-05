@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  applyKrOttDiscoverFilter, attachKrOttProviders, KR_OTT_PROVIDER_IDS,
+  applyKrOttDiscoverFilter, attachKrOttProviders, createProviderLink, KR_OTT_PROVIDER_IDS,
   listOtherAvailableRegions, mapKrWatchProvidersByCategory,
   matchTmdbAnimeForAniList, summarizeKrOttProviders,
   type TmdbProvider, type TmdbWatchProviderRegion
@@ -20,6 +20,13 @@ const target = (external_source: string, external_id: string, content_type = "an
 });
 
 describe("KR OTT provider contracts", () => {
+  it("opens Disney's Korean homepage instead of constructing unsupported search URLs", () => {
+    for (const provider of [p(337, "Disney Plus"), p(337, "디즈니+"), p(337)]) {
+      assert.equal(createProviderLink(provider, "메이드 인 코리아"), "https://www.disneyplus.com/ko-kr");
+      assert.equal(mapKrWatchProvidersByCategory({ flatrate: [provider] }, "메이드 인 코리아").flatrate[0]?.link, "https://www.disneyplus.com/ko-kr");
+    }
+    assert.equal(createProviderLink(p(8, "Netflix"), "무빙"), "https://www.netflix.com/search?q=%EB%AC%B4%EB%B9%99");
+  });
   it("W-1 sets only the three KR discover parameters", () => {
     const url = new URL("https://x/discover/tv?page=2");
     applyKrOttDiscoverFilter(url);

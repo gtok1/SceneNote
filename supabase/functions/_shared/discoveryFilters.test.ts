@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { it } from "node:test";
+import * as discoveryContract from "./discoveryFilters.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters } from "./discoveryFilters";
 
 test("positive filter defaults, Korean aliases and country casing share a cache identity", () => {
@@ -63,4 +64,65 @@ test("international TV category and authoritative query evidence support positiv
   assert.equal(matchesDiscoveryFilters({ content_type: "other", has_seasons: true }, { mediaTypes: ["drama"] }), true);
   assert.equal(matchesDiscoveryFilters({ content_type: "anime", has_seasons: true }, { mediaTypes: ["drama"] }), false);
   assert.equal(matchesDiscoveryFilters({ content_type: "other" }, { mediaTypes: ["drama"] }), false);
+});
+
+test("Y-1 year choices normalize and isolate cache identities", () => {
+  assert.equal(normalizeDiscoveryFilters({ year: 2025 }).year, 2025);
+  for (const year of [null, undefined, 1899, 2101, 2025.5, NaN]) {
+    assert.equal(normalizeDiscoveryFilters({ year }).year, undefined);
+    assert.equal(discoveryFilterKey({ year }), discoveryFilterKey());
+  }
+  assert.notEqual(discoveryFilterKey({ year: 2025 }), discoveryFilterKey({ year: 2026 }));
+  assert.notEqual(discoveryFilterKey({ year: 2025 }), discoveryFilterKey());
+});
+
+test("Y-2 selected year rejects older, newer and unknown years with other filters intersected", () => {
+  for (const air_year of [1992, 1981, 2026, null, undefined]) {
+    assert.equal(matchesDiscoveryFilters({ air_year }, { year: 2025 }), false);
+  }
+  assert.equal(matchesDiscoveryFilters({ air_year: 2025, countries: ['JP'] }, { year: 2025, countries: ['JP'] }), true);
+  assert.equal(matchesDiscoveryFilters({ air_year: 2025, countries: ['US'] }, { year: 2025, countries: ['JP'] }), false);
+  assert.equal(matchesDiscoveryFilters({ air_year: 1981 }), true);
+});
+
+
+
+it("A-1 applied filters normalize countries and retain year", () => {
+  assert.deepEqual(discoveryContract.toAppliedDiscoveryFilters({ countries: ["kr", "JP", "jp"], year: 2025 }), { year: 2025, genres: [], countries: ["JP", "KR"], media_types: [] });
+});
+it("A-2 applied filter defaults use null year", () => {
+  const expected = { year: null, genres: [], countries: [], media_types: [] };
+  assert.deepEqual(discoveryContract.toAppliedDiscoveryFilters({}), expected);
+  assert.deepEqual(discoveryContract.toAppliedDiscoveryFilters(), expected);
+});
+it("A-3 applied filters normalize all types, invalid year and Korean genre", () => {
+  assert.deepEqual(discoveryContract.toAppliedDiscoveryFilters({ mediaTypes: ["anime", "drama", "movie"], year: 1800, genres: ["드라마"] }), { year: null, genres: ["drama"], countries: [], media_types: [] });
+});
+it("U-1 legacy server cannot acknowledge requested year", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ countries: ["JP", "KR"], year: 2025 }, undefined), "year");
+});
+it("U-2 legacy server without requested year remains compatible", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ countries: ["JP", "KR"] }, undefined), null);
+});
+it("U-3 matching applied filters are supported", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ countries: ["JP", "KR"], year: 2025 }, { year: 2025, genres: [], countries: ["JP", "KR"], media_types: [] }), null);
+});
+it("U-4 missing applied year is unsupported", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ year: 2025 }, { year: null, genres: [], countries: [], media_types: [] }), "year");
+});
+it("U-5 unapplied requested genre is unsupported", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ genres: ["드라마"] }, { year: null, genres: [], countries: [], media_types: [] }), "filters");
+});
+it("U-6 malformed acknowledgements use the legacy year policy", () => {
+  for (const applied of ["garbage", { year: "2025", genres: [], countries: [], media_types: [] }, null, { year: 2025, genres: "drama", countries: [], media_types: [] }]) {
+    assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ year: 2025 }, applied), "year");
+  }
+});
+it("U-7 equivalent Korean genre and country case are supported", () => {
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter({ countries: ["kr"], genres: ["드라마"] }, { year: null, genres: ["drama"], countries: ["KR"], media_types: [] }), null);
+});
+it("U-8 all-type normalization distinguishes restricted acknowledgement", () => {
+  const requested = { mediaTypes: ["anime", "drama", "movie"] as const };
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter(requested, { year: null, genres: [], countries: [], media_types: [] }), null);
+  assert.equal(discoveryContract.detectUnsupportedDiscoveryFilter(requested, { year: null, genres: [], countries: [], media_types: ["anime"] }), "filters");
 });

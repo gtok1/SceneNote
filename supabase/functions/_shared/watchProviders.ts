@@ -1,4 +1,5 @@
 import { normalizeTitleForMatch } from "./titleMatch.ts";
+import { DISNEY_PLUS_HOME_URL } from "./watchProviderLinks.ts";
 import type { RecommendationExternalId } from "./recommendationEngine.ts";
 
 export type WatchProviderCategory = "flatrate" | "free" | "rent" | "buy";
@@ -107,7 +108,8 @@ export function createProviderLink(provider: TmdbProvider, title: string | null)
   const encodedTitle = encodeURIComponent(title);
   const providerName = provider.provider_name?.toLocaleLowerCase() ?? "";
   if (providerName.includes("netflix")) return `https://www.netflix.com/search?q=${encodedTitle}`;
-  if (providerName.includes("disney")) return `https://www.disneyplus.com/search?q=${encodedTitle}`;
+  // Do not invent a title-query route: Disney+'s old /search URL returns 404.
+  if (provider.provider_id === 337 || providerName.includes("disney") || providerName.includes("디즈니")) return DISNEY_PLUS_HOME_URL;
   if (providerName.includes("watcha") || providerName.includes("왓챠")) return `https://watcha.com/search?query=${encodedTitle}`;
   if (providerName.includes("wavve") || providerName.includes("웨이브")) return `https://www.wavve.com/search?searchWord=${encodedTitle}`;
   if (providerName.includes("tving") || providerName.includes("티빙")) return `https://www.tving.com/search?keyword=${encodedTitle}`;

@@ -980,3 +980,72 @@ describe("KR OTT recommendation provider requests", () => {
     });
   });
 });
+
+// Taste fill tests use the existing fetch stub and never contact providers.
+import { buildTasteFillDiscoverUrl, fetchTasteFillPage } from "./recommendationProviders.ts";
+import { tmdbIncludedGenreId } from "./recommendationProviderFilters.ts";
+import type { TasteFillQuery } from "./recommendationTasteFill.ts";
+const tasteDrama: TasteFillQuery = { key: "k", group: "drama-KR", kind: "tv", countries: ["KR"], genres: ["romance", "comedy"] };
+it("U-1 builds Korean OTT drama discovery with exclusions", () => {
+  const url = buildTasteFillDiscoverUrl(tasteDrama, 2, { excludedThemeKeys: ["boys-love"], excludedGenres: [] });
+  assert.equal(url.pathname, "/3/discover/tv");
+  const p = url.searchParams;
+  assert.equal(p.get("page"), "2"); assert.equal(p.get("watch_region"), "KR");
+  assert.ok(p.get("with_watch_providers")); assert.ok(p.get("with_watch_monetization_types"));
+  assert.equal(p.get("sort_by"), "popularity.desc"); assert.equal(p.get("vote_count.gte"), "50");
+  assert.equal(p.get("with_origin_country"), "KR"); assert.ok(p.get("without_genres")?.split(",").includes("16"));
+  for (const id of ["10764", "10767"]) assert.ok(p.get("without_genres")?.split(",").includes(id));
+  assert.ok(p.get("without_keywords")?.split(",").includes("289844"));
+  assert.equal(p.get("with_genres"), [tmdbIncludedGenreId("romance", "tv"), tmdbIncludedGenreId("comedy", "tv")].filter(id=>typeof id === "number").join("|"));
+});
+it("U-2 builds movie comedy discovery without a country restriction", () => {
+  const url = buildTasteFillDiscoverUrl({ key:"m",group:"movie",kind:"movie",countries:[],genres:["comedy"] },1,{excludedThemeKeys:[],excludedGenres:["horror"]});
+  assert.equal(url.pathname,"/3/discover/movie"); assert.equal(url.searchParams.get("with_genres"),"35");
+  assert.equal(url.searchParams.has("with_origin_country"),false); assert.ok(url.searchParams.get("without_genres")?.split(",").includes("27"));
+});
+it("U-3 builds Japanese anime discovery with an AND genre", () => {
+  // TMDB TV has no Romance genre id (movie-only 10749), so the AND example uses a TV genre.
+  const url = buildTasteFillDiscoverUrl({key:"a",group:"anime",kind:"tv",countries:["JP"],genres:["comedy"]},1,{excludedThemeKeys:[],excludedGenres:[]});
+  assert.equal(url.searchParams.get("with_genres"), `16,${tmdbIncludedGenreId("comedy","tv")}`); assert.equal(url.searchParams.get("with_origin_country"),"JP");
+});
+it("U-4 normalizes only matching drama candidates and reports more pages", async () => {
+  await withMockProviderFetch(async () => new Response(JSON.stringify({total_pages:3,results:[
+    {id:1,name:"한드",genre_ids:[18,10749],origin_country:["KR"]},
+    {id:2,name:"애니",genre_ids:[16],origin_country:["JP"]},
+    {id:3,name:"미드",genre_ids:[18],origin_country:["US"]}
+  ]})), async () => {
+    const page = await fetchTasteFillPage(tasteDrama,1,{asOfDate:"2026-10-03"});
+    assert.equal(page.items.length,1); assert.equal(page.items[0].external_id,"1");
+    assert.equal(page.items[0].trend_source,"취향 장르 인기작"); assert.equal(page.hasMore,true);
+  });
+});
+
+it("Y-3 taste fill constrains TV first airing and movie primary release to the selected year", () => {
+  for (const kind of ['tv', 'movie'] as const) {
+    const query = { key: kind, group: kind === 'tv' ? 'drama' as const : 'movie' as const, kind, countries: ['JP'], genres: [] };
+    const p = buildTasteFillDiscoverUrl(query, 1, undefined, { year: 2025 }).searchParams;
+    const date = kind === 'tv' ? 'first_air_date' : 'primary_release_date';
+    assert.equal(p.get(`${date}.gte`), '2025-01-01');
+    assert.equal(p.get(`${date}.lte`), '2025-12-31');
+    assert.equal(buildTasteFillDiscoverUrl(query, 1).searchParams.has(`${date}.gte`), false);
+  }
+});
+
+it("Y-6 taste provider requests and persisted caches are isolated by year", async () => {
+  const keys: string[] = [];
+  const dates: string[] = [];
+  const cache: RecommendationCache = {
+    async get<T>(key: string): Promise<T | null> { keys.push(key); return null; },
+    async set() {}
+  };
+  await withMockProviderFetch(async input => {
+    dates.push(new URL(String(input)).searchParams.get('first_air_date.gte') ?? 'all');
+    return new Response(JSON.stringify({ results: [], total_pages: 0 }));
+  }, async () => {
+    for (const year of [2025, 2026, undefined]) {
+      await fetchTasteFillPage(tasteDrama, 1, { asOfDate: '2026-10-04', cache, discoveryFilters: { year } });
+    }
+  });
+  assert.deepEqual(dates, ['2025-01-01', '2026-01-01', 'all']);
+  assert.equal(new Set(keys).size, 3);
+});

@@ -47,7 +47,7 @@ export const PERSONALIZED_RECOMMENDATION_BATCH_SIZE = 12;
 export function shouldAutoLoadNextRecommendationBatch(
   input: RecommendationScrollResumeInput
 ): boolean {
-  return input.visibleCount >= PERSONALIZED_RECOMMENDATION_BATCH_SIZE &&
+  return input.visibleCount >= (input.targetCount ?? PERSONALIZED_RECOMMENDATION_BATCH_SIZE) &&
     input.hasMore &&
     Boolean(input.nextCursor?.trim()) &&
     input.nextCursor !== input.lastRequestedCursor &&
@@ -61,6 +61,7 @@ export function shouldAutoLoadNextRecommendationBatch(
 
 export interface RecommendationScrollResumeInput {
   visibleCount: number;
+  targetCount?: number;
   hasMore: boolean;
   nextCursor: string | null;
   lastRequestedCursor: string | null;
@@ -78,7 +79,7 @@ export function shouldResumeRecommendationSearchOnScroll(
   input: RecommendationScrollResumeInput
 ): boolean {
   return input.visibleCount > 0 &&
-    input.visibleCount < PERSONALIZED_RECOMMENDATION_BATCH_SIZE &&
+    input.visibleCount < (input.targetCount ?? PERSONALIZED_RECOMMENDATION_BATCH_SIZE) &&
     input.hasMore &&
     Boolean(input.nextCursor?.trim()) &&
     input.nextCursor !== input.lastRequestedCursor &&
@@ -91,6 +92,7 @@ export function shouldResumeRecommendationSearchOnScroll(
 }
 
 export interface EmptyRecommendationContinuationInput {
+  unsupportedFilter?: boolean;
   hasData: boolean;
   itemCount: number;
   targetItemCount: number;
@@ -241,6 +243,7 @@ export function decideEmptyRecommendationContinuation(
   }
   if (input.isLoading) return "loading";
   if (input.hasError) return "stopped";
+  if (input.unsupportedFilter) return "stopped";
   if (
     input.hasMore &&
     Boolean(input.nextCursor) &&
@@ -293,4 +296,23 @@ function insertRecommendationFeedItem<T>(
     ...state,
     items: [...state.items.slice(0, index), item, ...state.items.slice(index)]
   };
+}
+
+
+export function nextRecommendationBatchTarget(visibleCount: number, currentTarget: number): number {
+  const visible = Number.isFinite(visibleCount) && visibleCount > 0 ? Math.floor(visibleCount) : 0;
+  return visible === 0 ? currentTarget : Math.max(currentTarget, visible + PERSONALIZED_RECOMMENDATION_BATCH_SIZE);
+}
+
+export function recommendationContinuationLimit(visibleCount: number, targetCount: number): number {
+  const visible = Number.isFinite(visibleCount) && visibleCount > 0 ? Math.floor(visibleCount) : 0;
+  return Math.min(PERSONALIZED_RECOMMENDATION_BATCH_SIZE, Math.max(0, targetCount - visible));
+}
+
+
+/** Retained action slots occupy the same grid positions as live recommendations. */
+export function countRecommendationDisplaySlots(
+  visibleIds: readonly string[], retainedIds: readonly string[] = []
+): number {
+  return new Set([...visibleIds, ...retainedIds]).size;
 }

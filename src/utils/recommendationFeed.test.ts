@@ -24,6 +24,8 @@ import {
   shouldShowRecommendationFeed
 } from "./recommendationFeed";
 
+import * as batchFlow from "./recommendationFeed";
+
 interface FeedItem {
   id: number;
   title: string;
@@ -371,3 +373,100 @@ function itemsFrom(start: number): FeedItem[] {
 function item(id: number): FeedItem {
   return { id, title: `작품 ${id}` };
 }
+
+
+const unsupportedFilterContinuationBase = {
+  hasData: true, itemCount: 0, targetItemCount: 12, isLoading: false,
+  hasError: false, hasMore: true, nextCursor: "page-2", isExhausted: false,
+  continuationAttempts: 0, consecutiveNoProgressAttempts: 0,
+  maxContinuationAttempts: 6, elapsedMs: 0, maxDurationMs: 45000
+};
+it("C-1 unsupported filter stops automatic continuation", () => {
+  assert.equal(decideEmptyRecommendationContinuation({ ...unsupportedFilterContinuationBase, unsupportedFilter: true }), "stopped");
+});
+it("C-2 supported or absent filter flag preserves continuation", () => {
+  assert.equal(decideEmptyRecommendationContinuation({ ...unsupportedFilterContinuationBase, unsupportedFilter: false }), "continue");
+  assert.equal(decideEmptyRecommendationContinuation(unsupportedFilterContinuationBase), "continue");
+});
+it("C-3 a complete batch remains idle with unsupported filters", () => {
+  assert.equal(decideEmptyRecommendationContinuation({ ...unsupportedFilterContinuationBase, unsupportedFilter: true, itemCount: 12 }), "idle");
+});
+it("C-4 loading takes precedence over unsupported filters", () => {
+  assert.equal(decideEmptyRecommendationContinuation({ ...unsupportedFilterContinuationBase, unsupportedFilter: true, isLoading: true }), "loading");
+});
+
+
+describe("recommendation batch top-up", () => {
+  const ready = {
+    visibleCount: 12, hasMore: true, nextCursor: "page-2",
+    lastRequestedCursor: "page-1", isExhausted: false, isLoading: false,
+    hasError: false, automaticSearchStopped: false, scrolledDown: true, nearEnd: true
+  };
+  const stoppedReady = {
+    ...ready, visibleCount: 7, nextCursor: "page-3",
+    lastRequestedCursor: "page-2", automaticSearchStopped: true
+  };
+  const base = {
+    hasData: true, itemCount: 0, targetItemCount: PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
+    isLoading: false, hasError: false, hasMore: true, nextCursor: "page-2",
+    isExhausted: false, continuationAttempts: 0, consecutiveNoProgressAttempts: 0,
+    maxContinuationAttempts: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS,
+    elapsedMs: 0, maxDurationMs: MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS
+  };
+
+  it("B-1 advances the target by twelve visible cards without lowering it", () => {
+    for (const [visible, target, expected] of [
+      [12, 12, 24], [17, 24, 29], [24, 36, 36], [0, 12, 12],
+      [NaN, 12, 12], [13, 12, 25], [12.7, 12, 24]
+    ] as const) assert.equal(batchFlow.nextRecommendationBatchTarget(visible, target), expected);
+  });
+  it("B-2 starts a new batch only when the current target is reached", () => {
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, visibleCount: 17, targetCount: 24 }), false);
+    assert.equal(shouldAutoLoadNextRecommendationBatch({ ...ready, visibleCount: 24, targetCount: 24 }), true);
+    assert.equal(shouldAutoLoadNextRecommendationBatch(ready), true);
+  });
+  it("B-3 resumes a stopped partial batch below its current target", () => {
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...stoppedReady, visibleCount: 17, targetCount: 24 }), true);
+    assert.equal(shouldResumeRecommendationSearchOnScroll({ ...stoppedReady, visibleCount: 24, targetCount: 24 }), false);
+    assert.equal(shouldResumeRecommendationSearchOnScroll(stoppedReady), true);
+  });
+  it("B-4 preserves continuation below a supplied target and idle at that target", () => {
+    assert.equal(decideEmptyRecommendationContinuation({ ...base, itemCount: 17, targetItemCount: 24 }), "continue");
+    assert.equal(decideEmptyRecommendationContinuation({ ...base, itemCount: 24, targetItemCount: 24 }), "idle");
+  });
+  it("B-5 limits continuation to the missing count with a twelve-card cap", () => {
+    for (const [visible, target, expected] of [
+      [17, 24, 7], [0, 12, 12], [24, 24, 0], [5, 36, 12], [30, 24, 0], [NaN, 12, 12]
+    ] as const) assert.equal(batchFlow.recommendationContinuationLimit(visible, target), expected);
+  });
+});
+
+
+describe("recommendation displayed batch count", () => {
+  it("counts retained added cards once alongside remaining recommendations", () => {
+    assert.equal(batchFlow.countRecommendationDisplaySlots(["b", "c"], ["a"]), 3);
+    assert.equal(batchFlow.countRecommendationDisplaySlots(["a", "b"], ["a", "a"]), 2);
+  });
+  it("does not refill a twelve-card screen just because one card was registered", () => {
+    const visible = Array.from({ length: 11 }, (_, index) => `remaining-${index}`);
+    const displayed = batchFlow.countRecommendationDisplaySlots(visible, ["added"]);
+    assert.equal(displayed, 12);
+    assert.equal(batchFlow.recommendationContinuationLimit(displayed, 12), 0);
+    assert.equal(batchFlow.nextRecommendationBatchTarget(displayed, 12), 24);
+  });
+  it("keeps the displayed target after three registered cards and fills only missing slots", () => {
+    const retained = ["added-a", "added-b", "added-c"];
+    const displayed = batchFlow.countRecommendationDisplaySlots(
+      Array.from({ length: 33 }, (_, index) => `remaining-${index}`), retained
+    );
+    assert.equal(displayed, 36);
+    assert.equal(batchFlow.nextRecommendationBatchTarget(displayed, 36), 48);
+    assert.equal(batchFlow.recommendationContinuationLimit(displayed + 5, 48), 7);
+  });
+  it("allows two empty advancing pages above twelve cards and stops on the third", () => {
+    const base = { ...unsupportedFilterContinuationBase, itemCount: 17, targetItemCount: 24 };
+    assert.equal(decideEmptyRecommendationContinuation({ ...base, consecutiveNoProgressAttempts: 1 }), "continue");
+    assert.equal(decideEmptyRecommendationContinuation({ ...base, consecutiveNoProgressAttempts: 2 }), "continue");
+    assert.equal(decideEmptyRecommendationContinuation({ ...base, consecutiveNoProgressAttempts: 3 }), "stopped");
+  });
+});

@@ -1,3 +1,5 @@
+import type { UnsupportedDiscoveryFilter } from "../../supabase/functions/_shared/discoveryFilters";
+
 export function canRunSearchRecommendations(input: {
   enabled: boolean; signedIn: boolean; focused: boolean; online: boolean;
   libraryReady: boolean; query: string; similarityMode: boolean;
@@ -35,4 +37,19 @@ export function recommendationProviderError(blocked: boolean, count: number): st
 
 export function searchSeasonIdentity(result: {external_source: string; external_id: string; season_number?: number | null}): string {
   return `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
+}
+
+
+export function unsupportedRecommendationFilterCopy(kind: UnsupportedDiscoveryFilter): {
+  title: string; description: string; actionLabel: string;
+} {
+  return kind === "year" ? {
+    title: "지금은 연도별 추천을 불러올 수 없어요",
+    description: "연도를 해제하면 최신 추천을 볼 수 있어요.",
+    actionLabel: "연도 해제"
+  } : {
+    title: "선택한 조건으로 추천을 불러올 수 없어요",
+    description: "조건을 바꾸거나 잠시 후 다시 시도해 주세요.",
+    actionLabel: "필터 변경"
+  };
 }

@@ -2,12 +2,14 @@
 export type DiscoveryMediaType = "anime" | "drama" | "movie";
 
 export interface DiscoveryFilters {
+  year?: number;
   genres: string[];
   countries: string[];
   mediaTypes: DiscoveryMediaType[];
 }
 
 export interface DiscoveryFilterInput {
+  year?: number | null | undefined;
   genres?: readonly string[] | undefined;
   countries?: readonly string[] | undefined;
   mediaTypes?: readonly DiscoveryMediaType[] | undefined;
@@ -17,6 +19,7 @@ export interface DiscoveryFilterInput {
 }
 
 export interface DiscoveryCandidate {
+  air_year?: number | null;
   genres?: readonly string[] | null;
   countries?: readonly string[] | null;
   origin_country?: readonly string[] | null;
@@ -55,12 +58,13 @@ export function normalizeDiscoveryFilters(input: DiscoveryFilterInput = {}): Dis
   const countryValues = (input.countries ?? [input.country ?? "all"]).map((value) => value.trim().toUpperCase()).filter(Boolean);
   const countries = countryValues.includes("ALL") ? [] : uniqueSorted(countryValues);
   const mediaTypes = uniqueSorted((input.mediaTypes ?? []).filter((value) => ["anime", "drama", "movie"].includes(value))) as DiscoveryMediaType[];
-  return { genres, countries, mediaTypes: mediaTypes.length === 3 ? [] : mediaTypes };
+  const year = typeof input.year === "number" && Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100 ? input.year : undefined;
+  return { ...(year !== undefined ? { year } : {}), genres, countries, mediaTypes: mediaTypes.length === 3 ? [] : mediaTypes };
 }
 
 export function discoveryFilterKey(input: DiscoveryFilterInput = {}): string {
-  const { genres, countries, mediaTypes } = normalizeDiscoveryFilters(input);
-  return JSON.stringify([genres, countries, mediaTypes]);
+  const { genres, countries, mediaTypes, year } = normalizeDiscoveryFilters(input);
+  return JSON.stringify([genres, countries, mediaTypes, ...(year !== undefined ? [year] : [])]);
 }
 
 function uniqueSorted(values: readonly string[]): string[] {
@@ -93,7 +97,7 @@ export function matchesDiscoveryFilters(candidate: DiscoveryCandidate, input: Di
     Boolean(candidate.matched_countries?.length && candidate.matched_countries.every((country) => filters.countries.includes(country.trim().toUpperCase())));
   const type = discoveryMediaType(candidate);
   const typeMatches = filters.mediaTypes.length === 0 || (type !== null && filters.mediaTypes.includes(type));
-  return genreMatches && countryMatches && typeMatches;
+  return genreMatches && countryMatches && typeMatches && (filters.year === undefined || candidate.air_year === filters.year);
 }
 
 export function discoveryMediaType(candidate: DiscoveryCandidate): DiscoveryMediaType | null {
@@ -102,4 +106,37 @@ export function discoveryMediaType(candidate: DiscoveryCandidate): DiscoveryMedi
   if (["kdrama", "jdrama"].includes(candidate.content_type ?? "") || candidate.category === "drama" ||
     (candidate.content_type === "other" && candidate.has_seasons === true)) return "drama";
   return null;
+}
+
+
+export interface AppliedDiscoveryFilters {
+  year: number | null;
+  genres: string[];
+  countries: string[];
+  media_types: DiscoveryMediaType[];
+}
+
+export function toAppliedDiscoveryFilters(input?: DiscoveryFilterInput): AppliedDiscoveryFilters {
+  const normalized = normalizeDiscoveryFilters(input);
+  return { year: normalized.year ?? null, genres: normalized.genres, countries: normalized.countries, media_types: normalized.mediaTypes };
+}
+
+export type UnsupportedDiscoveryFilter = "year" | "filters";
+
+export function detectUnsupportedDiscoveryFilter(
+  requested: DiscoveryFilterInput | undefined,
+  applied: unknown
+): UnsupportedDiscoveryFilter | null {
+  const request = toAppliedDiscoveryFilters(requested);
+  const value = applied as Partial<AppliedDiscoveryFilters> | null;
+  const isStringArray = (items: unknown): items is string[] => Array.isArray(items) && items.every(item => typeof item === "string");
+  if (!value || typeof value !== "object" ||
+    !(value.year === null || Number.isInteger(value.year)) ||
+    !isStringArray(value.genres) || !isStringArray(value.countries) || !isStringArray(value.media_types)) {
+    return request.year !== null ? "year" : null;
+  }
+  const response = toAppliedDiscoveryFilters({ year: value.year, genres: value.genres, countries: value.countries, mediaTypes: value.media_types as DiscoveryMediaType[] });
+  if (response.year !== request.year) return "year";
+  return JSON.stringify([response.genres, response.countries, response.media_types]) !==
+    JSON.stringify([request.genres, request.countries, request.media_types]) ? "filters" : null;
 }

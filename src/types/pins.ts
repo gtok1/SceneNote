@@ -35,6 +35,7 @@ export interface TimelinePin {
   genres?: string[] | undefined;
   episode_title?: string | null | undefined;
   episode_number?: number | null | undefined;
+  season_number?: number | null | undefined;
   timestamp_seconds: number | null;
   display_time_label: string | null;
   memo: string | null;

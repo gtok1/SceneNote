@@ -37,6 +37,9 @@ import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } from "@/hooks/useLibrary";
 import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
+import { useAuthStore } from "@/stores/authStore";
+import { getSavedListPosition } from "@/stores/listScrollStore";
+import { useListScrollRestoration } from "@/hooks/useListScrollRestoration";
 import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
@@ -128,6 +131,8 @@ export default function LibraryScreen() {
     [ratingFilter !== "all", Boolean(year), sortOrder !== "latest"].filter(Boolean).length;
   const isGallery = viewMode === "gallery";
   const pageSize = isGallery ? galleryColumns * 2 : 4;
+  const userId = useAuthStore(state => state.user?.id);
+  const scrollScope = JSON.stringify(["library", userId, filters, viewMode, pageSize, fontScale]);
   const genreOptions = useMemo(
     () => (library.data ?? []).flatMap((item) => item.genres),
     [library.data]
@@ -145,6 +150,7 @@ export default function LibraryScreen() {
     [filteredItems, visibleItemCount]
   );
   const visibleItemEnd = Math.min(visibleItemCount, filteredItems.length);
+  const scrollRestoration = useListScrollRestoration(scrollScope, listRef, visibleItems.length);
   const hasMoreItems = visibleItemEnd < filteredItems.length;
   const hasActiveFilter =
     statusFilter !== "all" ||
@@ -239,9 +245,8 @@ export default function LibraryScreen() {
   ]);
 
   useEffect(() => {
-    setVisibleItemCount(pageSize);
-    listRef.current?.scrollToOffset({ animated: false, offset: 0 });
-  }, [contentTypeFilter, genreFilter, pageSize, ratingFilter, searchQuery, sortOrder, statusFilter, viewMode, year]);
+    setVisibleItemCount(Math.max(pageSize, getSavedListPosition(scrollScope).itemCount));
+  }, [pageSize, scrollScope]);
 
   useEffect(() => {
     if (editingProgressItemId && library.data && !editingProgressItem) {
@@ -689,6 +694,13 @@ export default function LibraryScreen() {
       ) : null}
 
       <FlashList showsVerticalScrollIndicator={false}
+        maintainVisibleContentPosition={{ disabled: true }}
+        onLoad={scrollRestoration.onLoad}
+        onLayout={scrollRestoration.onLayout}
+        onContentSizeChange={scrollRestoration.onContentSizeChange}
+        onScrollBeginDrag={scrollRestoration.onScrollBeginDrag}
+        onScroll={scrollRestoration.onScroll}
+        scrollEventThrottle={16}
         ItemSeparatorComponent={isGallery ? undefined : () => <View style={{ height: spacing.md }} />}
         ListFooterComponent={
           filteredItems.length > pageSize ? (

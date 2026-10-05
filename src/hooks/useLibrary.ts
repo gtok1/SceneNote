@@ -30,6 +30,7 @@ import {
   toAbsoluteEpisodeNumber,
   toSeasonRelativeEpisodeNumber
 } from "@/utils/episodeProgress";
+import { createTrailingScheduler, LIBRARY_REFRESH_DEBOUNCE_MS } from "@/utils/recommendationAddFlow";
 import { filterUpcomingAiringItems } from "@/utils/upcomingAiring";
 
 export function useLibrary(status: LibraryStatusFilter = "all") {
@@ -85,7 +86,9 @@ export function useEpisodeProgress(contentId: string | undefined) {
   });
 }
 
-export function useAddToLibrary() {
+const libraryRefreshSchedulers = new Map<string, ReturnType<typeof createTrailingScheduler>>();
+
+export function useAddToLibrary(options?: { libraryRefresh?: "immediate" | "debounced" }) {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
 
@@ -94,7 +97,21 @@ export function useAddToLibrary() {
       addContentToLibrary(result, status),
     onSuccess: () => {
       if (user) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id) });
+        if (options?.libraryRefresh === "debounced") {
+          let scheduler = libraryRefreshSchedulers.get(user.id);
+          if (!scheduler) {
+            scheduler = createTrailingScheduler(LIBRARY_REFRESH_DEBOUNCE_MS, {
+              set: (run, ms) => setTimeout(run, ms),
+              clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>)
+            });
+            libraryRefreshSchedulers.set(user.id, scheduler);
+          }
+          scheduler.schedule(() => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id) });
+          });
+        } else {
+          queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id) });
+        }
       }
     }
   });

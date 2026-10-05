@@ -1,3 +1,4 @@
+import { planAddToLibraryPath, runAfterResponse, type EdgeRuntimeLike } from "../_shared/addToLibraryFlow.ts";
 import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
 import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
@@ -87,6 +88,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const adminClient = createAdminClient();
+  const runtime = (globalThis as { EdgeRuntime?: EdgeRuntimeLike }).EdgeRuntime;
 
   const { data: existingExternalId, error: externalLookupError } = await adminClient
     .from("content_external_ids")
@@ -99,8 +101,9 @@ Deno.serve(async (req: Request) => {
     return jsonError(500, "DB_ERROR", externalLookupError.message);
   }
 
+  let existingLibraryItem: { id: string; status: WatchStatus; status_flags: WatchStatus[] | null } | null = null;
   if (existingExternalId?.content_id) {
-    const { data: existingLibraryItem, error: libraryLookupError } = await adminClient
+    const { data: libraryItem, error: libraryLookupError } = await adminClient
       .from("user_library_items")
       .select("id, status, status_flags")
       .eq("user_id", userId)
@@ -112,18 +115,37 @@ Deno.serve(async (req: Request) => {
       return jsonError(500, "DB_ERROR", libraryLookupError.message);
     }
 
-    if (existingLibraryItem) {
-      return json(
-        {
-          library_item_id: existingLibraryItem.id,
-          content_id: existingExternalId.content_id,
-          status: existingLibraryItem.status,
-          statuses: existingLibraryItem.status_flags ?? [existingLibraryItem.status],
-          already_exists: true
-        },
-        200
-      );
+    existingLibraryItem = libraryItem;
+  }
+
+  const existingContentId = existingExternalId?.content_id ?? null;
+  const path = planAddToLibraryPath({ existingContentId, existingLibraryItemId: existingLibraryItem?.id ?? null });
+  if (path === "already_exists" && existingLibraryItem && existingContentId) {
+    return json(
+      {
+        library_item_id: existingLibraryItem.id,
+        content_id: existingContentId,
+        status: existingLibraryItem.status,
+        statuses: existingLibraryItem.status_flags ?? [existingLibraryItem.status],
+        already_exists: true
+      },
+      200
+    );
+  }
+  if (path === "fast_insert" && existingContentId) {
+    const response = await insertLibraryItem(adminClient, {
+      userId, contentId: existingContentId, watchStatus, watchStatuses, initialWatchCount, seasonNumber
+    });
+    if (response.status === 201) {
+      await runAfterResponse(() => logSync(adminClient, {
+        content_id: existingContentId,
+        api_source: source,
+        operation: "add_to_library",
+        status: "success",
+        request_payload: { source, externalId, watchStatus }
+      }), runtime);
     }
+    return response;
   }
 
   let contentMeta;
@@ -157,19 +179,20 @@ Deno.serve(async (req: Request) => {
 
   const contentId = contentRow.id as string;
 
-  try {
-    await upsertGenres(adminClient, contentId, contentMeta.genres);
-  } catch (error) {
-    console.error("Genre upsert skipped:", error);
-  }
-
   const themes = normalizeContentThemes({
     external_source: source,
     genres: contentMeta.genres,
     source_tags: contentMeta.source_tags
   });
-  if (themes.length > 0) {
-    const { error: themeError } = await adminClient.from("content_themes").upsert(
+  const [, themeResult, externalIdResult, seasonsResult] = await Promise.all([
+    (async () => {
+      try {
+        await upsertGenres(adminClient, contentId, contentMeta.genres);
+      } catch (error) {
+        console.error("Genre upsert skipped:", error);
+      }
+    })(),
+    themes.length > 0 ? adminClient.from("content_themes").upsert(
       themes.map((theme) => ({
         content_id: contentId,
         family: theme.family,
@@ -181,26 +204,12 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString()
       })),
       { onConflict: "content_id,family,key" }
-    );
-    if (themeError) console.error("Theme upsert skipped:", themeError);
-  }
-
-  const { error: externalIdError } = await adminClient.from("content_external_ids").upsert(
-    {
-      content_id: contentId,
-      api_source: source,
-      external_id: externalId
-    },
-    { onConflict: "api_source,external_id", ignoreDuplicates: true }
-  );
-
-  if (externalIdError) {
-    return jsonError(500, "DB_ERROR", externalIdError.message);
-  }
-
-  let seasonRows: SeasonRow[] = [];
-  if (contentMeta.seasons.length > 0) {
-    const { data: upsertedSeasons, error: seasonsError } = await adminClient.from("seasons").upsert(
+    ) : Promise.resolve({ error: null }),
+    adminClient.from("content_external_ids").upsert(
+      { content_id: contentId, api_source: source, external_id: externalId },
+      { onConflict: "api_source,external_id", ignoreDuplicates: true }
+    ),
+    contentMeta.seasons.length > 0 ? adminClient.from("seasons").upsert(
       contentMeta.seasons.map((season) => ({
         content_id: contentId,
         season_number: season.season_number,
@@ -209,30 +218,65 @@ Deno.serve(async (req: Request) => {
         air_year: season.air_year
       })),
       { onConflict: "content_id,season_number" }
-    ).select("id,season_number,episode_count");
+    ).select("id,season_number,episode_count") : Promise.resolve({ data: [], error: null })
+  ]);
+  if (themeResult.error) console.error("Theme upsert skipped:", themeResult.error);
+  if (externalIdResult.error) {
+    return jsonError(500, "DB_ERROR", externalIdResult.error.message);
+  }
 
-    if (seasonsError) {
+  let seasonRows: SeasonRow[] = [];
+  if (seasonsResult.error) {
+    await logSync(adminClient, {
+      content_id: contentId,
+      api_source: source,
+      operation: "upsert_seasons",
+      status: "partial",
+      request_payload: { source, externalId },
+      error_message: seasonsResult.error.message
+    });
+  } else {
+    seasonRows = (seasonsResult.data ?? []) as SeasonRow[];
+  }
+
+  const response = await insertLibraryItem(adminClient, {
+    userId, contentId, watchStatus, watchStatuses, initialWatchCount, seasonNumber
+  });
+  if (response.status === 201) {
+    await runAfterResponse(async () => {
+      await prefetchFirstSeasonEpisodes(adminClient, {
+        contentId, source, externalId, contentMeta, seasons: seasonRows
+      });
       await logSync(adminClient, {
         content_id: contentId,
         api_source: source,
-        operation: "upsert_seasons",
-        status: "partial",
-        request_payload: { source, externalId },
-        error_message: seasonsError.message
+        operation: "add_to_library",
+        status: "success",
+        request_payload: { source, externalId, watchStatus },
+        response_snapshot: {
+          title_primary: contentMeta.title_primary,
+          content_type: contentMeta.content_type,
+          air_date: contentMeta.air_date,
+          season_count: contentMeta.seasons.length
+        }
       });
-    } else {
-      seasonRows = (upsertedSeasons ?? []) as SeasonRow[];
-    }
+    }, runtime);
   }
+  return response;
+});
 
-  await prefetchFirstSeasonEpisodes(adminClient, {
-    contentId,
-    source,
-    externalId,
-    contentMeta,
-    seasons: seasonRows
-  });
-
+async function insertLibraryItem(
+  adminClient: ReturnType<typeof createAdminClient>,
+  params: {
+    userId: string;
+    contentId: string;
+    watchStatus: WatchStatus;
+    watchStatuses: WatchStatus[];
+    initialWatchCount: number;
+    seasonNumber: number | null;
+  }
+): Promise<Response> {
+  const { userId, contentId, watchStatus, watchStatuses, initialWatchCount, seasonNumber } = params;
   const { data: libraryItem, error: libraryError } = await adminClient
     .from("user_library_items")
     .insert({
@@ -255,20 +299,6 @@ Deno.serve(async (req: Request) => {
     return jsonError(500, "DB_ERROR", libraryError.message);
   }
 
-  await logSync(adminClient, {
-    content_id: contentId,
-    api_source: source,
-    operation: "add_to_library",
-    status: "success",
-    request_payload: { source, externalId, watchStatus },
-    response_snapshot: {
-      title_primary: contentMeta.title_primary,
-      content_type: contentMeta.content_type,
-      air_date: contentMeta.air_date,
-      season_count: contentMeta.seasons.length
-    }
-  });
-
   return json(
     {
       library_item_id: libraryItem.id,
@@ -279,7 +309,7 @@ Deno.serve(async (req: Request) => {
     },
     201
   );
-});
+}
 
 function buildContentPayload(
   contentMeta: ContentMeta,

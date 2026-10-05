@@ -6,15 +6,19 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
 import { chooseRecommendationOverview, mapRecommendationToCardViewModel, type RecommendationPresentation } from "@/utils/recommendationPresentation";
+
+import { RECOMMENDATION_ADD_HINT, RECOMMENDATION_COMPLETE_HINT } from "@/utils/recommendationAddFlow";
 
 interface RecommendationQuickViewModalProps {
   item: PersonalizedRecommendation | null;
   presentation: RecommendationPresentation | null;
   addLabel: string;
+  completeLabel: string;
+  onMarkCompleted: (item: PersonalizedRecommendation) => void;
   isAddDisabled: boolean;
   onClose: () => void;
   onAdd: (item: PersonalizedRecommendation) => void;
@@ -28,6 +32,8 @@ export function RecommendationQuickViewModal({
   item,
   presentation,
   addLabel,
+  completeLabel,
+  onMarkCompleted,
   isAddDisabled,
   onClose,
   onAdd,
@@ -149,15 +155,26 @@ export function RecommendationQuickViewModal({
               <Text style={styles.secondaryText}>상세 보기</Text>
             </Pressable>
             <Pressable
-              accessibilityLabel={`${item.title_primary} ${addLabel}`}
+              accessibilityHint={RECOMMENDATION_ADD_HINT} accessibilityLabel={`${item.title_primary} ${addLabel}`}
               accessibilityRole="button"
               accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
               disabled={isAddDisabled}
               onPress={() => onAdd(item)}
               style={[styles.primaryButton, isAddDisabled ? styles.disabled : null]}
             >
-              <Text style={styles.primaryText}>{addLabel}</Text>
+              <Text numberOfLines={1} style={styles.primaryText}>{addLabel}</Text>
             </Pressable>
+              <Pressable
+                accessibilityLabel={`${item.title_primary} ${completeLabel}`}
+                accessibilityRole="button"
+                accessibilityHint={RECOMMENDATION_COMPLETE_HINT}
+                accessibilityState={{ disabled: isAddDisabled, busy: completeLabel === "기록 중" }}
+                disabled={isAddDisabled}
+                onPress={() => onMarkCompleted(item)}
+                style={[styles.completeButton, isAddDisabled ? styles.disabled : null]}
+              >
+                <Text numberOfLines={1} style={styles.completeText}>{completeLabel}</Text>
+              </Pressable>
           </View>
           </ScrollView>
         </View>
@@ -212,6 +229,8 @@ const styles = StyleSheet.create({
   secondaryButton: { minHeight: 44, justifyContent: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   secondaryText: { color: colors.text, fontSize: 14, fontWeight: "900" },
   primaryButton: { minHeight: 44, justifyContent: "center", backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  primaryText: { color: colors.surface, fontSize: 14, fontWeight: "900" },
+  completeButton: { minHeight: 44, justifyContent: "center", alignItems: "center", backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  completeText: { ...typography.label, color: colors.primary },
+  primaryText: { ...typography.label, color: colors.surface },
   disabled: { opacity: 0.55 }
 });

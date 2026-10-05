@@ -121,3 +121,9 @@ describe("recommendation visibility parity", () => {
     }), unknown);
   });
 });
+
+it("Y-5 stale provider responses and replacements never display outside the selected year", () => {
+  const items = [1992, 1981, 2026, 2025, null].map((air_year, index) => candidate({ external_id: String(index), air_year }));
+  assert.deepEqual(filterVisibleRecommendationCandidates(items, [], null, { year: 2025 }).map(item => item.air_year), [2025]);
+  assert.equal(countVisibleRecommendationCandidates(items, [], null, { year: 2025 }), 1);
+});

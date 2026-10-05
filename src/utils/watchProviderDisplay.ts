@@ -1,5 +1,7 @@
 import type { WatchProviderCategory, WatchProvidersByCategory } from "@/types/watchProviders";
 
+export { DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink } from "../../supabase/functions/_shared/watchProviderLinks";
+
 const regionNames: Record<string, string> = {
   JP: "일본", US: "미국", TW: "대만", HK: "홍콩", SG: "싱가포르", TH: "태국",
   GB: "영국", CA: "캐나다", AU: "호주", FR: "프랑스", DE: "독일"

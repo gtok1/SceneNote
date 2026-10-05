@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { it } from "node:test";
+import * as recommendationPolicyContract from "./searchRecommendationPolicy";
 import { EXTENDED_FEATURES_ENABLED, SEARCH_RECOMMENDATIONS_ENABLED } from "../constants/features";
 import { canRunSearchRecommendations, createRecommendationRequestScope, recommendationProviderError, searchSeasonIdentity } from "./searchRecommendationPolicy";
 import { getResponsiveRecommendationColumns } from "./recommendationLayout";
@@ -55,4 +56,20 @@ test("SRR-04·21: 동일 TMDB 작품의 전체/시즌 1/시즌 2 키는 독립�
   const work = {external_source: "tmdb", external_id: "55925"};
   assert.equal(new Set([searchSeasonIdentity(work), searchSeasonIdentity({...work,season_number:1}), searchSeasonIdentity({...work,season_number:2})]).size,3);
   assert.equal(searchSeasonIdentity({...work,season_number:2}), "tmdb:55925:2");
+});
+
+
+it("P-1 unsupported year has a year-only recovery action", () => {
+  assert.deepEqual(recommendationPolicyContract.unsupportedRecommendationFilterCopy("year"), {
+    title: "지금은 연도별 추천을 불러올 수 없어요",
+    description: "연도를 해제하면 최신 추천을 볼 수 있어요.",
+    actionLabel: "연도 해제"
+  });
+});
+it("P-2 unsupported discovery filters open filter editing", () => {
+  assert.deepEqual(recommendationPolicyContract.unsupportedRecommendationFilterCopy("filters"), {
+    title: "선택한 조건으로 추천을 불러올 수 없어요",
+    description: "조건을 바꾸거나 잠시 후 다시 시도해 주세요.",
+    actionLabel: "필터 변경"
+  });
 });

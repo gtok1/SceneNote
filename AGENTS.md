@@ -42,6 +42,13 @@
 | `docs/38_japanese_person_korean_name_spec.md` | 일본 인물 한글 이름 채우기. 출처 우선순위(직접 입력 > TMDB ko 번역 > 한글 별칭 > 가나 읽기 > 로마자), 관용 표기 변환기(`_shared/japaneseReading.ts`), `favorite_people.name_ko` 3칸 마이그레이션(0023), `resolve-person-names` 백필, 인물 상세 한글 이름 입력 | 인물 이름 표기·좋아하는 인물 데이터·인물 Edge Function 작업 |
 | `docs/39_content_detail_saas_redesign_spec.md` | 작품 상세 SaaS 개편. 히어로(포스터 왼쪽·제목·한국어 메타·상태 세그먼트·행동 버튼) + 넓은 화면 2열(주: 진행·감상·줄거리·출연 / 옆: 보러가기·본 횟수·삭제), `docs/31` U-2 삭제 확인·U-5 상태 위치 흡수, 웹 `Alert` → 토스트 | 작품 상세 화면·상태 변경·삭제 작업 |
 | `docs/40_content_detail_delete_zone_fixes_spec.md` | 작품 상세 "내 목록에서 삭제"를 다른 섹션과 같은 "목록 관리" 카드 + 빨간 테두리 알약 버튼으로 정정, 설명 문구·실패 토스트 한국어화 | 작품 상세 삭제 영역 작업 |
+| `docs/41_taste_fill_recommendations_spec.md` | 검색 추천 빈 화면 정정: 원인 실측(운영 배포본 stale·월 커서 고정·테마 제외), 최신 레인 뒤 "취향 보충" 레인(취향 유형·장르 + 필터 + 국내 OTT, 기간 제한 없음), `tf1.` 결합 커서, `taste_fill_count` | 검색 추천·`personalized-recommendations` 작업 |
+| `docs/43_recommendation_add_misclick_fixes_spec.md` | 추천 추가 중 카드 위치 유지·누르기 identity 검증·중복 잠금·자동 보충 경쟁 방지 | 추천 카드 추가·보충·셀 재사용 작업 |
+| `docs/42_recommendation_add_latency_spec.md` | 검색 추천 "추가" 지연 개선: 카드 단위 잠금, 토스트 즉시, 보충 디바운스·일괄(목록 끝에), 라이브러리 재조회 디바운스(검색 화면만), `add-to-library` 빠른 경로·병렬 저장·응답 뒤 작업(`EdgeRuntime.waitUntil`) | 추천 추가·`add-to-library` 작업 |
+| `docs/44_pins_tab_saas_redesign_spec.md` | 핀 탭 SaaS 개편: 감정 요약 카드+감정 필터를 개수 칩 한 줄로, 장르·태그는 접히는 "필터" 카드, 포스터·카드·미리보기 패널(960 이상) 토큰화, 좁은 화면 카드 누름 → 상세. `docs/31` U-1·U-7 흡수(필터 설계 대체), U-3의 `pinSort`·`pinLabels` 계약 사용 | 핀 탭 화면·핀 목록 UI 작업 |
+| `docs/45_recommendation_year_filter_deploy_skew_fixes_spec.md` | 연도 선택 시 추천이 비는 문제: 원인은 앱(연도 재검사)·운영 서버(v20, 연도 미지원) 버전 어긋남(실측). 즉시 해결은 `personalized-recommendations` 재배포, 재발 방지로 응답 `applied_filters` + 앱 감지(`detectUnsupportedDiscoveryFilter`)·자동 이어 찾기 중단·전용 빈 상태("연도 해제") | 추천 발견 필터·서버 응답 계약·배포 순서 작업 |
+| `docs/46_recommendation_complete_action_spec.md` | 검색 추천 카드·목록·빠른 보기에 "완료" 버튼(이미 본 작품을 `completed`로 바로 등록). "추가"는 그대로, 같은 잠금·자리 유지·보충 흐름, 상태별 문구 순수 함수. `docs/30` D-4의 추가 버튼 폭만 대체. 서버 변경 없음 | 추천 카드 행동·라이브러리 추가 상태 작업 |
+| `docs/47_recommendation_batch_topup_spec.md` | 추천 스크롤 추가 묶음이 12개보다 짧게 붙는 문제: 자동 이어 찾기 목표를 "전체 12"에서 "묶음 목표(시작 시 보이는 개수+12)"로 일반화, 스크롤 판정 `targetCount`, 묶음별 원인 분해 개발 기록. 서버 변경 없음 | 추천 추가 로딩·자동 이어 찾기 작업 |
 
 **규칙**
 

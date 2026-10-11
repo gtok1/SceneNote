@@ -22,3 +22,23 @@ it("C-4 ends only when catalog and all taste pages are done", () => { assert.equ
 it("S-1 requires a vacant slot and at least 2500ms", () => { assert.equal(shouldRunTasteFill({itemCount:4,limit:12,remainingMs:3000}),true); assert.equal(shouldRunTasteFill({itemCount:12,limit:12,remainingMs:9000}),false); assert.equal(shouldRunTasteFill({itemCount:0,limit:12,remainingMs:2499}),false); });
 it("P-1 skips existing and blocked identities while filling", () => { const [a,b,c,d]=["1","2","3","4"].map(id=>({id})); assert.deepEqual(selectTasteFillItems({ranked:[a,b,c,d],existing:[b],blockedIdentities:new Set(["3"]),need:2,identities:x=>[x.id]}),[a,d]); });
 it("K-1 exposes the agreed taste fill constants", () => { assert.equal(TASTE_FILL_MAX_QUERIES,3); assert.equal(TASTE_FILL_MIN_REMAINING_MS,2500); assert.equal(TASTE_FILL_CURSOR_PREFIX,"tf1."); assert.equal(TASTE_FILL_TREND_SOURCE,"취향 장르 인기작"); });
+
+import * as firstBatchFill from "./recommendationTasteFill.ts";
+
+it("TF-1 prefetches only pending queries with at least 2500ms", () => {
+  for (const [remainingMs, pendingQueryCount, expected] of [[6000, 2, true], [2400, 2, false], [6000, 0, false], [2500, 1, true]] as const) {
+    assert.equal(firstBatchFill.shouldPrefetchTasteFill({ remainingMs, pendingQueryCount }), expected);
+  }
+});
+it("TF-2 plans full, empty, prefetched, fetched and time-limited fill in order", () => {
+  const cases = [
+    [12, 12, 9000, 2, true, "skip", "full"],
+    [2, 12, 1000, 0, false, "skip", "no_queries"],
+    [2, 12, 1000, 2, true, "use_prefetch", "prefetched"],
+    [2, 12, 3000, 2, false, "fetch_now", "fetched"],
+    [2, 12, 1000, 2, false, "skip", "time"]
+  ] as const;
+  for (const [itemCount, limit, remainingMs, pendingQueryCount, prefetched, action, reason] of cases) {
+    assert.deepEqual(firstBatchFill.planTasteFill({ itemCount, limit, remainingMs, pendingQueryCount, prefetched }), { action, reason });
+  }
+});

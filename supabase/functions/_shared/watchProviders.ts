@@ -199,3 +199,103 @@ export async function attachKrOttProviders<T extends KrOttLookupTarget>(
   }));
   return result;
 }
+
+export type WatchProviderScope = "content" | "season" | "series";
+export interface AnimeSeasonMarkerStrip { base: string; hadMarker: boolean }
+
+export function stripAnimeSeasonMarkers(title: string | null | undefined): AnimeSeasonMarkerStrip {
+  const normalized = title?.normalize("NFKC").trim() ?? "";
+  if (!normalized) return { base: "", hadMarker: false };
+  let hadMarker = false;
+  const stripped = normalized.replace(
+    /第(?:\d+|[一二三四五六七八九十]+)期|第\d+(?:\s*[&・,、]\s*\d+)*クール|\b\d+(?:st|nd|rd|th)\s+Season\b|\bSeason\s+\d+\b|シーズン\s*\d+|시즌\s*\d+|\bPart\s+\d+(?:\s*(?:&|and)\s*\d+)*\b|\d+[기부](?=$|\s|:|-)/gi,
+    () => { hadMarker = true; return " "; }
+  );
+  const base = stripped.replace(/\s+/g, " ").replace(/[\s:：\-–—~・/]+$/g, "").trim();
+  return base ? { base, hadMarker } : { base: normalized, hadMarker: false };
+}
+
+export function matchTmdbAnimeSeriesForSequel(
+  input: { titles: readonly (string | null | undefined)[]; year: number | null },
+  results: readonly TmdbTvSearchItem[]
+): number | null {
+  const strips = input.titles.map(stripAnimeSeasonMarkers);
+  if (!strips.some(strip => strip.hadMarker)) return null;
+  const titles = new Set([...input.titles, ...strips.map(strip => strip.base)].map(normalizeTitleForMatch).filter(Boolean));
+  const scored = results.flatMap(item => {
+    if (!item.genre_ids?.includes(16)) return [];
+    const year = Number.parseInt(item.first_air_date?.slice(0, 4) ?? "", 10);
+    if (input.year !== null && (!Number.isFinite(year) || year > input.year + 1)) return [];
+    const score = titles.has(normalizeTitleForMatch(item.original_name)) ? 2
+      : titles.has(normalizeTitleForMatch(item.name)) ? 1 : 0;
+    return score ? [{ item, score, yearDifference: input.year !== null && Number.isFinite(year) ? Math.abs(input.year - year) : 99 }] : [];
+  });
+  scored.sort((a, b) => b.score - a.score || a.yearDifference - b.yearDifference
+    || (b.item.popularity ?? 0) - (a.item.popularity ?? 0) || a.item.id - b.item.id);
+  return scored[0]?.item.id ?? null;
+}
+
+export interface TmdbSeasonSummary { season_number?: number | null; air_date?: string | null; episode_count?: number | null }
+export function pickTmdbSeasonForAirYear(
+  seasons: readonly TmdbSeasonSummary[] | null | undefined,
+  year: number | null
+): number | null {
+  if (year === null || !seasons) return null;
+  const candidates = seasons.flatMap(season => {
+    const airYear = Number.parseInt(season.air_date?.slice(0, 4) ?? "", 10);
+    return typeof season.season_number === "number" && season.season_number > 0 && Number.isFinite(airYear)
+      ? [{ number: season.season_number, year: airYear }] : [];
+  });
+  const exact = candidates.filter(season => season.year === year);
+  if (exact.length) return exact.length === 1 ? exact[0].number : null;
+  const adjacent = candidates.filter(season => Math.abs(season.year - year) <= 1);
+  return adjacent.length === 1 ? adjacent[0].number : null;
+}
+
+export interface TmdbWatchProvidersPayload { results?: Record<string, TmdbWatchProviderRegion | undefined> }
+export interface AniListWatchLookupDeps {
+  searchTv(query: string): Promise<TmdbTvSearchItem[]>;
+  getTvSeasons(tmdbId: number): Promise<TmdbSeasonSummary[]>;
+  getProviders(target: { tmdbId: number; seasonNumber: number | null }): Promise<TmdbWatchProvidersPayload>;
+}
+export interface AniListWatchLookupResult {
+  tmdbId: number;
+  seasonNumber: number | null;
+  scope: WatchProviderScope;
+  payload: TmdbWatchProvidersPayload;
+}
+
+// TMDB puts sequels under a series' first-season year. Series-wide providers can
+// include OTT services carrying only season one (docs/54 §2.2), so prefer season data.
+export async function lookupAniListWatchProviders(
+  input: { titles: readonly (string | null | undefined)[]; year: number | null },
+  deps: AniListWatchLookupDeps
+): Promise<AniListWatchLookupResult | null> {
+  const queries = [...new Set(input.titles.map(title => title?.trim()).filter((title): title is string => Boolean(title)))];
+  const results: TmdbTvSearchItem[] = [];
+  for (const query of queries) results.push(...await deps.searchTv(query));
+  const direct = matchTmdbAnimeForAniList(input, results);
+  if (direct !== null) {
+    return { tmdbId: direct, seasonNumber: null, scope: "content", payload: await deps.getProviders({ tmdbId: direct, seasonNumber: null }) };
+  }
+  const strips = input.titles.map(stripAnimeSeasonMarkers);
+  if (!strips.some(strip => strip.hadMarker)) return null;
+  const searched = new Set(queries.map(normalizeTitleForMatch));
+  for (const strip of strips) {
+    const key = normalizeTitleForMatch(strip.base);
+    if (!strip.hadMarker || !key || searched.has(key)) continue;
+    searched.add(key);
+    results.push(...await deps.searchTv(strip.base));
+  }
+  const tmdbId = matchTmdbAnimeSeriesForSequel(input, results);
+  if (tmdbId === null) return null;
+  const seasonNumber = pickTmdbSeasonForAirYear(await deps.getTvSeasons(tmdbId), input.year);
+  if (seasonNumber !== null) {
+    const payload = await deps.getProviders({ tmdbId, seasonNumber });
+    const region = payload.results?.KR;
+    if ([region?.flatrate, region?.free, region?.ads, region?.rent, region?.buy].some(providers => (providers?.length ?? 0) > 0)) {
+      return { tmdbId, seasonNumber, scope: "season", payload };
+    }
+  }
+  return { tmdbId, seasonNumber: null, scope: "series", payload: await deps.getProviders({ tmdbId, seasonNumber: null }) };
+}

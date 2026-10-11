@@ -1,5 +1,5 @@
 import type { ContentType } from "@/types/content";
-import type { EpisodeProgressSource, SeasonEpisodeCount } from "@/types/library";
+import type { EpisodeProgressSource, LibraryListItem, SeasonEpisodeCount, WatchStatus } from "@/types/library";
 
 export const MAX_MANUAL_EPISODE_NUMBER = 9999;
 
@@ -9,6 +9,7 @@ export interface EpisodeProgressInput {
   watchedEpisodeCount: number;
   derivedWatchedThrough: number | null;
   manualWatchedThrough: number | null;
+  completed?: boolean;
 }
 
 export interface ResolvedEpisodeProgress {
@@ -36,6 +37,17 @@ export function resolveEpisodeProgress(input: EpisodeProgressInput): ResolvedEpi
       totalEpisodes: null,
       isComplete: false,
       progressRatio: null,
+    };
+  }
+
+  if (input.completed && input.episodeCount !== null && input.episodeCount > 0) {
+    return {
+      source: "completed",
+      watchedThrough: input.episodeCount,
+      nextEpisodeNumber: null,
+      totalEpisodes: input.episodeCount,
+      isComplete: true,
+      progressRatio: 1,
     };
   }
 
@@ -71,6 +83,18 @@ export function resolveEpisodeProgress(input: EpisodeProgressInput): ResolvedEpi
     isComplete,
     progressRatio,
   };
+}
+
+export function resolveLibraryItemProgress(
+  item: Pick<LibraryListItem, "content_type" | "episode_count" | "watched_episode_count" | "derived_watched_through" | "manual_watched_absolute_number">,
+  statuses: readonly WatchStatus[]
+): Pick<LibraryListItem, "progress_source" | "effective_watched_through" | "next_episode_number"> {
+  const resolved = resolveEpisodeProgress({
+    contentType: item.content_type, episodeCount: item.episode_count,
+    watchedEpisodeCount: item.watched_episode_count, derivedWatchedThrough: item.derived_watched_through,
+    manualWatchedThrough: item.manual_watched_absolute_number, completed: statuses.includes("completed")
+  });
+  return { progress_source: resolved.source, effective_watched_through: resolved.watchedThrough, next_episode_number: resolved.nextEpisodeNumber };
 }
 
 export function createSeasonOffsetsByNumber(

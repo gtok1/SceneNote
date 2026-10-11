@@ -1,3 +1,4 @@
+import { parseStoredCrew } from "../../supabase/functions/_shared/contentCrew";
 import { supabase } from "@/lib/supabase";
 import { getExternalContentDetail } from "@/services/contentSearch";
 import type { ExternalSource } from "@/types/content";
@@ -14,6 +15,7 @@ interface RawPinTag {
 type RawPinRow = TimelinePin & {
   timeline_pin_tags?: RawPinTag[];
   contents?: {
+    crew?: unknown;
     title_primary: string | null;
     poster_url: string | null;
     source_api: string | null;
@@ -27,7 +29,7 @@ type RawPinRow = TimelinePin & {
 };
 
 const PIN_SELECT =
-  "*,contents(title_primary,poster_url,source_api,source_id,content_genres(genres(name))),episodes(episode_number,title),timeline_pin_tags(tag_id,tags(*))";
+  "*,contents(*,content_genres(genres(name))),episodes(episode_number,title),timeline_pin_tags(tag_id,tags(*))";
 
 export async function getAllPins(): Promise<TimelinePin[]> {
   const { data, error } = await supabase
@@ -165,6 +167,7 @@ function mapPin(row: RawPinRow): TimelinePin {
     user_id: row.user_id,
     content_id: row.content_id,
     episode_id: row.episode_id,
+    content_crew: parseStoredCrew(row.contents?.crew),
     content_title: row.contents?.title_primary ?? row.content_title ?? null,
     content_poster_url: row.contents?.poster_url ?? row.content_poster_url ?? null,
     content_source_api: (row.contents?.source_api ?? row.content_source_api ?? null) as TimelinePin["content_source_api"],

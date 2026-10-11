@@ -81,6 +81,7 @@ export interface PersonalizedRecommendationsRequest extends DiscoveryFilterInput
 }
 
 interface PersonalizedRecommendationsApiResponse {
+  diagnostics?: unknown;
   applied_filters?: unknown;
   items?: PersonalizedRecommendation[];
   next_cursor?: string | null;
@@ -231,6 +232,7 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
 
   if (__DEV__) console.info("recommendation response", JSON.stringify({
     action: "recommend", mediaType: input.mediaType, cursor: input.cursor ? "continuation" : "initial",
+    diagnostics: data.diagnostics ?? null,
     count: data.items.length, elapsedMs: Date.now() - startedAt, hasMore: data.has_more, partial: data.partial,
     failedSources: (data.failed_sources ?? []).filter(source => ["tmdb", "anilist", "tmdb_kr", "tmdb_jp", "tmdb_movie"].includes(source))
   }));

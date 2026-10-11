@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { CrewMember } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 
 import {
@@ -83,3 +84,15 @@ function item(contentId: string, contentType: LibraryListItem["content_type"], g
   season_number: null
   };
 }
+
+function crewMember(id: number, name: string, original_name: string | null = null): CrewMember {
+  return {id,name,original_name,role:"director",job:"director",profile_url:null};
+}
+it("F-1 finds library items by crew names", () => {
+  const withCrew = {...item("parasite","movie",[]),crew:[crewMember(1,"봉준호")]};
+  assert.deepEqual(filterLibraryItems([withCrew,item("other","movie",[])], {...baseFilters,searchQuery:"봉준호"}).map(entry => entry.content_id), ["parasite"]);
+});
+it("F-2 finds original crew names without case sensitivity", () => {
+  const withCrew = {...item("frieren","anime",[]),crew:[crewMember(2,"斎藤圭一郎","Keiichiro Saito")]};
+  assert.deepEqual(filterLibraryItems([withCrew], {...baseFilters,searchQuery:"saito"}).map(entry => entry.content_id), ["frieren"]);
+});

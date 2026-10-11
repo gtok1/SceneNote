@@ -2,7 +2,7 @@ import { matchesDiscoveryFilters, type DiscoveryFilterInput } from "../../supaba
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { isExcludedRecommendation, type RecommendationExclusions } from "@/utils/excludedThemes";
-import { createRecommendationIdentityAliases } from "../../supabase/functions/_shared/recommendationEngine";
+import { createRecommendationIdentityAliases, isSameRecommendationWork } from "../../supabase/functions/_shared/recommendationEngine";
 
 /** Keep the feed's library check identical in its UI and refill policy. */
 export function isRegisteredRecommendation(
@@ -17,17 +17,7 @@ export function isRegisteredRecommendation(
       return true;
     }
 
-    if (item.content_type !== result.content_type) return false;
-    if (item.air_year && result.air_year && item.air_year !== result.air_year) return false;
-
-    const itemTitles = [item.title_primary, item.title_original]
-      .map((title) => normalizeTitleForRecommendation(title ?? ""))
-      .filter((title) => title.length >= 2);
-    const resultTitles = [result.title_primary, result.title_original]
-      .map((title) => normalizeTitleForRecommendation(title ?? ""))
-      .filter((title) => title.length >= 2);
-
-    return itemTitles.some((title) => resultTitles.includes(title));
+    return isSameRecommendationWork(item, result);
   });
 }
 
@@ -90,12 +80,4 @@ export function summarizeRecommendationVisibility<T extends SearchResult & { key
     }
   }
   return { raw: items.length, registered, excluded, visible, unverifiableTmdb };
-}
-
-function normalizeTitleForRecommendation(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, "")
-    .trim();
 }

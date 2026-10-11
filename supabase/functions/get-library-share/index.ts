@@ -1,4 +1,5 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
+import { parseStoredCrew } from "../_shared/contentCrew.ts";
 import { LIBRARY_SHARE_QUERY_CHUNK, chunk } from "../_shared/libraryShare.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
 import type { ContentType, WatchStatus } from "../_shared/types.ts";
@@ -33,6 +34,7 @@ interface LibraryRow {
 }
 
 interface ContentRow {
+  crew?: unknown;
   id: string;
   content_type: ContentType;
   source_api: string;
@@ -159,6 +161,7 @@ Deno.serve(async (req: Request) => {
           air_date: row.contents?.air_date ?? null,
           end_date: row.contents?.end_date ?? null,
           cast: [],
+          crew: parseStoredCrew(row.contents?.crew),
           rating: review?.rating ?? null,
           one_line_review: review?.one_line_review ?? null,
           episode_count: episodeCountsByContentId.get(row.content_id) ?? null,

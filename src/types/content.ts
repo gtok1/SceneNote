@@ -33,6 +33,17 @@ export interface SearchResult {
   series_title?: string | null;
 }
 
+export type CrewRole = "director" | "writer" | "original" | "creator";
+
+export interface CrewMember {
+  id: number;
+  name: string;
+  original_name: string | null;
+  role: CrewRole;
+  job: string;
+  profile_url: string | null;
+}
+
 export interface CastMember {
   id: number;
   name: string;

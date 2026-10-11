@@ -4,7 +4,8 @@ import type { ExternalSource } from "../_shared/types.ts";
 import {
   listOtherAvailableRegions,
   mapKrWatchProvidersByCategory,
-  matchTmdbAnimeForAniList,
+  lookupAniListWatchProviders,
+  type TmdbSeasonSummary,
   type TmdbTvSearchItem,
   type TmdbWatchProviderRegion
 } from "../_shared/watchProviders.ts";
@@ -56,21 +57,48 @@ Deno.serve(async (req: Request) => {
     let tmdbId = externalId;
     if (source === "anilist") {
       mediaType = "tv";
-      const titles = [...new Set([body.value.original_title?.trim(), title].filter((value): value is string => Boolean(value)))];
-      const matches: TmdbTvSearchItem[] = [];
-      for (const searchTitle of titles) {
-        const searchUrl = new URL("https://api.themoviedb.org/3/search/tv");
-        searchUrl.searchParams.set("query", searchTitle);
-        searchUrl.searchParams.set("language", TMDB_LANGUAGE);
-        searchUrl.searchParams.set("include_adult", "false");
-        const searchResponse = await fetch(searchUrl, { headers: applyTmdbAuth(searchUrl, apiKey) });
-        if (!searchResponse.ok) return jsonError(503, "TMDB_API_ERROR", `TMDB anime search error: ${searchResponse.status}`);
-        const searchPayload = await searchResponse.json() as { results?: TmdbTvSearchItem[] };
-        matches.push(...(searchPayload.results ?? []));
-      }
-      const match = matchTmdbAnimeForAniList({ titles, year: body.value.air_year ?? null }, matches);
-      if (match === null) return json(createEmptyResponse(externalId));
-      tmdbId = String(match);
+      const titles = [body.value.original_title, title];
+      const result = await lookupAniListWatchProviders({ titles, year: body.value.air_year ?? null }, {
+        async searchTv(query) {
+          const searchUrl = new URL("https://api.themoviedb.org/3/search/tv");
+          searchUrl.searchParams.set("query", query);
+          searchUrl.searchParams.set("language", TMDB_LANGUAGE);
+          searchUrl.searchParams.set("include_adult", "false");
+          const response = await fetch(searchUrl, { headers: applyTmdbAuth(searchUrl, apiKey) });
+          if (!response.ok) throw new Error(`TMDB anime search error: ${response.status}`);
+          const payload = await response.json() as { results?: TmdbTvSearchItem[] };
+          return payload.results ?? [];
+        },
+        async getTvSeasons(id) {
+          const url = new URL(`https://api.themoviedb.org/3/tv/${id}`);
+          url.searchParams.set("language", TMDB_LANGUAGE);
+          const response = await fetch(url, { headers: applyTmdbAuth(url, apiKey) });
+          if (!response.ok) throw new Error(`TMDB season lookup error: ${response.status}`);
+          const payload = await response.json() as { seasons?: TmdbSeasonSummary[] };
+          return payload.seasons ?? [];
+        },
+        async getProviders({ tmdbId, seasonNumber }) {
+          const path = seasonNumber === null ? `tv/${tmdbId}` : `tv/${tmdbId}/season/${seasonNumber}`;
+          const url = new URL(`https://api.themoviedb.org/3/${path}/watch/providers`);
+          const response = await fetch(url, { headers: applyTmdbAuth(url, apiKey) });
+          if (!response.ok) throw new Error(`TMDB watch providers error: ${response.status}`);
+          return await response.json() as TmdbWatchProvidersResponse;
+        }
+      });
+      if (result === null) return json(createEmptyResponse(externalId));
+      const regionData = result.payload.results?.[WATCH_REGION];
+      return json({
+        external_source: "tmdb",
+        external_id: externalId,
+        tmdb_id: String(result.tmdbId),
+        provider_scope: result.scope,
+        tmdb_season_number: result.seasonNumber,
+        region: WATCH_REGION,
+        link: regionData?.link ?? null,
+        providers: mapKrWatchProvidersByCategory(regionData, title),
+        other_regions: listOtherAvailableRegions(result.payload.results),
+        updated_at: new Date().toISOString()
+      });
     }
     const url = new URL(`https://api.themoviedb.org/3/${mediaType}/${tmdbId}/watch/providers`);
     const headers = applyTmdbAuth(url, apiKey);
@@ -87,6 +115,8 @@ Deno.serve(async (req: Request) => {
       external_source: "tmdb",
       external_id: externalId,
       tmdb_id: tmdbId,
+      provider_scope: "content",
+      tmdb_season_number: null,
       region: WATCH_REGION,
       link: regionData?.link ?? null,
       providers: mapKrWatchProvidersByCategory(regionData, title),
@@ -107,6 +137,8 @@ function createEmptyResponse(externalId: string) {
     external_source: "tmdb",
     external_id: externalId,
     tmdb_id: null,
+    provider_scope: null,
+    tmdb_season_number: null,
     region: WATCH_REGION,
     link: null,
     providers: {

@@ -16,6 +16,7 @@ import {
   createWatchCountLabel
 } from "@/utils/contentMetaDisplay";
 import { createContinueWatchingLabel } from "@/utils/continueWatching";
+import { createCrewShortLine } from "@/utils/contentCrew";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { WatchStatusBadge } from "./WatchStatusBadge";
 
@@ -40,6 +41,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
 }: ContentGalleryCardProps) {
   const { fontScale } = useWindowDimensions();
   const cast = useLibraryItemCast(item, 2);
+  const crew = createCrewShortLine(item.crew);
   const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
   const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
@@ -103,6 +105,7 @@ export const ContentGalleryCard = memo(function ContentGalleryCard({
                   .join(" · ")}
               </Text>
               <GenreBadgeList genres={item.genres} maxVisible={2} />
+              {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={1} style={styles.cast}>{crew.text}</Text> : null}
               {cast.length ? (
                 <Text numberOfLines={1} style={styles.cast}>
                   {item.content_type === "anime" ? "성우" : "출연"}:{" "}

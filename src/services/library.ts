@@ -1,3 +1,5 @@
+import { readBatchedRows } from "@/utils/batchedQuery";
+import { parseStoredCrew } from "../../supabase/functions/_shared/contentCrew";
 import { getPrimaryWatchStatus, normalizeWatchStatuses } from "@/constants/status";
 import { supabase } from "@/lib/supabase";
 import type { ExternalSource, SearchResult, Season, Episode, Content } from "@/types/content";
@@ -37,6 +39,7 @@ interface RawLibraryRow {
 }
 
 type RawContentWithGenres = Content & {
+  crew?: unknown;
   content_genres?: ContentGenreJoin[] | null;
 };
 
@@ -142,6 +145,7 @@ export async function getLibraryItems(status: LibraryStatusFilter): Promise<Libr
       air_date: row.contents?.air_date ?? null,
       end_date: row.contents?.end_date ?? null,
       cast: [],
+      crew: parseStoredCrew(row.contents?.crew),
       rating: null,
       one_line_review: null,
       episode_count: null,
@@ -409,6 +413,7 @@ export async function getLibraryStatusByExternalId(
     air_date: row.contents?.air_date ?? null,
     end_date: row.contents?.end_date ?? null,
     cast: [],
+    crew: parseStoredCrew(row.contents?.crew),
     rating: null,
     one_line_review: null,
     episode_count: null,
@@ -451,23 +456,31 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
 
   const contentIds = Array.from(new Set(items.map((item) => item.content_id)));
   const [reviewsResult, seasonsResult, progressResult, episodeAirDatesResult] = await Promise.all([
-    supabase
+    readBatchedRows(contentIds, (ids, from, to) => supabase
       .from("reviews")
       .select("content_id,rating,one_line_review")
-      .in("content_id", contentIds),
-    supabase
+      .in("content_id", ids)
+      .order("id")
+      .range(from, to)),
+    readBatchedRows(contentIds, (ids, from, to) => supabase
       .from("seasons")
       .select("id,content_id,season_number,episode_count,title,air_year")
-      .in("content_id", contentIds),
-    supabase
+      .in("content_id", ids)
+      .order("id")
+      .range(from, to)),
+    readBatchedRows(contentIds, (ids, from, to) => supabase
       .from("user_episode_progress")
       .select("content_id,episode_id,episodes(season_id,episode_number)")
-      .in("content_id", contentIds),
-    supabase
+      .in("content_id", ids)
+      .order("id")
+      .range(from, to)),
+    readBatchedRows(contentIds, (ids, from, to) => supabase
       .from("episodes")
       .select("content_id,air_date")
-      .in("content_id", contentIds)
+      .in("content_id", ids)
       .not("air_date", "is", null)
+      .order("id")
+      .range(from, to))
   ]);
 
   if (reviewsResult.error) throw new Error(reviewsResult.error.message);
@@ -533,7 +546,8 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       episodeCount,
       watchedEpisodeCount,
       derivedWatchedThrough: progress?.maxWatchedEpisodeNumber ?? null,
-      manualWatchedThrough: manualAbsolute
+      manualWatchedThrough: manualAbsolute,
+      completed: item.statuses.includes("completed")
     });
 
     // A season-scoped row shares its content_id (and so its title/air_date) with the

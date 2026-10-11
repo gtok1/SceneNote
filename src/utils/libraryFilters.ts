@@ -75,6 +75,7 @@ export function filterLibraryItems(items: LibraryListItem[], filters: LibraryFil
     const searchableText = [
       item.title_primary,
       item.title_original,
+      ...(item.crew ?? []).flatMap((member) => [member.name, member.original_name]),
       ...(item.cast ?? []).flatMap((member) => [member.name, member.original_name, member.character])
     ]
       .filter(Boolean)

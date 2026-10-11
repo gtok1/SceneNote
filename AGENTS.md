@@ -49,11 +49,20 @@
 | `docs/45_recommendation_year_filter_deploy_skew_fixes_spec.md` | 연도 선택 시 추천이 비는 문제: 원인은 앱(연도 재검사)·운영 서버(v20, 연도 미지원) 버전 어긋남(실측). 즉시 해결은 `personalized-recommendations` 재배포, 재발 방지로 응답 `applied_filters` + 앱 감지(`detectUnsupportedDiscoveryFilter`)·자동 이어 찾기 중단·전용 빈 상태("연도 해제") | 추천 발견 필터·서버 응답 계약·배포 순서 작업 |
 | `docs/46_recommendation_complete_action_spec.md` | 검색 추천 카드·목록·빠른 보기에 "완료" 버튼(이미 본 작품을 `completed`로 바로 등록). "추가"는 그대로, 같은 잠금·자리 유지·보충 흐름, 상태별 문구 순수 함수. `docs/30` D-4의 추가 버튼 폭만 대체. 서버 변경 없음 | 추천 카드 행동·라이브러리 추가 상태 작업 |
 | `docs/47_recommendation_batch_topup_spec.md` | 추천 스크롤 추가 묶음이 12개보다 짧게 붙는 문제: 자동 이어 찾기 목표를 "전체 12"에서 "묶음 목표(시작 시 보이는 개수+12)"로 일반화, 스크롤 판정 `targetCount`, 묶음별 원인 분해 개발 기록. 서버 변경 없음 | 추천 추가 로딩·자동 이어 찾기 작업 |
+| `docs/48_content_detail_completed_progress_fixes_spec.md` | 작품 상세: "완료"면 모든 화를 본 것으로 **계산**(`resolveEpisodeProgress` `completed`, DB 쓰기 없음), 상태 변경 시 진행 캐시 재계산, 진행 카드 완료 모드, 웹에서 안 되던 `Alert` 확인(진행 되돌리기·에피소드 길게 누름)·감상 저장 오류 정정 | 작품 상세·시청 진행·상태 변경 작업 |
+| `docs/49_content_crew_display_spec.md` | 감독·작가·원작(제작진) 1단계: TMDB `credits.crew`·AniList `staff` 매핑(`_shared/contentCrew.ts`), `get-content-detail` `crew`, 작품 상세 히어로·빠른 보기 표시. 목록 화면은 DB 저장 2단계 | 제작진 데이터·상세 표시·`get-content-detail` 작업 |
+| `docs/50_content_crew_storage_list_display_spec.md` | 제작진 2단계: `contents.crew`·`crew_updated_at` 마이그레이션(0024, 작성만), Edge 최선 노력 저장(`saveContentCrew`), 방어적 읽기(`parseStoredCrew`), 라이브러리·핀 패널·공유 표시, 라이브러리 검색, 백필 스크립트(dry-run 기본). 적용·배포·백필은 사람 | 제작진 저장·목록 표시·백필 작업 |
+| `docs/51_recommendation_cross_type_library_match_fixes_spec.md` | 라이브러리에 영화로 저장된 작품이 추천에 TV판으로 다시 뜨는 문제: 같은 작품 판정 공유 함수 `isSameRecommendationWork`(movie↔kdrama/jdrama/other, 연도 차 1년 이하·애니 제외), 앱 `isRegisteredRecommendation`·서버 `areSameWork` 적용 | 추천 라이브러리 제외·중복 판정 작업 |
+| `docs/52_recommendation_first_batch_fill_spec.md` | 검색 추천 첫 응답이 2개만 오고 나머지가 늦게 붙는 문제: 준비 조회 병렬화, 취향 보충 페이지를 목록 탐색과 동시에 미리 받기(`planTasteFill`), 응답 `diagnostics`(단계별 시간·개수), 이어 찾기 중 스켈레톤 + "추천을 더 찾고 있어요 · n/목표" | 추천 첫 묶음 속도·채움 표시 작업 |
+| `docs/53_recommendation_topup_skeleton_alignment_fixes_spec.md` | 이어 찾기 스켈레톤이 실제 카드보다 좌우 24px 안쪽인 문제: 첫 로딩 스켈레톤과 같은 감싸기(`sharedInset`)로 정렬, 꼬리말 좌우 여백 제거. 14장 Codex 실행 지시 포함 | 추천 스켈레톤·꼬리말 정렬 작업 |
+| `docs/54_anime_sequel_watch_providers_fixes_spec.md` | AniList 애니 후속 시즌(`第4期` 등)의 보러가기가 비는 문제: 시즌 표시를 뗀 제목으로 TMDB 시리즈 보완 매칭, 방영 연도로 시즌 하나를 고를 때만 시즌 제공처, 아니면 시리즈 전체 + 안내(`provider_scope`). TMDB에 없는 라프텔은 애니 카드의 "라프텔에서 찾아보기" 검색 줄로만 연결. 14장 Codex 실행 지시 포함 | 보러가기·OTT 제공처·AniList→TMDB 매칭 작업 |
+| `docs/55_korean_search_spacing_fallback_spec.md` | 한국어 제목을 붙여 쓰면("너말고다른") 검색 0건인 문제: TMDB 단어 단위 일치 실측, 1단계에 맞는 결과가 없을 때만 "앞 k글자 + 공백 + 다음 1글자"(k=1~4) 질의를 TMDB에 2단계로 검색(`planKoreanWordSplitFallback`), `hasNextPage`는 1단계 기준, 골든 띄어쓰기 사례 7개. 14장 Codex 실행 지시 포함 | 검색어 변형·띄어쓰기·검색 누락 작업 |
+| `docs/56_korean_search_spacing_length_fixes_spec.md` | docs/55 보정이 4글자 이상에만 실행되어 "너말고" 같은 짧은 검색어가 0건인 문제: 글자 수 조건 제거(기준은 공백 뺀 검색어 ⊂ 공백 뺀 제목), `filterResultsByCompactQuery`는 빈 검색어만 통과, 입력 중 자모는 제외, 짧은 골든 사례 4개. 14장 Codex 실행 지시 포함 | 검색어 변형·띄어쓰기·검색 누락 작업 |
 
 **규칙**
 
 - UI 작업(화면·컴포넌트·스타일)은 [docs/00_ui_style_rules.md](docs/00_ui_style_rules.md)를 따른다. 웹과 iOS·Android 앱을 함께 만족해야 완료다. UI 명세·프롬프트는 이 문서를 READ FIRST에 넣고 규칙을 다시 풀어 쓰지 않는다(다른 점만 쓴다).
-- 명세 작성 방식의 기준은 [docs/00_codex_doc_pattern.md](docs/00_codex_doc_pattern.md)다. 새 명세는 **명세 파일 + 응답 본문의 Codex 프롬프트**를 짝으로 제공한다. 기존 `NN_codex_prompt_*.md` 파일은 보존하되, 새 프롬프트 파일 생성은 요구하지 않는다. 기존 프롬프트를 사용할 때는 후속 명세와 현재 코드를 먼저 대조한다.
+- 명세 작성 방식의 기준은 [docs/00_codex_doc_pattern.md](docs/00_codex_doc_pattern.md)다. 새 명세는 **명세 파일(14장 "Codex 실행 지시" 포함) + 응답 본문의 짧은 복붙 프롬프트(명세 경로 지시)**로 제공한다. 기존 `NN_codex_prompt_*.md` 파일은 보존하되, 새 프롬프트 파일 생성은 요구하지 않는다. 기존 프롬프트를 사용할 때는 후속 명세와 현재 코드를 먼저 대조한다.
 - 명세서의 **설계 결정(D-N) 항목은 임의로 바꾸지 않는다.** 바꿔야 한다고 판단되면 구현하지 말고 이유를 보고한다.
 - 명세서에 테스트 표가 있으면 표의 모든 행을 테스트로 옮긴다. 임의로 줄이지 않는다.
 

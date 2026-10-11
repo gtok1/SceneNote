@@ -8,6 +8,18 @@ export function canRunSearchRecommendations(input: {
     input.libraryReady && !input.similarityMode && input.query.trim().length === 0;
 }
 
+/** Cached card actions remain available when fetching is paused, within the same account and feed. */
+export function canEditCachedRecommendationFeed(input: {
+  userId: string | null | undefined;
+  currentUserId: string | null | undefined;
+  cacheIdentity: string;
+  currentCacheIdentity: string;
+  scopeActive: boolean;
+}): boolean {
+  return Boolean(input.userId) && input.userId === input.currentUserId &&
+    input.cacheIdentity === input.currentCacheIdentity && input.scopeActive;
+}
+
 /** One activation owns its requests. Closing it prevents further work and aborts pending IO. */
 export function createRecommendationRequestScope() {
   let active = true;

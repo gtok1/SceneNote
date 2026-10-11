@@ -951,15 +951,16 @@ function createWorkKeys(item: RecommendationCandidate | RecommendationLibraryIte
   return new Set(titles.map((title) => `work:${contentType}:${title}:${releaseYear ?? "unknown"}`));
 }
 
-function areSameWork(
-  left: RecommendationCandidate | RecommendationLibraryItem,
-  right: RecommendationCandidate | RecommendationLibraryItem
-): boolean {
-  if (normalizeContentType(left.content_type) !== normalizeContentType(right.content_type)) return false;
-  const leftYear = getReleaseYear(left);
-  const rightYear = getReleaseYear(right);
-  if (leftYear !== null && rightYear !== null && leftYear !== rightYear) return false;
+export interface SameWorkInput {
+  content_type?: string | null;
+  title_primary?: string | null;
+  title_original?: string | null;
+  air_year?: number | null;
+  air_date?: string | null;
+  release_date?: string | null;
+}
 
+export function isSameRecommendationWork(left: SameWorkInput, right: SameWorkInput): boolean {
   const leftTitles = new Set(
     [left.title_primary, left.title_original]
       .map((title) => normalizeTitle(title ?? ""))
@@ -970,7 +971,27 @@ function areSameWork(
       .map((title) => normalizeTitle(title ?? ""))
       .filter((title) => title.length >= 2)
   );
-  return intersects(leftTitles, rightTitles);
+  if (!intersects(leftTitles, rightTitles)) return false;
+
+  const leftType = normalizeContentType(left.content_type);
+  const rightType = normalizeContentType(right.content_type);
+  const leftYear = getReleaseYear(left);
+  const rightYear = getReleaseYear(right);
+  if (leftType === rightType) {
+    return leftYear === null || rightYear === null || leftYear === rightYear;
+  }
+
+  const seriesTypes = ["kdrama", "jdrama", "other"];
+  const movieAndSeries = (leftType === "movie" && seriesTypes.includes(rightType)) ||
+    (rightType === "movie" && seriesTypes.includes(leftType));
+  return movieAndSeries && leftYear !== null && rightYear !== null && Math.abs(leftYear - rightYear) <= 1;
+}
+
+function areSameWork(
+  left: RecommendationCandidate | RecommendationLibraryItem,
+  right: RecommendationCandidate | RecommendationLibraryItem
+): boolean {
+  return isSameRecommendationWork(left, right);
 }
 
 function createFranchiseKey(item: RecommendationCandidate): string {
@@ -1076,7 +1097,7 @@ function getReleaseDate(item: RecommendationCandidate | RecommendationLibraryIte
   return year ? new Date(Date.UTC(year, 0, 1)) : null;
 }
 
-function getReleaseYear(item: RecommendationCandidate | RecommendationLibraryItem): number | null {
+function getReleaseYear(item: SameWorkInput): number | null {
   if (Number.isInteger(item.air_year) && (item.air_year ?? 0) > 0) return item.air_year ?? null;
   const value = item.release_date ?? item.air_date;
   if (!value) return null;

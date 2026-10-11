@@ -73,3 +73,19 @@ it("P-2 unsupported discovery filters open filter editing", () => {
     actionLabel: "필터 변경"
   });
 });
+
+it("cached recommendation completion survives a disabled request after library refresh failure", () => {
+  const oldRequest = createRecommendationRequestScope();
+  oldRequest.close();
+  const disabledRequest = createRecommendationRequestScope();
+  assert.equal(canRunSearchRecommendations({ ...ready, libraryReady: false }), false);
+  assert.equal(recommendationPolicyContract.canEditCachedRecommendationFeed({
+    userId: "user-a", currentUserId: "user-a", cacheIdentity: "feed-a", currentCacheIdentity: "feed-a", scopeActive: disabledRequest.isActive()
+  }), true);
+});
+it("cached recommendation actions reject changed users, filters and unmounted scopes", () => {
+  const current = { userId: "user-a", currentUserId: "user-a", cacheIdentity: "feed-a", currentCacheIdentity: "feed-a", scopeActive: true };
+  for (const input of [{ ...current, currentUserId: "user-b" }, { ...current, currentCacheIdentity: "feed-b" }, { ...current, scopeActive: false }, { ...current, userId: null, currentUserId: null }]) {
+    assert.equal(recommendationPolicyContract.canEditCachedRecommendationFeed(input), false);
+  }
+});

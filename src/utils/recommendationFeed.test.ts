@@ -470,3 +470,30 @@ describe("recommendation displayed batch count", () => {
     assert.equal(decideEmptyRecommendationContinuation({ ...base, consecutiveNoProgressAttempts: 3 }), "stopped");
   });
 });
+
+it("U-1 shows ten vacant slots while continuing from two cards", () => {
+  assert.deepEqual(batchFlow.recommendationTopUpStatus({ visibleCount: 2, targetCount: 12, decision: "continue" }), { active: true, placeholderCount: 10, text: "추천을 더 찾고 있어요 · 2/12" });
+});
+it("U-2 keeps placeholders active between continuation requests", () => {
+  const status = batchFlow.recommendationTopUpStatus({ visibleCount: 2, targetCount: 12, decision: "loading" });
+  assert.equal(status.active, true);
+  assert.equal(status.placeholderCount, 10);
+});
+it("U-3 hides placeholders when continuation stops or is idle", () => {
+  for (const decision of ["stopped", "idle"] as const) assert.deepEqual(batchFlow.recommendationTopUpStatus({ visibleCount: 2, targetCount: 12, decision }), { active: false, placeholderCount: 0, text: null });
+});
+it("U-4 preserves the existing zero-card loading state", () => {
+  assert.equal(batchFlow.recommendationTopUpStatus({ visibleCount: 0, targetCount: 12, decision: "continue" }).active, false);
+});
+it("U-5 hides placeholders once the batch target is reached", () => {
+  assert.equal(batchFlow.recommendationTopUpStatus({ visibleCount: 12, targetCount: 12, decision: "continue" }).active, false);
+});
+it("U-6 shows the seven remaining slots of a scroll batch", () => {
+  const status = batchFlow.recommendationTopUpStatus({ visibleCount: 17, targetCount: 24, decision: "continue" });
+  assert.equal(status.placeholderCount, 7);
+  assert.equal(status.text, "추천을 더 찾고 있어요 · 17/24");
+});
+it("U-7 caps placeholders at twelve and rejects nonfinite counts", () => {
+  assert.equal(batchFlow.recommendationTopUpStatus({ visibleCount: 2, targetCount: 30, decision: "continue" }).placeholderCount, 12);
+  assert.equal(batchFlow.recommendationTopUpStatus({ visibleCount: NaN, targetCount: 12, decision: "continue" }).active, false);
+});

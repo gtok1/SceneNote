@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +12,9 @@ import {
 
 import { Ionicons } from "@expo/vector-icons";
 
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
+import { confirmDestructive } from "@/utils/confirmDestructive";
+import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, isEpisodeProgressCompletedMode } from "@/utils/contentDetailView";
 import type { LibraryListItem } from "@/types/library";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
@@ -45,6 +46,7 @@ export function EpisodeProgressCard({
   onOpenEpisodes,
   highlighted = false,
 }: EpisodeProgressCardProps) {
+  const completedMode = isEpisodeProgressCompletedMode({ statuses: item.statuses, totalEpisodes });
   const seasons = item.season_episode_counts;
   const hasSeasonSelector = seasons.length > 1;
   const initialDraft = useMemo(() => getInitialDraft(item, hasSeasonSelector), [item, hasSeasonSelector]);
@@ -71,6 +73,7 @@ export function EpisodeProgressCard({
     watchedEpisodeCount: item.watched_episode_count,
     derivedWatchedThrough: null,
     manualWatchedThrough: draftAbsolute,
+    completed: completedMode,
   });
   const savedSeasonNumber = hasSeasonSelector ? item.manual_watched_season_number : null;
   const unchanged = item.manual_watched_episode_number !== null
@@ -78,14 +81,16 @@ export function EpisodeProgressCard({
     && item.manual_watched_episode_number === draftEpisodeNumber;
   const disabled = isSaving || isUnavailable;
   const saveDisabled = disabled || isOffline || unchanged || rawEpisodeNumber === "";
-  const statusLabel = !unchanged
+  const statusLabel = completedMode
+    ? EPISODE_PROGRESS_COMPLETED_COPY.modeLabel
+    : !unchanged
     ? "저장 전"
     : item.progress_source === "manual"
       ? "직접 설정함"
       : item.progress_source === "episode_progress"
         ? "에피소드 체크 기준"
         : null;
-  const derivedDiffers = item.progress_source === "manual"
+  const derivedDiffers = (completedMode || item.progress_source === "manual")
     && item.derived_watched_through !== null
     && item.derived_watched_through !== item.effective_watched_through;
 
@@ -120,21 +125,19 @@ export function EpisodeProgressCard({
   };
 
   const reset = () => {
-    Alert.alert(
-      "시청 진행 되돌리기",
-      "직접 설정한 진행 위치를 지우고 에피소드 체크 기준으로 되돌릴까요?",
-      [
-        { text: "취소", style: "cancel" },
-        { text: "되돌리기", style: "destructive", onPress: () => onSave(null) },
-      ],
-    );
+    confirmDestructive({
+      title: MANUAL_PROGRESS_COPY.resetTitle,
+      message: MANUAL_PROGRESS_COPY.resetMessage,
+      confirmLabel: MANUAL_PROGRESS_COPY.resetConfirm,
+      onConfirm: () => onSave(null),
+    });
   };
 
   return (
     <View
       style={[
         styles.card,
-        item.progress_source === "none" || highlighted ? styles.cardHighlighted : null,
+        !completedMode && (item.progress_source === "none" || highlighted) ? styles.cardHighlighted : null,
         disabled ? styles.disabled : null,
       ]}
     >
@@ -165,7 +168,7 @@ export function EpisodeProgressCard({
         </View>
       ) : null}
 
-      {hasSeasonSelector ? (
+      {!completedMode && hasSeasonSelector ? (
         <View style={styles.section}>
           <Text style={styles.label}>시즌</Text>
           <HorizontalChoiceRail
@@ -197,7 +200,7 @@ export function EpisodeProgressCard({
         </View>
       ) : null}
 
-      <View style={styles.section}>
+      {!completedMode ? <View style={styles.section}>
         <Text style={styles.label}>여기까지 봤어요</Text>
         {totalEpisodes !== null && upperBound <= 200 ? (
           <View accessibilityRole="radiogroup" style={styles.episodeChoicesSection}>
@@ -275,14 +278,19 @@ export function EpisodeProgressCard({
           </Pressable>
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </View>
+      </View> : null}
 
       <Text accessibilityLiveRegion="polite" style={styles.next}>
-        {draftProgress.isComplete
+        {completedMode
+          ? EPISODE_PROGRESS_COMPLETED_COPY.summary
+          : draftProgress.isComplete
           ? "모든 화 시청 완료"
           : `다음에 볼 화 · ${draftProgress.nextEpisodeNumber ?? 1}화`}
       </Text>
 
+      {completedMode ? <Text style={styles.completedHint}>{EPISODE_PROGRESS_COMPLETED_COPY.hint}</Text> : null}
+
+      {!completedMode ? <>
       <View style={styles.quickActions}>
         <Pressable disabled={disabled} onPress={() => changeDraft(0)} style={styles.quickButton}>
           <Text style={styles.quickText}>아직 안 봄</Text>
@@ -311,6 +319,8 @@ export function EpisodeProgressCard({
       >
         <Text style={styles.saveText}>{isSaving ? "저장 중" : "저장"}</Text>
       </Pressable>
+
+      </> : null}
 
       {isUnavailable ? (
         <Text style={styles.notice}>서버 업데이트 후 사용할 수 있습니다</Text>
@@ -447,6 +457,7 @@ function getErrorMessage(reason: string): string {
 }
 
 const styles = StyleSheet.create({
+  completedHint: { ...typography.caption, color: colors.textMuted },
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

@@ -1,10 +1,10 @@
-import type { CastMember, Content, ContentType, ExternalSource } from "./content";
+import type { CastMember, CrewMember, Content, ContentType, ExternalSource } from "./content";
 
 export type WatchStatus = "wishlist" | "watching" | "completed" | "recommended" | "not_recommended" | "dropped";
 
 export type LibraryStatusFilter = WatchStatus | "all";
 
-export type EpisodeProgressSource = "manual" | "episode_progress" | "none";
+export type EpisodeProgressSource = "manual" | "episode_progress" | "none" | "completed";
 
 export interface SeasonEpisodeCount {
   season_number: number;
@@ -47,6 +47,7 @@ export interface LibraryListItem {
   air_date: string | null;
   end_date: string | null;
   cast: CastMember[];
+  crew?: CrewMember[];
   rating: number | null;
   one_line_review: string | null;
   episode_count: number | null;

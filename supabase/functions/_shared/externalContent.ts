@@ -1,4 +1,5 @@
 import type { CastMemberMeta, ContentMeta, EpisodeMeta, ExternalSource, SeasonMeta } from "./types.ts";
+import { mapAniListStaff, mapTmdbCrew, type AniListStaffEdgeInput, type CrewMemberMeta, type TmdbCreatorInput, type TmdbCrewInput } from "./contentCrew.ts";
 import { normalizeGenreNames } from "./genres.ts";
 import { hasTmdbAnimationGenre } from "./tmdbClassification.ts";
 import {
@@ -108,7 +109,9 @@ interface TmdbDetail {
   };
   credits?: {
     cast?: TmdbCastMember[];
+    crew?: TmdbCrewInput[];
   };
+  created_by?: TmdbCreatorInput[];
   keywords?: {
     keywords?: { id?: number; name?: string | null }[];
     results?: { id?: number; name?: string | null }[];
@@ -150,6 +153,7 @@ interface TmdbKoreanFallback {
   overview: string | null;
   poster_url: string | null;
   cast: CastMemberMeta[];
+  crew: CrewMemberMeta[];
 }
 
 export async function fetchTmdbDetail(externalId: string, preferredMediaType?: string): Promise<ContentMeta> {
@@ -216,7 +220,8 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
       .filter((name): name is string => Boolean(name))
       .map((name) => ({ name, source: "tmdb", rank: null })),
     seasons,
-    cast
+    cast,
+    crew: mapTmdbCrew(detail.credits?.crew, isMovie ? undefined : detail.created_by)
   };
 }
 
@@ -343,6 +348,7 @@ async function fetchTmdbKoreanAnimeFallback(params: {
 
       if (title || overview) {
         let cast: CastMemberMeta[] = [];
+        let crew: CrewMemberMeta[] = [];
         try {
           const detailUrl = new URL(`https://api.themoviedb.org/3/tv/${match.id}`);
           detailUrl.searchParams.set("language", TMDB_LANGUAGE);
@@ -353,6 +359,7 @@ async function fetchTmdbKoreanAnimeFallback(params: {
             3000
           );
           cast = mapTmdbCast(detail.credits?.cast);
+          crew = mapTmdbCrew(detail.credits?.crew, detail.created_by);
         } catch {
           // Cast is an optional enhancement for anime fallback.
         }
@@ -361,7 +368,8 @@ async function fetchTmdbKoreanAnimeFallback(params: {
           title,
           overview,
           poster_url: match.poster_path ? `https://image.tmdb.org/t/p/w500${match.poster_path}` : null,
-          cast
+          cast,
+          crew
         };
       }
     } catch {
@@ -426,6 +434,9 @@ const ANILIST_DETAIL_QUERY = `
           }
         }
       }
+      staff(perPage: 25, sort: [RELEVANCE, ID]) {
+        edges { role node { id name { full native } image { large medium } } }
+      }
     }
   }
 `;
@@ -478,6 +489,7 @@ interface AniListDetailResponse {
           }[] | null;
         }[] | null;
       } | null;
+      staff?: { edges?: AniListStaffEdgeInput[] | null } | null;
     };
   };
   errors?: { message?: string }[];
@@ -527,6 +539,7 @@ export async function fetchAniListDetail(externalId: string): Promise<ContentMet
   const airDate = dateFromParts(media.startDate);
   const endDate = dateFromParts(media.endDate) ?? (isMovie ? airDate : null);
   const aniListCast = mapAniListVoiceActors(media);
+  const aniListCrew = mapAniListStaff(media?.staff?.edges ?? undefined);
   const koreanFallback = await fetchTmdbKoreanAnimeFallback({
     titles: [media.title?.native, media.title?.romaji, media.title?.english],
     year: media.startDate?.year ?? null
@@ -566,7 +579,8 @@ export async function fetchAniListDetail(externalId: string): Promise<ContentMet
             air_year: media.startDate?.year ?? null
           }
         ],
-    cast: aniListCast.length ? aniListCast : koreanFallback?.cast ?? []
+    cast: aniListCast.length ? aniListCast : koreanFallback?.cast ?? [],
+    crew: aniListCrew.length ? aniListCrew : koreanFallback?.crew ?? []
   };
 }
 
@@ -649,7 +663,8 @@ export async function fetchKitsuDetail(externalId: string): Promise<ContentMeta>
             air_year: yearFromDate(attributes.startDate)
           }
         ],
-    cast: koreanFallback?.cast ?? []
+    cast: koreanFallback?.cast ?? [],
+    crew: koreanFallback?.crew ?? []
   };
 }
 
@@ -704,7 +719,8 @@ export async function fetchTvmazeDetail(externalId: string): Promise<ContentMeta
     episode_count: seasonRows.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) || null,
     genres: normalizeGenreNames(show.genres ?? []),
     seasons: seasonRows,
-    cast: []
+    cast: [],
+    crew: []
   };
 }
 

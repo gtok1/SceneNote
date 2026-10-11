@@ -385,7 +385,7 @@ export default function LibraryScreen() {
         <TextInput
           accessibilityLabel="라이브러리 검색"
           onChangeText={(value) => commitFilters({ searchQuery: value })}
-          placeholder="작품명, 출연자, 성우 검색"
+          placeholder="작품명, 감독·작가, 출연자 검색"
           style={styles.searchInput}
           value={searchQuery}
         />

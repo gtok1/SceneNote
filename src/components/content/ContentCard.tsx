@@ -10,6 +10,7 @@ import { useAiringAvailability } from "@/hooks/useAiringAvailability";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createContinueWatchingLabel } from "@/utils/continueWatching";
+import { createCrewSummary } from "@/utils/contentCrew";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { WatchStatusBadge } from "./WatchStatusBadge";
 
@@ -29,6 +30,7 @@ export const ContentCard = memo(function ContentCard({
   compact = false
 }: ContentCardProps) {
   const cast = useLibraryItemCast(item, 2);
+  const crew = createCrewSummary(item.crew, 1);
   const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
   const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
@@ -63,6 +65,7 @@ export const ContentCard = memo(function ContentCard({
           {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
         </Text>
         <GenreBadgeList genres={item.genres} maxVisible={2} />
+        {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={1} style={[styles.cast, compact ? styles.castCompact : null]}>{crew.text}</Text> : null}
         {cast.length ? (
           <Text numberOfLines={1} style={[styles.cast, compact ? styles.castCompact : null]}>
             {item.content_type === "anime" ? "성우" : "출연"}:{" "}

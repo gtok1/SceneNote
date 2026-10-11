@@ -3,6 +3,7 @@ import { normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supa
 import type {
   MediaTypeFilter,
   CastMember,
+  CrewMember,
   SearchContentResponse,
   SearchResult,
   Season
@@ -114,6 +115,7 @@ export interface ContentDetailResponse {
   content: SearchResult & {
     content_id?: string;
     cast?: CastMember[];
+    crew?: CrewMember[];
     genres?: string[];
   };
   seasons: (Pick<Season, "season_number" | "title" | "episode_count" | "air_year"> & {

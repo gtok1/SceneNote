@@ -1,5 +1,20 @@
 # SceneNote Development Next Steps
 
+## 검색 추천의 라이브러리 조회 오류 정정 (2026-10-10)
+
+- 검색 화면의 추천 영역에서 `라이브러리 정보를 불러오지 못해 취향을 분석할 수 없습니다`를 재현했다. 임시 오류 진단으로 시즌 조회의 `Bad Request`, 작품 ID 628개를 확인했다. `getLibraryItems`의 메타데이터 보강에서 전체 UUID를 한 `.in()` URL로 요청하던 것을 100개 ID씩 분할하여 요청 길이를 줄였다. 진단 코드는 제거했다.
+- 감상·시즌·시청 진행·방영일 4개 조회에 `readBatchedRows`를 적용했다. 각 묶음은 ID 정렬과 1000행 페이지 조회로 결과 누락을 방지하고, 후속 묶음 실패 시 부분 성공으로 처리하지 않는다. 추천 필터·개인 기록·D-N·서버 및 DB 계약 변경 없음.
+- 자동: 시작 경로·git 상태와 `npm test` 기준선 확인(1068/1069). 수정 후 1073/1074, 기존 추천 엔진 `uses latest-popular fallback ordering with an empty library` 1건만 실패. 새 5개 테스트는 628개 ID 분할·추가 페이지·후속 실패·빈 입력/중복·잘못된 크기를 확인한다. typecheck·lint·diff 공백 검사 통과. 로그 `/tmp/scenenote-library-error-{before,after,typecheck,lint}.log`.
+- 실제 웹: 기존 8081 검색 화면의 동일한 2025년·애니/드라마·일본/한국 필터에서 오류 문구 제거, 추천 12개 표시와 새 추천 버튼 활성 확인. 증빙 `/tmp/scenenote-search-library-recovered.png`. 서버 재시작·배포·계정 기록 저장 없음. iOS/Android 실기기는 실행 환경이 없어 미검증이며, 실제 계정의 작품 완료 저장은 이번 조회 검증에 포함하지 않았다.
+
+## 추천 캐시 카드 완료 무반응 정정 (2026-10-10)
+
+- 실제 8081 검색 화면에서 라이브러리 조회 오류와 기존 추천 카드가 함께 표시되고, `모텔 캘리포니아 완료` 클릭이 반응 없이 끝나는 상황을 재현했다. 추천 요청이 비활성화되면 `removeOptimistically`가 null을 반환하여 저장 이전에 종료하는 것이 원인이다.
+- `usePersonalizedRecommendations`의 캐시 제거·복원 조건을 요청 활성 조건과 분리했다. 현재 계정·추천 캐시 identity·마운트 범위를 확인하며 요청·자동 보충의 활성 조건은 유지한다. 캐시에서 카드를 찾지 못할 때 안내 토스트를 추가했다. [46 명세](46_recommendation_complete_action_spec.md#10-캐시-카드-완료-무반응-정정-2026-10-10)의 D-N 변경 없음.
+- 자동: 시작 `git status --short`로 기존 변경 확인. 기준선 `npm test` 1066/1067, 수정 후 1068/1069. 새 회귀 2개는 구현 전 실패·구현 후 통과하며 기존 추천 엔진 `uses latest-popular fallback ordering with an empty library` 1건만 실패한다. typecheck·lint 통과. 로그 `/tmp/scenenote-complete-{before,red,after,typecheck,lint}.log`.
+- 격리 웹: 실제 추천 훅과 모의 계정·캐시를 사용하여 활성→라이브러리 실패(요청 비활성) 전환 뒤 완료 경로 진입·캐시 제거, 저장 실패 복원을 확인했다. 서버 저장은 모사이며 실제 계정의 완료 저장 성공은 확인하지 않았다. 증빙 `/tmp/scenenote-completion-qa/result.png`. 임시 public QA 파일은 제거했고 기존 8081 서버 재시작·배포·DB 변경 없음.
+- 미검증: 실제 계정 저장 성공, iOS/Android 실기기, 계정·필터 전환의 UI 연속 동작. 조회 장애와 네이티브 실행 환경 제약으로 남긴다. 계정·필터·언마운트 차단은 순수 함수 테스트로 확인했다.
+
 ## 검색·라이브러리 상세 복귀 스크롤 유지 (2026-10-03)
 
 - `useListScrollRestoration` + 세션 전용 `listScrollStore`를 검색·라이브러리 FlashList에 연결했다. 계정·검색 조건·정렬·보기별 offset/표시 개수 분리, 레이아웃·페이지 준비 후 복원, 비활성 화면/복원 이벤트 제외를 적용한다. 라이브러리 복귀 시 첫 묶음으로 표시 개수를 줄이던 효과를 저장된 개수 복원으로 바꿨다. 새 조건은 처음부터 시작한다. 서버·API·DB·저장 필터 계약은 변경하지 않았다.

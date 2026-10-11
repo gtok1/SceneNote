@@ -1,3 +1,5 @@
+import type { CrewMemberMeta } from "./contentCrew.ts";
+
 export type ExternalSource = "tmdb" | "anilist" | "kitsu" | "tvmaze";
 export type ContentType = "anime" | "kdrama" | "jdrama" | "movie" | "other";
 export type WatchStatus = "wishlist" | "watching" | "completed" | "recommended" | "not_recommended" | "dropped";
@@ -43,4 +45,5 @@ export interface ContentMeta {
   source_tags?: { name: string; source: string; rank?: number | null }[];
   seasons: SeasonMeta[];
   cast: CastMemberMeta[];
+  crew: CrewMemberMeta[];
 }

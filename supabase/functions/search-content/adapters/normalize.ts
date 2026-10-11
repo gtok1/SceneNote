@@ -137,7 +137,7 @@ export function compactSearchText(value: string): string {
 }
 
 export function filterResultsByCompactQuery(results: SearchResult[], compactQuery: string): SearchResult[] {
-  if (compactQuery.length < 4) return results;
+  if (!compactQuery) return results;
 
   return results.filter((result) => {
     if (result.matched_via === "season_relation") return true;
@@ -304,4 +304,46 @@ function createKoreanAnchorQueries(compactedQuery: string): string[] {
   }
 
   return Array.from(anchors);
+}
+
+export const MAX_WORD_SPLIT_VARIANTS = 4;
+export const WORD_SPLIT_MIN_REMAINING_MS = 3_000;
+
+// TMDB matches whole words; only the last word permits prefix matches (docs/55 §2.1).
+export function createKoreanWordSplitVariants(
+  query: string, existing: readonly SearchQueryVariant[] = []
+): SearchQueryVariant[] {
+  const compactQuery = compactSearchText(collapseWhitespace(query));
+  const chars = Array.from(compactQuery);
+  // Composing jamo cannot match a title; NFKC maps U+3131 to U+1100.
+  if (!/[가-힣]/.test(compactQuery) || /[ᄀ-ᇿ㄰-㆏]/.test(compactQuery)) return [];
+  const seen = new Set(existing.map(variant => variant.query));
+  const variants: SearchQueryVariant[] = [];
+  for (let k = 1; k <= Math.min(MAX_WORD_SPLIT_VARIANTS, chars.length - 1); k += 1) {
+    const text = `${chars.slice(0, k).join("")} ${chars[k]}`;
+    if (seen.has(text)) continue;
+    seen.add(text);
+    variants.push({ query: text, matchMode: "compact-title", compactQuery });
+  }
+  return variants;
+}
+
+export type WordSplitFallbackReason = "run" | "page" | "no_tmdb" | "not_eligible" | "has_match" | "time";
+export function planKoreanWordSplitFallback(input: {
+  query: string;
+  page: number;
+  sources: readonly string[];
+  remainingMs: number;
+  primaryVariants: readonly SearchQueryVariant[];
+  primaryResults: readonly SearchResult[];
+}): { variants: SearchQueryVariant[]; reason: WordSplitFallbackReason } {
+  if (input.page !== 1) return { variants: [], reason: "page" };
+  if (!input.sources.includes("tmdb")) return { variants: [], reason: "no_tmdb" };
+  const q = compactSearchText(collapseWhitespace(input.query));
+  // Composing jamo cannot match a title; NFKC maps U+3131 to U+1100.
+  if (!/[가-힣]/.test(q) || /[ᄀ-ᇿ㄰-㆏]/.test(q)) return { variants: [], reason: "not_eligible" };
+  if (filterResultsByCompactQuery([...input.primaryResults], q).length > 0) return { variants: [], reason: "has_match" };
+  if (input.remainingMs < WORD_SPLIT_MIN_REMAINING_MS) return { variants: [], reason: "time" };
+  const variants = createKoreanWordSplitVariants(input.query, input.primaryVariants);
+  return { variants, reason: variants.length ? "run" : "not_eligible" };
 }

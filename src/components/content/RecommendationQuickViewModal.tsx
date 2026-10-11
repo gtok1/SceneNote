@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing, typography } from "@/constants/theme";
+import { createCrewSummary, CREW_SECTION_TITLE } from "@/utils/contentCrew";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
 import { chooseRecommendationOverview, mapRecommendationToCardViewModel, type RecommendationPresentation } from "@/utils/recommendationPresentation";
@@ -54,6 +55,7 @@ export function RecommendationQuickViewModal({
 
   const resolvedPresentation = presentation ?? mapRecommendationToCardViewModel(item);
   const content = detail.data?.content;
+  const crew = createCrewSummary(content?.crew);
   const overview = chooseRecommendationOverview(
     item.content_type,
     content?.localized_overview,
@@ -125,6 +127,7 @@ export function RecommendationQuickViewModal({
             ) : null}
 
             {overview ? <InfoSection title="작품 소개"><Text style={styles.overview}>{overview}</Text></InfoSection> : null}
+            {crew.text ? <InfoSection title={CREW_SECTION_TITLE}><Text style={styles.value}>{crew.text}</Text></InfoSection> : null}
             {resolvedPresentation.personalizedReason ? (
               <InfoSection icon="sparkles-outline" title={resolvedPresentation.reasonLabel ?? "추천 이유"}>
                 <Text style={styles.overview}>{resolvedPresentation.personalizedReason}</Text>

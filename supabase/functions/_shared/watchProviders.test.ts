@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import * as sequel from "./watchProviders.ts";
+import type { AniListWatchLookupDeps, TmdbSeasonSummary, TmdbTvSearchItem, TmdbWatchProvidersPayload } from "./watchProviders.ts";
+
 import {
   applyKrOttDiscoverFilter, attachKrOttProviders, createProviderLink, KR_OTT_PROVIDER_IDS,
   listOtherAvailableRegions, mapKrWatchProvidersByCategory,
@@ -97,4 +100,87 @@ describe("KR OTT provider contracts", () => {
   it("W-31 treats an empty successful response as known empty", async () => {
     const result=await attachKrOttProviders([target("tmdb","1")],async()=>null);assert.deepEqual(result[0]?.watch_providers_kr,[]);
   });
+});
+
+
+const slimeOriginal = "転生したらスライムだった件 第4期 第1&2クール";
+const slimeKorean = "전생했더니 슬라임이었던 건에 대하여";
+const anime = (id: number, original_name: string, year: number, extra: Partial<TmdbTvSearchItem> = {}): TmdbTvSearchItem =>
+  ({ id, original_name, first_air_date: `${year}-01-01`, genre_ids: [16], ...extra });
+const slime = anime(82684, "転生したらスライムだった件", 2018, { name: slimeKorean, first_air_date: "2018-10-02" });
+const diary = anime(118541, "転生したらスライムだった件 転スラ日記", 2021, { name: `${slimeKorean}: 전생슬라임 일기`, first_air_date: "2021-04-06" });
+const season = (season_number: number, air_date: string | null): TmdbSeasonSummary => ({ season_number, air_date });
+const slimeSeasons = [season(0,"2019-03-26"),season(1,"2018-10-02"),season(2,"2021-01-12"),season(3,"2024-04-05"),season(4,"2026-04-03")];
+const kr = (...ids: number[]): TmdbWatchProvidersPayload => ({ results: { KR: { flatrate: ids.map(id => p(id)) } } });
+function lookupFixture(options: {
+  searches: Record<string, TmdbTvSearchItem[]>;
+  seasons?: TmdbSeasonSummary[];
+  provider?: (n: number | null) => TmdbWatchProvidersPayload;
+}) {
+  const calls: unknown[][] = [];
+  const deps: AniListWatchLookupDeps = {
+    async searchTv(query) { calls.push(["search", query]); return options.searches[query] ?? []; },
+    async getTvSeasons(id) { calls.push(["seasons", id]); return options.seasons ?? []; },
+    async getProviders(target) { calls.push(["providers", target]); return options.provider?.(target.seasonNumber) ?? kr(97); }
+  };
+  return { calls, deps };
+}
+function slimeFixture(emptySeason = false) {
+  return lookupFixture({ searches: { [slimeOriginal]: [], [slimeKorean]: [slime,diary], "転生したらスライムだった件": [slime] }, seasons: slimeSeasons,
+    provider: n => n === 4 ? (emptySeason ? { results: {} } : kr(97,1883)) : kr(8) });
+}
+const stripEquals = (title: string | null, base: string, hadMarker = true) => assert.deepEqual(sequel.stripAnimeSeasonMarkers(title), { base, hadMarker });
+
+describe("anime sequel watch provider contracts", () => {
+  it("W-32 strips Japanese season and cours", () => stripEquals(slimeOriginal,"転生したらスライムだった件"));
+  it("W-33 strips English ordinal season and combined parts", () => stripEquals("Tensei Shitara Slime Datta Ken 4th Season Part 1 & 2","Tensei Shitara Slime Datta Ken"));
+  it("W-34 strips English Season N", () => stripEquals("That Time I Got Reincarnated as a Slime Season 4","That Time I Got Reincarnated as a Slime"));
+  it("W-35 strips Japanese and full-width season digits", () => { stripEquals("薬屋のひとりごと 第2期","薬屋のひとりごと"); stripEquals("葬送のフリーレン 第２期","葬送のフリーレン"); });
+  it("W-36 strips Korean seasons and parts", () => { stripEquals("진격의 거인 시즌 3","진격의 거인"); stripEquals(`${slimeKorean} 2기 1부`,slimeKorean); });
+  it("W-37 preserves internal colons and removes trailing separators", () => { stripEquals("Re:ゼロから始める異世界生活 3rd season","Re:ゼロから始める異世界生活"); stripEquals("Title: Season 2","Title"); });
+  it("W-38 preserves titles without supported markers", () => { for(const title of ["うる星やつら","モブサイコ100 III","86―エイティシックス―"]) stripEquals(title,title,false); });
+  it("W-39 strips parts but rejects marker-only titles", () => { stripEquals("86―エイティシックス― Part 2","86―エイティシックス―"); stripEquals("第4期","第4期",false); });
+  it("W-40 handles missing and blank titles", () => { for(const title of [null,"","   "]) stripEquals(title,"",false); });
+  it("W-41 strips kanji season numbers", () => stripEquals("X 第二期","X"));
+  it("W-42 matches the main slime series rather than its spinoff", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:[slimeOriginal,slimeKorean],year:2026},[slime,diary]),82684));
+  it("W-43 rejects remake matching without season markers", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["うる星やつら"],year:2022},[anime(1,"うる星やつら",1981)]),null));
+  it("W-44 rejects non-animation genres", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["薬屋のひとりごと 第2期"],year:2025},[anime(2,"薬屋のひとりごと",2023,{genre_ids:[18]})]),null));
+  it("W-45 rejects future series beyond one year", () => {
+    assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["X 第2期"],year:2020},[anime(3,"X",2023)]),null);
+    assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["X 第2期"],year:2020},[anime(3,"X",2021)]),3);
+  });
+  it("W-46 prefers the nearer remake over popularity", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["フルーツバスケット 2nd season"],year:2020},[anime(10,"フルーツバスケット",2001,{popularity:50}),anime(11,"フルーツバスケット",2019,{popularity:5})]),11));
+  it("W-47 prioritizes original title over display title", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["Y 第2期"],year:2024},[anime(20,"Z",2022,{name:"Y"}),anime(21,"Y",2018)]),21));
+  it("W-48 permits unknown source years", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["X 第3期"],year:null},[anime(30,"X",2010)]),30));
+  it("W-49 picks a unique exact air-year season", () => { assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,2026),4); assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,2024),3); });
+  it("W-50 rejects distant seasons and specials", () => assert.equal(sequel.pickTmdbSeasonForAirYear([season(0,"2023-10-23"),season(1,"2023-10-22")],2025),null));
+  it("W-51 picks only a unique adjacent-year season", () => { assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2022-01-01"),season(2,"2023-01-01")],2024),2); assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2023-01-01"),season(2,"2025-01-01")],2024),null); });
+  it("W-52 rejects multiple exact-year seasons", () => assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2024-04-01"),season(2,"2024-10-01")],2024),null));
+  it("W-53 rejects absent years, seasons, dates and specials", () => { assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,null),null); assert.equal(sequel.pickTmdbSeasonForAirYear(null,2026),null); assert.equal(sequel.pickTmdbSeasonForAirYear([season(0,"2026-01-01")],2026),null); assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,null)],2026),null); });
+  it("W-54 preserves direct-match request counts", async () => {
+    const a=anime(260463,"黄泉のツガイ",2026,{name:"황천의 츠가이",first_air_date:"2026-04-04"});
+    const f=lookupFixture({searches:{"黄泉のツガイ":[a],"황천의 츠가이":[a]}});
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["黄泉のツガイ","황천의 츠가이"],year:2026},f.deps),{tmdbId:260463,seasonNumber:null,scope:"content",payload:kr(97)});
+    assert.deepEqual(f.calls,[["search","黄泉のツガイ"],["search","황천의 츠가이"],["providers",{tmdbId:260463,seasonNumber:null}]]);
+  });
+  it("W-55 fetches only the matched slime fourth season providers", async () => {
+    const f=slimeFixture();
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:4,scope:"season",payload:kr(97,1883)});
+    assert.deepEqual(f.calls,[["search",slimeOriginal],["search",slimeKorean],["search","転生したらスライムだった件"],["seasons",82684],["providers",{tmdbId:82684,seasonNumber:4}]]);
+  });
+  it("W-56 uses series providers for merged apothecary seasons", async () => {
+    const a=anime(220542,"薬屋のひとりごと",2023,{name:"약사의 혼잣말",first_air_date:"2023-10-22"});
+    const f=lookupFixture({searches:{"薬屋のひとりごと 第2期":[a],"薬屋のひとりごと":[a]},seasons:[season(0,"2023-10-23"),season(1,"2023-10-22")],provider:()=>kr(8,283)});
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["薬屋のひとりごと 第2期"],year:2025},f.deps),{tmdbId:220542,seasonNumber:null,scope:"series",payload:kr(8,283)});
+    assert.deepEqual(f.calls,[["search","薬屋のひとりごと 第2期"],["search","薬屋のひとりごと"],["seasons",220542],["providers",{tmdbId:220542,seasonNumber:null}]]);
+  });
+  it("W-57 falls back from empty season providers to series providers", async () => {
+    const f=slimeFixture(true);
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:null,scope:"series",payload:kr(8)});
+    assert.deepEqual(f.calls,[["search",slimeOriginal],["search",slimeKorean],["search","転生したらスライムだった件"],["seasons",82684],["providers",{tmdbId:82684,seasonNumber:4}],["providers",{tmdbId:82684,seasonNumber:null}]]);
+  });
+  it("W-58 performs no sequel calls for unmarked remakes", async () => { const f=lookupFixture({searches:{"うる星やつら":[anime(1,"うる星やつら",1981)]}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["うる星やつら"],year:2022},f.deps),null); assert.deepEqual(f.calls,[["search","うる星やつら"]]); });
+  it("W-59 performs no season or provider calls without candidates", async () => { const f=lookupFixture({searches:{}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["X 第2期"],year:2025},f.deps),null); assert.deepEqual(f.calls,[["search","X 第2期"],["search","X"]]); });
+  it("W-60 does not repeat an already searched base title", async () => { const f=lookupFixture({searches:{}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["X 第2期","X"],year:2025},f.deps),null); assert.deepEqual(f.calls,[["search","X 第2期"],["search","X"]]); });
+  it("W-61 propagates TMDB dependency errors unchanged", async () => { const f=lookupFixture({searches:{}}); f.deps.searchTv=async()=>{throw Error("TMDB anime search error: 500");}; await assert.rejects(async()=>sequel.lookupAniListWatchProviders({titles:["X"],year:2025},f.deps),{message:"TMDB anime search error: 500"}); });
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 
+import * as spacingGoldenContract from "./searchGolden";
 import type { SearchResult } from "../src/types/content";
 import { evaluateGoldenCase, SEARCH_GOLDEN_CASES } from "./searchGolden";
 
@@ -38,5 +39,18 @@ it("G-6 preserves the twelve specified golden queries and ids", () => {
     ["고독한 미식가", ["55582"]], ["중쇄를 찍자", ["67504"]], ["진격의 거인", ["1429"]],
     ["귀멸의 칼날", ["85937"]], ["브레이킹 배드", ["1396"]], ["기생충", ["496243"]],
     ["파묘", ["838209"]], ["랑야방", ["64197"]], ["눈물의 여왕", ["215720"]], ["셜록", ["19885"]]
+  ]);
+});
+
+it("G-7 preserves the seven spacing fallback queries and ids", () => {
+  assert.deepEqual(spacingGoldenContract.SEARCH_GOLDEN_SPACING_CASES.map(item => [item.query, item.mustInclude.map(expected => expected.externalId)]), [
+    ["너말고다른", ["314939"]], ["선재업고튀어", ["230923"]], ["폭싹속았수다", ["219246"]],
+    ["그해우리는", ["135897"]], ["닥터차정숙", ["214997"]], ["내남편과결혼해줘", ["221851"]], ["지금우리학교는", ["99966"]]
+  ]);
+});
+
+it("G-8 preserves the four short spacing queries and ids", () => {
+  assert.deepEqual(spacingGoldenContract.SEARCH_GOLDEN_SHORT_SPACING_CASES.map(item => [item.query, item.mustInclude.map(expected => expected.externalId)]), [
+    ["너말고", ["314939"]], ["너말", ["314939"]], ["그해우", ["135897"]], ["선재업", ["230923"]]
   ]);
 });

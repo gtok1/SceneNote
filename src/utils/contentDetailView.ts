@@ -5,6 +5,26 @@ import { getHomeLayout } from "@/utils/homeLayout";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
 
 export const CONTENT_DETAIL_SIDE_WIDTH = 360;
+export const EPISODE_PROGRESS_COMPLETED_COPY = {
+  modeLabel: "완료로 표시됨",
+  summary: "모든 화 시청 완료",
+  hint: "완료 상태라 모든 화를 본 것으로 계산해요. 다시 보고 있다면 상태를 '보는 중'으로 바꾸면 진행 위치를 고칠 수 있어요."
+} as const;
+export const MANUAL_PROGRESS_COPY = {
+  undo: "되돌리기",
+  saveFailed: "시청 진행을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.",
+  completedNotice: "완료 상태라 모든 화를 본 것으로 표시돼요. 상태를 '보는 중'으로 바꾸면 진행 위치를 정할 수 있어요.",
+  resetTitle: "시청 진행 되돌리기",
+  resetMessage: "직접 설정한 진행 위치를 지우고 에피소드 체크 기준으로 되돌릴까요?",
+  resetConfirm: "되돌리기",
+  reviewSaveFailed: "감상 기록을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."
+} as const;
+export function manualProgressSavedToast(episodeNumber: number): string {
+  return `${Math.max(0, Math.floor(episodeNumber))}화까지 봤음으로 표시했어요.`;
+}
+export function isEpisodeProgressCompletedMode(input: { statuses: readonly WatchStatus[]; totalEpisodes: number | null }): boolean {
+  return input.statuses.includes("completed") && input.totalEpisodes !== null && input.totalEpisodes > 0;
+}
 export const PRIMARY_WATCH_STATUSES: readonly WatchStatus[] = ["wishlist", "watching", "dropped", "completed"];
 export const SECONDARY_WATCH_STATUSES: readonly WatchStatus[] = ["recommended", "not_recommended"];
 export interface ContentDetailLayout {

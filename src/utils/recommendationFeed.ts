@@ -316,3 +316,18 @@ export function countRecommendationDisplaySlots(
 ): number {
   return new Set([...visibleIds, ...retainedIds]).size;
 }
+
+export function recommendationTopUpStatus(input: {
+  visibleCount: number;
+  targetCount: number;
+  decision: EmptyRecommendationContinuationDecision;
+}): { active: boolean; placeholderCount: number; text: string | null } {
+  const visible = Number.isFinite(input.visibleCount) && input.visibleCount > 0 ? Math.floor(input.visibleCount) : 0;
+  const target = Number.isFinite(input.targetCount) && input.targetCount > 0 ? Math.floor(input.targetCount) : 0;
+  const active = visible > 0 && visible < target && (input.decision === "continue" || input.decision === "loading");
+  return {
+    active,
+    placeholderCount: active ? Math.min(PERSONALIZED_RECOMMENDATION_BATCH_SIZE, target - visible) : 0,
+    text: active ? `추천을 더 찾고 있어요 · ${visible}/${target}` : null
+  };
+}

@@ -1,3 +1,5 @@
+import type { CrewMember } from "./content";
+
 export type EmotionType =
   | "excited"
   | "moved"
@@ -28,6 +30,7 @@ export interface TimelinePin {
   user_id: string;
   content_id: string;
   episode_id: string | null;
+  content_crew?: CrewMember[];
   content_title?: string | null | undefined;
   content_poster_url?: string | null | undefined;
   content_source_api?: string | null | undefined;

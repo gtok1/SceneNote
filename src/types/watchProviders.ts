@@ -22,6 +22,8 @@ export interface WatchProvider {
 export type WatchProvidersByCategory = Record<WatchProviderCategory, WatchProvider[]>;
 
 export interface WatchProvidersResponse {
+  provider_scope?: WatchProviderScope | null;
+  tmdb_season_number?: number | null;
   external_source: "tmdb";
   external_id: string;
   tmdb_id?: string | null;
@@ -31,3 +33,5 @@ export interface WatchProvidersResponse {
   providers: WatchProvidersByCategory;
   updated_at: string;
 }
+
+export type WatchProviderScope = "content" | "season" | "series";

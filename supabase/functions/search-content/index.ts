@@ -6,7 +6,8 @@ import {
   compactResults,
   createSearchQueryVariants,
   filterResponseForVariant,
-  annotateFilterMatches
+  annotateFilterMatches,
+  planKoreanWordSplitFallback
 } from "./adapters/normalize.ts";
 import { discoverTmdb, filterSearchResultsByDiscovery, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
@@ -45,6 +46,7 @@ interface SearchResponse {
   country_filter_limited?: boolean;
   genre_filter_limited?: boolean;
   filtered_out_count?: number;
+  word_split_fallback?: boolean;
 }
 
 interface SearchJob {
@@ -57,6 +59,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
+const ADAPTER_TIMEOUT_MS = 5000;
 const SEARCH_CACHE_VERSION = "ko-v14-unfiltered-query";
 
 Deno.serve(async (req: Request) => {
@@ -146,15 +149,76 @@ Deno.serve(async (req: Request) => {
   const searchFilters = body.value.mediaTypes === undefined && filters.mediaTypes.length === 0 && mediaType !== "all"
     ? { ...filters, mediaTypes: [mediaType] } : filters;
   const targetSources = getTargetSources(fetchMediaType);
+  const primary = await searchQueryVariants(adminClient, targetSources, queryVariants, fetchMediaType, page, ADAPTER_TIMEOUT_MS);
+  const plan = planKoreanWordSplitFallback({
+    query: normalizedQuery, page, sources: targetSources,
+    remainingMs: requestDeadline - Date.now(),
+    primaryVariants: queryVariants, primaryResults: compactResults(primary.results)
+  });
+  const fallback: VariantSearchOutcome = plan.reason === "run"
+    ? await searchQueryVariants(adminClient, ["tmdb"], plan.variants, fetchMediaType, page,
+      Math.min(ADAPTER_TIMEOUT_MS, requestDeadline - Date.now() - 1000))
+    : { results: [], totals: [], hasNextPage: false, successfulSources: [], failedSources: [], misses: 0 };
+  const unfilteredResults = compactResults([...primary.results, ...fallback.results]);
+  // Keep the provider page cache independent of the viewer's selected filters.
+  // Only the small, reusable production-country evidence is cached separately.
+  const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
+  const filtered = await filterSearchResultsByDiscovery(unfilteredResults, searchFilters, {
+    cache: countryCache, deadlineMs: requestDeadline, signal: req.signal
+  });
+  const hasFilters = searchFilters.genres.length + searchFilters.countries.length + searchFilters.mediaTypes.length > 0;
+  const annotated = annotateFilterMatches(unfilteredResults, filtered.results, hasFilters);
+  const results = annotated.results;
+  const successfulSources = [...primary.successfulSources, ...fallback.successfulSources];
+  const failedSources = [...primary.failedSources, ...fallback.failedSources]
+    .filter(source => !successfulSources.includes(source));
+
+  if (results.length === 0 && successfulSources.length === 0 && failedSources.length > 0) {
+    return jsonError(503, "ALL_APIS_FAILED", "All external APIs failed");
+  }
+
+  const response: SearchResponse = {
+    results,
+    sources: [...new Set(successfulSources)],
+    failedSources: [...new Set(failedSources)],
+    cached: primary.misses + fallback.misses === 0,
+    query,
+    normalizedQuery,
+    total: Math.max(results.length, ...primary.totals, ...fallback.totals),
+    page,
+    hasNextPage: primary.hasNextPage,
+    partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
+    country_filter_limited: filtered.countryFilterLimited,
+    genre_filter_limited: filtered.genreFilterLimited,
+    filtered_out_count: annotated.filteredOutCount,
+    word_split_fallback: plan.reason === "run"
+  };
+
+  return json(response);
+});
+
+interface VariantSearchOutcome {
+  results: SearchResult[];
+  totals: number[];
+  hasNextPage: boolean;
+  successfulSources: ExternalSource[];
+  failedSources: ExternalSource[];
+  misses: number;
+}
+
+async function searchQueryVariants(
+  adminClient: SupabaseClient, sources: readonly ExternalSource[], variants: readonly QueryVariant[],
+  mediaType: MediaTypeFilter, page: number, timeoutMs: number
+): Promise<VariantSearchOutcome> {
   const cachedResults: SearchResult[] = [];
   const cachedTotals: number[] = [];
   const cachedHasNextPages: boolean[] = [];
   const sourcesFromCache: ExternalSource[] = [];
   const missedSearches: SearchJob[] = [];
 
-  for (const source of targetSources) {
-    for (const queryVariant of queryVariants) {
-      const queryHash = await createQueryHash(queryVariant, fetchMediaType, page, source);
+  for (const source of sources) {
+    for (const queryVariant of variants) {
+      const queryHash = await createQueryHash(queryVariant, mediaType, page, source);
       const { data: cacheRow } = await adminClient
         .from("external_search_cache")
         .select("response_json")
@@ -183,7 +247,7 @@ Deno.serve(async (req: Request) => {
   const failedSourceCandidates: ExternalSource[] = [];
 
   if (missedSearches.length > 0) {
-    const calls = missedSearches.map((job) => callAdapter(job.source, job.variant.query, fetchMediaType, page));
+    const calls = missedSearches.map((job) => callAdapter(job.source, job.variant.query, mediaType, page, timeoutMs));
     const settled = await Promise.allSettled(calls);
 
     for (const [index, result] of settled.entries()) {
@@ -198,7 +262,7 @@ Deno.serve(async (req: Request) => {
 
       const response = filterResponseForVariant(result.value, searchJob.variant);
       freshResponses.push(response);
-      const queryHash = await createQueryHash(searchJob.variant, fetchMediaType, page, response.source);
+      const queryHash = await createQueryHash(searchJob.variant, mediaType, page, response.source);
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       await adminClient.from("external_search_cache").upsert(
@@ -218,45 +282,15 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const freshResults = freshResponses.flatMap((response) => response.results);
-  const unfilteredResults = compactResults([...cachedResults, ...freshResults]);
-  // Keep the provider page cache independent of the viewer's selected filters.
-  // Only the small, reusable production-country evidence is cached separately.
-  const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
-  const filtered = await filterSearchResultsByDiscovery(unfilteredResults, searchFilters, {
-    cache: countryCache, deadlineMs: requestDeadline, signal: req.signal
-  });
-  const hasFilters = searchFilters.genres.length + searchFilters.countries.length + searchFilters.mediaTypes.length > 0;
-  const annotated = annotateFilterMatches(unfilteredResults, filtered.results, hasFilters);
-  const results = annotated.results;
-  const successfulSources = [
-    ...sourcesFromCache,
-    ...freshResponses.map((response) => response.source)
-  ] as ExternalSource[];
-  const failedSources = failedSourceCandidates.filter((source) => !successfulSources.includes(source));
-
-  if (results.length === 0 && successfulSources.length === 0 && failedSources.length > 0) {
-    return jsonError(503, "ALL_APIS_FAILED", "All external APIs failed");
-  }
-
-  const response: SearchResponse = {
-    results,
-    sources: [...new Set(successfulSources)],
-    failedSources: [...new Set(failedSources)],
-    cached: missedSearches.length === 0,
-    query,
-    normalizedQuery,
-    total: Math.max(results.length, ...cachedTotals, ...freshResponses.map((item) => item.total ?? item.results.length)),
-    page,
-    hasNextPage: cachedHasNextPages.some(Boolean) || freshResponses.some((item) => item.hasNextPage),
-    partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
-    country_filter_limited: filtered.countryFilterLimited,
-    genre_filter_limited: filtered.genreFilterLimited,
-    filtered_out_count: annotated.filteredOutCount
+  return {
+    results: [...cachedResults, ...freshResponses.flatMap(response => response.results)],
+    totals: [...cachedTotals, ...freshResponses.map(item => item.total ?? item.results.length)],
+    hasNextPage: cachedHasNextPages.some(Boolean) || freshResponses.some(item => item.hasNextPage),
+    successfulSources: [...sourcesFromCache, ...freshResponses.map(response => response.source)],
+    failedSources: failedSourceCandidates,
+    misses: missedSearches.length
   };
-
-  return json(response);
-});
+}
 
 function createSearchMetadataCache(adminClient: SupabaseClient, requestDeadline: number) {
   return createPersistentRecommendationCache({
@@ -280,10 +314,11 @@ async function callAdapter(
   source: ExternalSource,
   query: string,
   mediaType: MediaTypeFilter,
-  page: number
+  page: number,
+  timeoutMs = ADAPTER_TIMEOUT_MS
 ): Promise<AdapterSearchResponse> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const params = { query, mediaType, page, signal: controller.signal };
 
   try {

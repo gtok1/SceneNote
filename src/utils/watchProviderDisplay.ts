@@ -1,4 +1,4 @@
-import type { WatchProviderCategory, WatchProvidersByCategory } from "@/types/watchProviders";
+import type { WatchProviderCategory, WatchProvidersByCategory, WatchProviderScope } from "@/types/watchProviders";
 
 export { DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink } from "../../supabase/functions/_shared/watchProviderLinks";
 
@@ -28,4 +28,13 @@ export function describeNoKrProviders(otherRegions: readonly string[] | null | u
   return otherRegions?.length
     ? `국내 OTT 정보가 아직 없어요. ${formatRegionNames(otherRegions)}에서 제공 중이에요.`
     : "국내 OTT에서 볼 수 있는 곳 정보가 아직 없어요.";
+}
+
+export function describeWatchProviderScope(scope: WatchProviderScope | null | undefined): string | null {
+  return scope === "series" ? "시리즈 전체 기준이에요. 이 시즌 제공 여부는 플랫폼에서 확인해 주세요." : null;
+}
+
+export function createLaftelSearchLink(title: string | null | undefined): string | null {
+  const trimmed = title?.trim();
+  return trimmed ? `https://laftel.net/search?keyword=${encodeURIComponent(trimmed)}` : null;
 }

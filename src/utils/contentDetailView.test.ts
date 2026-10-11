@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { getContentDetailLayout, createContentDetailMetaItems, pinListLabel, createWatchStatusControlModel, contentDetailSections, CONTENT_DETAIL_SIDE_WIDTH, PRIMARY_WATCH_STATUSES, SECONDARY_WATCH_STATUSES } from "./contentDetailView";
+import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, manualProgressSavedToast, isEpisodeProgressCompletedMode, getContentDetailLayout, createContentDetailMetaItems, pinListLabel, createWatchStatusControlModel, contentDetailSections, CONTENT_DETAIL_SIDE_WIDTH, PRIMARY_WATCH_STATUSES, SECONDARY_WATCH_STATUSES } from "./contentDetailView";
 
 const mobile = { gutter: 16, contentWidth: 343, gap: 12, columns: 1, mainWidth: 343, sideWidth: 343, poster: { width: 96, height: 144 } };
 it("L-1: layout at 375", () => assert.deepEqual(getContentDetailLayout(375), mobile));
@@ -32,4 +32,29 @@ it("K-1: layout and status constants", () => {
   assert.equal(CONTENT_DETAIL_SIDE_WIDTH, 360);
   assert.deepEqual(PRIMARY_WATCH_STATUSES, ["wishlist", "watching", "dropped", "completed"]);
   assert.deepEqual(SECONDARY_WATCH_STATUSES, ["recommended", "not_recommended"]);
+});
+
+it("C-1 exposes the exact completed and manual progress copy", () => {
+  assert.deepEqual(EPISODE_PROGRESS_COMPLETED_COPY, {
+    modeLabel:"완료로 표시됨", summary:"모든 화 시청 완료",
+    hint:"완료 상태라 모든 화를 본 것으로 계산해요. 다시 보고 있다면 상태를 '보는 중'으로 바꾸면 진행 위치를 고칠 수 있어요."
+  });
+  assert.deepEqual(MANUAL_PROGRESS_COPY, {
+    undo:"되돌리기", saveFailed:"시청 진행을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.",
+    completedNotice:"완료 상태라 모든 화를 본 것으로 표시돼요. 상태를 '보는 중'으로 바꾸면 진행 위치를 정할 수 있어요.",
+    resetTitle:"시청 진행 되돌리기", resetMessage:"직접 설정한 진행 위치를 지우고 에피소드 체크 기준으로 되돌릴까요?",
+    resetConfirm:"되돌리기", reviewSaveFailed:"감상 기록을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."
+  });
+});
+it("C-2 formats saved progress toasts with integer episode numbers", () => {
+  assert.equal(manualProgressSavedToast(3),"3화까지 봤음으로 표시했어요.");
+  assert.equal(manualProgressSavedToast(0),"0화까지 봤음으로 표시했어요.");
+  assert.equal(manualProgressSavedToast(2.7),"2화까지 봤음으로 표시했어요.");
+});
+it("C-3 enables completed mode only with a positive known total", () => {
+  assert.equal(isEpisodeProgressCompletedMode({statuses:["completed"],totalEpisodes:10}),true);
+  assert.equal(isEpisodeProgressCompletedMode({statuses:["completed"],totalEpisodes:null}),false);
+  assert.equal(isEpisodeProgressCompletedMode({statuses:["completed"],totalEpisodes:0}),false);
+  assert.equal(isEpisodeProgressCompletedMode({statuses:["watching"],totalEpisodes:10}),false);
+  assert.equal(isEpisodeProgressCompletedMode({statuses:["completed","recommended"],totalEpisodes:1}),true);
 });

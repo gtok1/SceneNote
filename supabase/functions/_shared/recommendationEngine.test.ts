@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as workMatching from "./recommendationEngine.ts";
 
 import {
   buildPreferenceProfile,
@@ -15,6 +16,59 @@ import {
 } from "./recommendationEngine.ts";
 
 const NOW = "2026-07-10T00:00:00.000Z";
+
+function w(type: string, title: string, year: number | null, original: string | null = null) {
+  return { content_type: type, title_primary: title, title_original: original, air_year: year };
+}
+
+describe("cross-type recommendation work matching", () => {
+  it("I-1 matches movie and drama with the same title and year in both directions", () => {
+    const movie = w("movie", "개인적인 택시", 2026);
+    const drama = w("kdrama", "개인적인 택시", 2026);
+    assert.equal(workMatching.isSameRecommendationWork(movie, drama), true);
+    assert.equal(workMatching.isSameRecommendationWork(drama, movie), true);
+  });
+  it("I-2 accepts a one-year cross-type gap but rejects two years", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("movie", "개인적인 택시", 2026), w("kdrama", "개인적인 택시", 2027)), true);
+    assert.equal(workMatching.isSameRecommendationWork(w("movie", "개인적인 택시", 2026), w("kdrama", "개인적인 택시", 2028)), false);
+  });
+  it("I-3 requires known years for cross-type matching", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("movie", "개인적인 택시", null), w("kdrama", "개인적인 택시", 2026)), false);
+  });
+  it("I-4 keeps anime distinct from a same-title movie", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("anime", "같은 제목", 2026), w("movie", "같은 제목", 2026)), false);
+  });
+  it("I-5 preserves same-type matching when one year is unknown", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("kdrama", "무빙", 2023), w("kdrama", "무빙", null)), true);
+  });
+  it("I-6 preserves same-type rejection when known years differ", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("kdrama", "무빙", 2023), w("kdrama", "무빙", 2024)), false);
+  });
+  it("I-7 rejects different titles shorter than two characters", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("movie", "가", 2026), w("kdrama", "나", 2026)), false);
+  });
+  it("I-8 matches a Japanese drama and movie through their original title", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("jdrama", "다른 한국어 제목", 2026, "同じ原題"), w("movie", "또 다른 제목", 2026, "同じ原題")), true);
+  });
+  it("I-9 matches other series and movies using normalized titles", () => {
+    assert.equal(workMatching.isSameRecommendationWork(w("other", "Same Title", 2025), w("movie", "same-title", 2025)), true);
+  });
+  it("I-10 excludes a TV recommendation already stored as a movie", () => {
+    const batch = getRecommendationBatch(
+      [libraryItem({ source_api: "tmdb", source_id: "1744241", content_type: "movie", title_primary: "개인적인 택시", air_year: 2026 })],
+      [candidate("333484", { content_type: "kdrama", title_primary: "개인적인 택시", air_year: 2026 }), candidate("new")],
+      { limit: 12, now: NOW }
+    );
+    assert.deepEqual(batch.items.map(item => item.external_id), ["new"]);
+  });
+  it("I-11 keeps only one movie or TV candidate for the same work", () => {
+    const batch = getRecommendationBatch([], [
+      candidate("tv-1", { content_type: "kdrama", title_primary: "개인적인 택시", air_year: 2026 }),
+      candidate("movie-1", { content_type: "movie", title_primary: "개인적인 택시", air_year: 2026 })
+    ], { limit: 12, now: NOW });
+    assert.equal(batch.items.filter(item => item.title_primary === "개인적인 택시").length, 1);
+  });
+});
 
 function candidate(id: string, overrides: Partial<RecommendationCandidate> = {}): RecommendationCandidate {
   return {

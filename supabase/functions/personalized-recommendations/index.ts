@@ -1,4 +1,4 @@
-import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, selectTasteFillItems, shouldRunTasteFill, type TasteFillQuery } from "../_shared/recommendationTasteFill.ts";
+import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, selectTasteFillItems, shouldPrefetchTasteFill, planTasteFill } from "../_shared/recommendationTasteFill.ts";
 import {
   hasKoreanDisplayTitle,
   scanRecommendationCatalog,
@@ -130,7 +130,8 @@ const MAX_IMPRESSIONS_PER_REQUEST = 12;
 const MAX_FEEDBACK_PER_REQUEST = 4;
 
 Deno.serve(async (req: Request) => {
-  const requestDeadline = Date.now() + 8_500;
+  const requestStartedAt = Date.now();
+  const requestDeadline = requestStartedAt + 8_500;
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonError(405, "METHOD_NOT_ALLOWED", "POST method required");
 
@@ -173,7 +174,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const [libraryResult, feedbackResult] = await Promise.all([
+    const [libraryResult, feedbackResult, recentSeenIds] = await Promise.all([
       userClient
         .from("user_library_items")
         .select(
@@ -183,7 +184,8 @@ Deno.serve(async (req: Request) => {
       userClient
         .from("user_content_feedback")
         .select("target_type,target_key,action,weight,source_content_id,updated_at")
-        .eq("user_id", user.id)
+        .eq("user_id", user.id),
+      loadRecentSeenIdentityKeys(userClient, user.id)
     ]);
 
     if (libraryResult.error) {
@@ -197,7 +199,6 @@ Deno.serve(async (req: Request) => {
 
     const libraryItems = mergeLibraryRowsByContent((libraryResult.data ?? []) as unknown as RawLibraryRow[])
       .map(normalizeLibraryItem);
-    const recentSeenIds = await loadRecentSeenIdentityKeys(userClient, user.id);
     const feedback = (feedbackResult.data ?? []) as RecommendationFeedback[];
     const filters = userRecommendationFiltersFromFeedback(feedback);
     const keywordLookupExclusions = new Set(
@@ -267,6 +268,15 @@ Deno.serve(async (req: Request) => {
     };
     const cursorState = decodeTasteFillCursor(validated.value.cursor);
     const profile = buildPreferenceProfile(libraryItems, feedback);
+    const setupDoneAt = Date.now();
+    const queries = deriveTasteFillQueries({ profile, discoveryFilters, mediaType: validated.value.mediaType, userFilters: filters });
+    const pending = queries.filter(query => !cursorState.taste[query.key]?.done);
+    const asOfDate = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10);
+    const prefetched = shouldPrefetchTasteFill({ remainingMs: requestDeadline - Date.now(), pendingQueryCount: pending.length });
+    const prefetchPromise = prefetched ? Promise.allSettled(pending.map(query => fetchTasteFillPage(query, cursorState.taste[query.key]?.page ?? 1, {
+      filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, asOfDate
+    }))) : null;
+    const catalogStartedAt = Date.now();
     const result: RecommendationCatalogScanResult<CatalogRecommendationCandidate> = cursorState.catalogDone ? {
       items: [], nextCursor: null, hasMore: false, exhausted: true,
       scanBudgetReached: false, broadened: false, warnings: [], failedProviders: [],
@@ -287,16 +297,16 @@ Deno.serve(async (req: Request) => {
       feedback
     });
 
+    const catalogDoneAt = cursorState.catalogDone ? catalogStartedAt : Date.now();
     const taste = { ...cursorState.taste };
-    let queries: TasteFillQuery[] = [];
     let fill: typeof result.items = [];
-    if (shouldRunTasteFill({ itemCount: result.items.length, limit: validated.value.limit, remainingMs: requestDeadline - Date.now() })) {
-      queries = deriveTasteFillQueries({ profile, discoveryFilters, mediaType: validated.value.mediaType, userFilters: filters });
-      const pending = queries.filter(query => !taste[query.key]?.done);
-      const asOfDate = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10);
-      const pages = await Promise.allSettled(pending.map(query => fetchTasteFillPage(query, taste[query.key]?.page ?? 1, {
-        filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, asOfDate
-      })));
+    const plan = planTasteFill({ itemCount: result.items.length, limit: validated.value.limit, remainingMs: requestDeadline - Date.now(), pendingQueryCount: pending.length, prefetched });
+    if (plan.action !== "skip") {
+      const pages = plan.action === "use_prefetch" && prefetchPromise
+        ? await prefetchPromise
+        : await Promise.allSettled(pending.map(query => fetchTasteFillPage(query, taste[query.key]?.page ?? 1, {
+          filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, asOfDate
+        })));
       let candidates: CatalogRecommendationCandidate[] = [];
       pages.forEach((page, index) => {
         if (page.status !== "fulfilled") return;
@@ -324,6 +334,7 @@ Deno.serve(async (req: Request) => {
         identities: item => createRecommendationIdentityAliases(item).map(normalizeRecommendationIdentityKey)
       });
     }
+    const tasteDoneAt = Date.now();
     const items = [...result.items, ...fill];
     if (result.allProvidersFailed && items.length === 0) {
       return jsonError(503, "ALL_PROVIDERS_FAILED", "Recommendation data providers are unavailable");
@@ -331,7 +342,6 @@ Deno.serve(async (req: Request) => {
 
     const failedSources = normalizeFailedSources(result.failedProviders);
     const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
-    if (includeDebug) console.info("personalized-recommendations taste fill", { catalogItems: result.items.length, tasteFill: fill.length, queries: queries.length });
     const catalogDone = cursorState.catalogDone || !result.nextCursor || !result.hasMore;
     const nextCursor = encodeTasteFillCursor({ catalog: catalogDone ? null : result.nextCursor, catalogDone, taste });
     const itemsWithProviders = await attachKrOttProviders(
@@ -339,6 +349,17 @@ Deno.serve(async (req: Request) => {
       (kind, tmdbId) => fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline }),
       { deadlineMs: requestDeadline }
     );
+    const diagnostics = {
+      setup_ms: setupDoneAt - requestStartedAt,
+      catalog_ms: catalogDoneAt - catalogStartedAt,
+      taste_fill_ms: tasteDoneAt - catalogDoneAt,
+      total_ms: Date.now() - requestStartedAt,
+      catalog_items: result.items.length,
+      taste_fill_items: fill.length,
+      taste_fill: plan.reason,
+      keyword_lookups_left: keywordLookupBudget.remaining
+    };
+    if (includeDebug) console.info("personalized-recommendations taste fill", { catalogItems: result.items.length, tasteFill: fill.length, queries: queries.length, diagnostics });
     return json({
       items: itemsWithProviders.map((item) => {
         if (includeDebug) return { ...item, origin_country: item.countries ?? [] };
@@ -356,6 +377,7 @@ Deno.serve(async (req: Request) => {
       warnings: result.warnings,
       filter_limited: keywordLookupLimited,
       applied_filters: toAppliedDiscoveryFilters(discoveryFilters),
+      diagnostics,
       failed_sources: failedSources,
       partial: result.providersBlocked && failedSources.length > 0 && result.items.length < validated.value.limit
     });

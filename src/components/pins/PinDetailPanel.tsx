@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { AppImage } from "@/components/common/AppImage";
 import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
 import type { TimelinePin } from "@/types/pins";
+import { createCrewSummary } from "@/utils/contentCrew";
 import { createPinCardModel, PINS_SCREEN_COPY } from "@/utils/pinListUi";
 
 interface PinDetailPanelProps {
@@ -20,6 +21,7 @@ interface PinDetailPanelProps {
 export function PinDetailPanel({
   pin, width, spoilerRevealed, canShare, onRevealSpoiler, onOpenDetail, onShare
 }: PinDetailPanelProps) {
+  const crew = createCrewSummary(pin?.content_crew, 2);
   const model = useMemo(() => pin ? createPinCardModel(pin, { spoilerRevealed }) : null, [pin, spoilerRevealed]);
   return (
     <View style={[styles.panel, { width }]}>
@@ -33,6 +35,7 @@ export function PinDetailPanel({
               <View style={styles.headerCopy}>
                 <Text numberOfLines={3} style={styles.title}>{model.title}</Text>
                 {model.episodeLabel ? <Text style={styles.episode}>{model.episodeLabel}</Text> : null}
+                {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={2} style={styles.caption}>{crew.text}</Text> : null}
               </View>
             </View>
             <View style={styles.meta}>

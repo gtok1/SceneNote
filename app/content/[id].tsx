@@ -14,6 +14,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentReviewEditor } from "@/components/content/ContentReviewEditor";
 import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import { WatchProviderList } from "@/components/content/WatchProviderList";
+import { createLaftelSearchLink } from "@/utils/watchProviderDisplay";
 import { normalizeWatchStatuses } from "@/constants/status";
 import { colors, spacing } from "@/constants/theme";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
@@ -32,6 +33,7 @@ import { useWatchProviders } from "@/hooks/useWatchProviders";
 import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
+import { createCrewSummary } from "@/utils/contentCrew";
 import { createAirDateLabel, createEpisodeCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
@@ -323,6 +325,7 @@ export default function ContentDetailScreen() {
   const progressLibraryItem = libraryItem
     ? { ...libraryItem, season_episode_counts: seasonEpisodeCounts }
     : null;
+  const crew = createCrewSummary(externalDetail.data?.content.crew?.length ? externalDetail.data.content.crew : libraryItem?.crew);
   const airDateLabel = createAirDateLabel(view.airDate, view.airYear);
   const episodeLabel = createEpisodeCountLabel(resolvedEpisodeCount);
 
@@ -390,7 +393,7 @@ export default function ContentDetailScreen() {
           item={progressLibraryItem ?? libraryItem} onOpenEpisodes={openEpisodes} onSave={saveManualProgress} totalEpisodes={resolvedEpisodeCount} />
       </View> : null;
       case "watchCount": return libraryItem ? <WatchCountCard key={key} watchCount={libraryItem.watch_count} isCompleted={selectedStatuses.includes("completed")} isSaving={updateWatchCount.isPending} onSave={saveWatchCount} /> : null;
-      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} providers={watchProviders.data.providers} otherRegions={watchProviders.data.other_regions ?? []} />;
+      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} providers={watchProviders.data.providers} otherRegions={watchProviders.data.other_regions ?? []} scope={watchProviders.data.provider_scope ?? null} laftelSearchUrl={view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle) : null} />;
       case "review": return libraryItem ? <ContentReviewEditor key={key} contentId={libraryItem.content_id} contentAirDate={view.airDate} contentEndDate={view.endDate} contentAirYear={view.airYear} firstWatchedAt={libraryItem.first_watched_at} lastWatchedAt={libraryItem.last_watched_at} libraryItemId={libraryItem.library_item_id} onSaved={() => addToast("내 감상을 저장했어요.", "success")} /> : null;
       case "overview": return <ContentOverviewCard key={key} overview={view.overview} />;
       case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} pending={addFavoritePerson.isPending} columns={layout.mainWidth >= 520 ? 2 : 1} onAdd={addCastMember} onOpen={openCastMember} />;
@@ -404,6 +407,7 @@ export default function ContentDetailScreen() {
         <View style={{ width: "100%", maxWidth: HOME_CONTENT_MAX_WIDTH, alignSelf: "center", paddingLeft: Math.max(layout.gutter, insets.left), paddingRight: Math.max(layout.gutter, insets.right), paddingTop: spacing.lg, gap: layout.gap }}>
           <ContentDetailHero title={view.title} originalTitle={view.originalTitle} posterUrl={view.posterUrl}
             metaItems={createContentDetailMetaItems({ contentType: view.contentType, airDateLabel, episodeLabel })}
+            crewLine={crew.text || null} crewAccessibilityLabel={crew.accessibilityLabel}
             genres={view.genres} poster={layout.poster} warning={externalDetail.isError ? "상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다." : null}>
             {externalResult || libraryItem ? <WatchStatusControl model={createWatchStatusControlModel(selectedStatuses, Boolean(libraryItem))} pending={statusPending} onSelect={toggleStatus} /> : null}
             {!externalResult || libraryItem ? <ContentActionBar isMovie={view.contentType === "movie"} pinCount={libraryItem?.pin_count}

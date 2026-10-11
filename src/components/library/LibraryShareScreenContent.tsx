@@ -9,12 +9,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { getLibraryShare } from "@/services/libraryShare";
 import { extractShareId } from "@/utils/libraryShareErrors";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
+import { createCrewShortLine } from "@/utils/contentCrew";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
@@ -123,6 +124,7 @@ function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWid
   const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
   const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
+  const crew = createCrewShortLine(item.crew);
 
   return (
     <View style={[styles.cell, { width: cardWidth }]}>
@@ -137,6 +139,7 @@ function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWid
           <Text numberOfLines={1} style={styles.itemMeta}>
             {[airDateLabel, CONTENT_TYPE_LABELS[item.content_type], episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
           </Text>
+          {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={1} style={styles.crew}>{crew.text}</Text> : null}
           <GenreBadgeList genres={item.genres} maxVisible={2} />
           {reviewLabel ? <Text numberOfLines={1} style={styles.review}>{reviewLabel}</Text> : null}
           <View style={styles.badges}>
@@ -151,6 +154,7 @@ function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWid
 }
 
 const styles = StyleSheet.create({
+  crew: { ...typography.caption, color: colors.textMuted },
   container: {
     alignSelf: "center",
     backgroundColor: colors.background,

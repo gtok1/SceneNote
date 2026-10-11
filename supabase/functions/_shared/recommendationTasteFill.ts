@@ -86,3 +86,19 @@ export function selectTasteFillItems<T>(input: { ranked: readonly T[]; existing:
   }
   return selected;
 }
+
+export function shouldPrefetchTasteFill(input: { remainingMs: number; pendingQueryCount: number }): boolean {
+  return input.pendingQueryCount > 0 && input.remainingMs >= TASTE_FILL_MIN_REMAINING_MS;
+}
+
+export type TasteFillAction = "skip" | "use_prefetch" | "fetch_now";
+export type TasteFillReason = "full" | "no_queries" | "prefetched" | "fetched" | "time";
+export function planTasteFill(input: {
+  itemCount: number; limit: number; remainingMs: number; pendingQueryCount: number; prefetched: boolean;
+}): { action: TasteFillAction; reason: TasteFillReason } {
+  if (input.itemCount >= input.limit) return { action: "skip", reason: "full" };
+  if (input.pendingQueryCount === 0) return { action: "skip", reason: "no_queries" };
+  if (input.prefetched) return { action: "use_prefetch", reason: "prefetched" };
+  if (input.remainingMs >= TASTE_FILL_MIN_REMAINING_MS) return { action: "fetch_now", reason: "fetched" };
+  return { action: "skip", reason: "time" };
+}

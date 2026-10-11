@@ -1,5 +1,6 @@
 import { planAddToLibraryPath, runAfterResponse, type EdgeRuntimeLike } from "../_shared/addToLibraryFlow.ts";
 import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
+import { saveContentCrew } from "../_shared/contentCrewStore.ts";
 import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
@@ -244,6 +245,8 @@ Deno.serve(async (req: Request) => {
   });
   if (response.status === 201) {
     await runAfterResponse(async () => {
+      const crewResult = await saveContentCrew(adminClient, contentId, contentMeta.crew);
+      if (crewResult === "failed") console.warn("content crew save failed");
       await prefetchFirstSeasonEpisodes(adminClient, {
         contentId, source, externalId, contentMeta, seasons: seasonRows
       });

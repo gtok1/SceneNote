@@ -8,8 +8,9 @@ interface ContentDetailHeroProps {
   title: string; originalTitle: string | null; posterUrl: string | null;
   metaItems: string[]; genres: string[]; warning: string | null;
   poster: { width: number; height: number }; children?: ReactNode;
+  crewLine?: string | null; crewAccessibilityLabel?: string;
 }
-export function ContentDetailHero({ title, originalTitle, posterUrl, metaItems, genres, warning, poster, children }: ContentDetailHeroProps) {
+export function ContentDetailHero({ title, originalTitle, posterUrl, metaItems, genres, warning, poster, children, crewLine, crewAccessibilityLabel }: ContentDetailHeroProps) {
   const wide = poster.width >= 160;
   return <View style={styles.card}>
     <View style={styles.row}>
@@ -22,6 +23,7 @@ export function ContentDetailHero({ title, originalTitle, posterUrl, metaItems, 
           {metaItems.length > 1 ? <Text style={[typography.caption, styles.muted]}>{metaItems.slice(1).join(" · ")}</Text> : null}
         </View> : null}
         {genres.length ? <GenreBadgeList genres={genres} maxVisible={genres.length} /> : null}
+        {crewLine ? <Text accessibilityLabel={crewAccessibilityLabel} numberOfLines={2} style={[typography.label, styles.muted]}>{crewLine}</Text> : null}
         {warning ? <Text style={[typography.caption, { color: colors.warning }]}>{warning}</Text> : null}
         {wide ? children : null}
       </View>

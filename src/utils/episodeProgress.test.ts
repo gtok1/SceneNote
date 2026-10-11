@@ -5,6 +5,7 @@ import {
   createSeasonOffsetsByNumber,
   normalizeManualEpisodeInput,
   resolveEpisodeProgress,
+  resolveLibraryItemProgress,
   syncManualProgressAfterToggle,
   toAbsoluteEpisodeNumber,
   toSeasonRelativeEpisodeNumber,
@@ -145,4 +146,42 @@ describe("normalizeManualEpisodeInput", () => {
   it("still rejects the global maximum when no total is known", () => {
     assert.deepEqual(normalizeManualEpisodeInput({ rawEpisodeNumber: "10000", seasonNumber: null, seasons: [], totalEpisodes: null }), { ok: false, reason: "exceeds_max" });
   });
+});
+
+// Keep the spec's non-movie "drama" fixture without widening the app ContentType enum.
+const completedBase = {
+  contentType: "drama" as import("@/types/content").ContentType,
+  episodeCount: 10, watchedEpisodeCount: 3, derivedWatchedThrough: 3, manualWatchedThrough: 8
+};
+const manualExpected = {source:"manual",watchedThrough:8,nextEpisodeNumber:9,totalEpisodes:10,isComplete:false,progressRatio:0.8};
+it("P-1 completed status takes precedence over saved manual progress", () => {
+  assert.deepEqual(resolveEpisodeProgress({...completedBase,completed:true}), {source:"completed",watchedThrough:10,nextEpisodeNumber:null,totalEpisodes:10,isComplete:true,progressRatio:1});
+});
+it("P-2 preserves manual progress without completed status", () => {
+  assert.deepEqual(resolveEpisodeProgress({...completedBase,completed:false}), manualExpected);
+});
+it("P-3 preserves unknown episode totals when completed", () => {
+  const result=resolveEpisodeProgress({...completedBase,episodeCount:null,completed:true});
+  assert.equal(result.source,"manual"); assert.equal(result.watchedThrough,8);
+  assert.equal(result.isComplete,false); assert.equal(result.totalEpisodes,null);
+});
+it("P-4 preserves movie progress behavior when completed", () => {
+  const result=resolveEpisodeProgress({...completedBase,contentType:"movie",completed:true});
+  assert.equal(result.source,"none"); assert.equal(result.watchedThrough,0); assert.equal(result.progressRatio,null);
+});
+it("P-5 completes newly added anime without existing progress", () => {
+  const result=resolveEpisodeProgress({contentType:"anime",episodeCount:12,watchedEpisodeCount:0,derivedWatchedThrough:null,manualWatchedThrough:null,completed:true});
+  assert.equal(result.source,"completed"); assert.equal(result.watchedThrough,12); assert.equal(result.nextEpisodeNumber,null);
+});
+it("P-6 preserves default behavior without a completed input", () => {
+  assert.deepEqual(resolveEpisodeProgress(completedBase), manualExpected);
+});
+it("P-7 recalculates library progress when completed is toggled", () => {
+  const item={content_type:completedBase.contentType,episode_count:10,watched_episode_count:3,derived_watched_through:3,manual_watched_absolute_number:8};
+  assert.deepEqual(resolveLibraryItemProgress(item,["completed","recommended"]), {progress_source:"completed",effective_watched_through:10,next_episode_number:null});
+  assert.deepEqual(resolveLibraryItemProgress(item,["watching"]), {progress_source:"manual",effective_watched_through:8,next_episode_number:9});
+});
+it("P-8 preserves zero-total clamping when completed", () => {
+  const result=resolveEpisodeProgress({...completedBase,completed:true,episodeCount:0});
+  assert.equal(result.source,"manual"); assert.equal(result.watchedThrough,0);
 });

@@ -167,6 +167,8 @@ export type Database = {
           air_year: number | null
           content_type: Database["public"]["Enums"]["content_type"]
           created_at: string
+          crew: Json
+          crew_updated_at: string | null
           end_date: string | null
           id: string
           overview: string | null
@@ -182,6 +184,8 @@ export type Database = {
           air_year?: number | null
           content_type: Database["public"]["Enums"]["content_type"]
           created_at?: string
+          crew?: Json
+          crew_updated_at?: string | null
           end_date?: string | null
           id?: string
           overview?: string | null
@@ -197,6 +201,8 @@ export type Database = {
           air_year?: number | null
           content_type?: Database["public"]["Enums"]["content_type"]
           created_at?: string
+          crew?: Json
+          crew_updated_at?: string | null
           end_date?: string | null
           id?: string
           overview?: string | null

@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { evaluateGoldenCase, SEARCH_GOLDEN_CASES } from "./searchGolden";
+import { evaluateGoldenCase, SEARCH_GOLDEN_CASES, SEARCH_GOLDEN_SPACING_CASES, SEARCH_GOLDEN_SHORT_SPACING_CASES } from "./searchGolden";
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
@@ -19,10 +19,11 @@ async function main(): Promise<void> {
   const tmdbModulePath: string = "../supabase/functions/search-content/adapters/tmdb.ts";
   const normalizeModulePath: string = "../supabase/functions/search-content/adapters/normalize.ts";
   const { searchTmdb } = await import(tmdbModulePath);
-  const { compactResults, createSearchQueryVariants, filterResponseForVariant } =
+  const { compactResults, createSearchQueryVariants, filterResponseForVariant, planKoreanWordSplitFallback } =
     await import(normalizeModulePath);
   let passed = 0;
-  for (const expectation of SEARCH_GOLDEN_CASES) {
+  const expectations = [...SEARCH_GOLDEN_CASES, ...SEARCH_GOLDEN_SPACING_CASES, ...SEARCH_GOLDEN_SHORT_SPACING_CASES];
+  for (const expectation of expectations) {
     const variants = createSearchQueryVariants(expectation.query);
     const responses = await Promise.all(variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title"; compactQuery: string }) => {
       try {
@@ -35,12 +36,26 @@ async function main(): Promise<void> {
         return [];
       }
     }));
-    const verdict = evaluateGoldenCase(compactResults(responses.flat()), expectation);
+    const primaryResults = compactResults(responses.flat());
+    const plan = planKoreanWordSplitFallback({
+      query: expectation.query, page: 1, sources: ["tmdb"], remainingMs: Number.POSITIVE_INFINITY,
+      primaryVariants: variants, primaryResults
+    });
+    const fallbackResults = plan.reason === "run" ? await Promise.all(plan.variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title"; compactQuery: string }) => {
+      try {
+        const response = await searchTmdb({ query: variant.query, mediaType: "all", page: 1, signal: AbortSignal.timeout(8_000) });
+        return filterResponseForVariant(response, variant).results;
+      } catch {
+        console.warn(`${expectation.query}: 변형 "${variant.query}" 조회 실패`);
+        return [];
+      }
+    })) : [];
+    const verdict = evaluateGoldenCase(compactResults([...primaryResults, ...fallbackResults.flat()]), expectation);
     if (verdict.ok) passed += 1;
     else for (const failure of verdict.failures) console.error(failure);
   }
-  console.log(`통과 ${passed}/${SEARCH_GOLDEN_CASES.length}`);
-  if (passed !== SEARCH_GOLDEN_CASES.length) process.exitCode = 1;
+  console.log(`통과 ${passed}/${expectations.length}`);
+  if (passed !== expectations.length) process.exitCode = 1;
 }
 
 function loadEnvFile(filename: string): void {

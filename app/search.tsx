@@ -56,7 +56,7 @@ import { getGenreDisplayName } from "@/utils/genre";
 import { createSearchFilterDraft } from "@/utils/searchFilterDraft";
 import { partitionSearchResults } from "@/utils/searchResultVisibility";
 import { discoveryFilterKey, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
-import { shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
+import { recommendationTopUpStatus, shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { formatPersonName } from "@/utils/japaneseName";
 import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
 import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
@@ -246,6 +246,11 @@ export default function SearchScreen() {
   const searchFilterLimited = Boolean(search.data?.country_filter_limited || search.data?.genre_filter_limited);
   const isGallery = viewMode === "gallery";
   const galleryColumns = getResponsiveRecommendationColumns(Math.min(width, 1280), fontScale);
+  const topUp = recommendationTopUpStatus({
+    visibleCount: personalizedRecommendations.visibleCount,
+    targetCount: personalizedRecommendations.visibleTarget,
+    decision: personalizedRecommendations.continuationDecision
+  });
   const showRecommendationFeed = SEARCH_RECOMMENDATIONS_ENABLED && !isSimilarityMode && shouldShowRecommendationFeed(query);
   useEffect(() => {
     recommendationScrollState.current = { previousOffsetY: null, lastRequestedCursor: null };
@@ -441,6 +446,7 @@ export default function SearchScreen() {
     const removed = personalizedRecommendations.removeOptimistically(result.canonical_id);
     if (!removed) {
       recommendationAddLock.current.release(lockKey);
+      addToast("추천 목록이 변경되어 기록하지 못했어요. 새 추천을 불러온 뒤 다시 시도해 주세요.", "info");
       return;
     }
     const slot = { item: result, index: activeRecommendations.findIndex(item => item.canonical_id === result.canonical_id) };
@@ -1114,7 +1120,18 @@ export default function SearchScreen() {
               <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>모든 결과를 확인했습니다.</Text>
             ) : null
           ) : showRecommendationFeed ? (
-            personalizedRecommendations.isLoadingMore ? (
+            topUp.active ? (
+              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.topUpFooter}>
+                <View style={{ paddingHorizontal: displayedAsGallery ? spacing.sm : spacing.lg }}>
+                  <View style={styles.sharedInset}>
+                    <LoadingSkeleton variant="recommendation-card" count={topUp.placeholderCount} columns={displayedAsGallery ? galleryColumns : 1} />
+                  </View>
+                </View>
+                <View style={styles.loadMoreFooter}>
+                  <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>{topUp.text}</Text>
+                </View>
+              </View>
+            ) : personalizedRecommendations.isLoadingMore ? (
               <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
                 <ActivityIndicator color={colors.primary} size="small" />
                 <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>
@@ -1737,6 +1754,9 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     paddingBottom: spacing.xxl
+  },
+  topUpFooter: {
+    paddingVertical: spacing.md
   },
   loadMoreFooter: {
     alignItems: "center",

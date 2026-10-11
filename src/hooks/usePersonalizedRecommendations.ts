@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { createRecommendationRequestScope } from "@/utils/searchRecommendationPolicy";
+import { canEditCachedRecommendationFeed, createRecommendationRequestScope } from "@/utils/searchRecommendationPolicy";
 import { queryKeys } from "@/lib/query";
 import {
   getPersonalizedRecommendations,
@@ -77,6 +77,8 @@ export function usePersonalizedRecommendations(
     [exclusionIdentity, discoveryIdentity, mediaType, user?.id]
   );
   const cacheIdentity = JSON.stringify(cacheKey);
+  const currentCacheIdentity = useRef(cacheIdentity);
+  currentCacheIdentity.current = cacheIdentity;
   const enabled = Boolean(user && (options.enabled ?? true));
   // Each user/filter/activation receives a distinct request lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,6 +86,13 @@ export function usePersonalizedRecommendations(
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const isCurrent = () => enabled && scope.isActive() && currentScope.current === scope;
+  const canEditCachedFeed = () => canEditCachedRecommendationFeed({
+    userId: user?.id,
+    currentUserId: useAuthStore.getState().user?.id,
+    cacheIdentity,
+    currentCacheIdentity: currentCacheIdentity.current,
+    scopeActive: currentScope.current.isActive()
+  });
   useEffect(() => () => {
     scope.close();
     if (enabled) void queryClient.cancelQueries({ queryKey: cacheKey, exact: true });
@@ -315,7 +324,7 @@ export function usePersonalizedRecommendations(
   const removeOptimistically = (
     recommendationId: string
   ): RemovedFeedItem<PersonalizedRecommendation> | null => {
-    if (!isCurrent()) return null;
+    if (!canEditCachedFeed()) return null;
     const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
     if (!current) return null;
 
@@ -340,6 +349,7 @@ export function usePersonalizedRecommendations(
   };
 
   const restore = (removed: RemovedFeedItem<PersonalizedRecommendation>) => {
+    if (!canEditCachedFeed()) return;
     const current = queryClient.getQueryData<PersonalizedRecommendationsResponse>(cacheKey);
     if (!current) return;
 
@@ -844,6 +854,7 @@ export function usePersonalizedRecommendations(
     loadMore,
     loadNextBatch,
     visibleTarget,
+    continuationDecision: emptyContinuationDecision,
     visibleCount: visibleRecommendationCount,
     retryEmptyContinuation,
     submitFeedback

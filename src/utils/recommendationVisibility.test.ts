@@ -30,6 +30,20 @@ const libraryItem = (overrides: Partial<LibraryListItem> = {}): LibraryListItem 
   ...overrides
 } as LibraryListItem);
 
+it("V-1 hides a TV recommendation already registered as a same-title movie", () => {
+  const result = candidate({ external_source: "tmdb", external_id: "333484", content_type: "kdrama", title_primary: "개인적인 택시", air_year: 2026 });
+  const library = [libraryItem({ source_api: "tmdb", source_id: "1744241", content_type: "movie", title_primary: "개인적인 택시", air_year: 2026 })];
+  assert.equal(isRegisteredRecommendation(result, library), true);
+  assert.equal(countVisibleRecommendationCandidates([result], library, null), 0);
+});
+
+it("V-2 preserves separate anime and movie recommendations with the same title and year", () => {
+  const result = candidate({ content_type: "movie", title_primary: "같은 제목", air_year: 2026 });
+  const library = [libraryItem({ content_type: "anime", title_primary: "같은 제목", air_year: 2026 })];
+  assert.equal(isRegisteredRecommendation(result, library), false);
+  assert.equal(countVisibleRecommendationCandidates([result], library, null), 1);
+});
+
 describe("recommendation visibility parity", () => {
   it("uses the same multi-select union for visible cards, counts, and replacements", () => {
     const korean = candidate({ external_id: "kr", content_type: "kdrama", genres: ["Comedy"], origin_country: ["KR"] });

@@ -50,6 +50,15 @@
 | [45 추천 연도 필터 배포 어긋남](45_recommendation_year_filter_deploy_skew_fixes_spec.md) | 연도 선택 시 빈 추천 원인 실측(운영 v20 연도 미지원), 재배포 + `applied_filters` 감지·전용 빈 상태 | 구현, `personalized-recommendations` v21 배포(2026-10-05 11:30). 웹 M-1은 사용자 캡처로 2025년 추천 표시 확인, iOS(M-3) 남음 |
 | [46 추천 카드 완료 버튼](46_recommendation_complete_action_spec.md) | 추천 카드·빠른 보기에 "완료"(바로 완료 등록), "추가"는 그대로, 상태별 문구·잠금 공유 | 구현(코드 확인), 수동 미검증 |
 | [47 추천 추가 묶음 12개 채우기](47_recommendation_batch_topup_spec.md) | 스크롤 묶음 목표(보이는 개수+12)까지 자동 이어 찾기, 스크롤 판정 목표 기준, 원인 분해 개발 기록 | 신규: 미구현 |
+| [48 작품 상세 완료·진행 정정](48_content_detail_completed_progress_fixes_spec.md) | 완료면 모든 화 시청으로 계산, 진행 카드 완료 모드, 웹 `Alert` 확인 정정 | 신규: 미구현 |
+| [49 제작진 표시 1단계](49_content_crew_display_spec.md) | 감독·작가·원작 매핑, 작품 상세·빠른 보기 표시(`get-content-detail` 재배포 필요), 목록은 2단계 | 구현(코드 확인), 재배포 전 |
+| [50 제작진 2단계 저장·목록 표시](50_content_crew_storage_list_display_spec.md) | DB 저장(0024)·백필 스크립트·라이브러리/핀/공유 표시·검색 | 구현(코드 확인), 마이그레이션·배포·백필 전 |
+| [51 추천 영화↔드라마 같은 작품 제외](51_recommendation_cross_type_library_match_fixes_spec.md) | 라이브러리 영화 항목과 추천 TV 항목 같은 작품 판정, 앱·서버 공유 함수 | 구현, `personalized-recommendations` v22 배포(2026-10-10). 수동 확인 남음 |
+| [52 추천 첫 묶음 채우기](52_recommendation_first_batch_fill_spec.md) | 취향 보충 미리 받기·준비 조회 병렬화·진단 값, 이어 찾기 중 빈자리 스켈레톤 | 구현, `personalized-recommendations` v22 배포(2026-10-10 17:43). 로그인 수동 확인(M-1~M-3) 남음 |
+| [53 이어 찾기 스켈레톤 정렬](53_recommendation_topup_skeleton_alignment_fixes_spec.md) | 스켈레톤을 첫 로딩과 같은 감싸기로 실제 카드 열에 맞춤 | 신규: 미구현 |
+| [54 애니 후속 시즌 보러가기·라프텔 찾아보기](54_anime_sequel_watch_providers_fixes_spec.md) | 후속 시즌 TMDB 보완 매칭·시즌 제공처(없으면 시리즈 + 안내), TMDB에 없는 라프텔은 검색 링크로만 | 신규: 미구현. 구현 후 `get-watch-providers` 재배포 필요 |
+| [55 붙여 쓴 한국어 검색어 띄어쓰기 보정](55_korean_search_spacing_fallback_spec.md) | 1단계에 맞는 결과가 없을 때만 TMDB 2단계 띄어쓰기 질의, 골든 띄어쓰기 사례 7개 | 구현(`npm test` 1125/1126, 골든 19/19), `search-content` v27 배포(2026-10-11 22:53). 로그인 수동 확인(M-1~M-4) 남음 |
+| [56 붙여 쓴 검색어 글자 수 조건 제거](56_korean_search_spacing_length_fixes_spec.md) | 짧은 검색어("너말고")도 공백 뺀 제목 기준으로 2단계 보정, 입력 중 자모 제외 | 신규: 미구현. 구현 후 `search-content` 재배포 필요 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

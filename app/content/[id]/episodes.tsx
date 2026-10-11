@@ -1,6 +1,6 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 
@@ -11,6 +11,8 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { EpisodeSelector } from "@/components/content/EpisodeSelector";
 import { SeasonSelector } from "@/components/content/SeasonSelector";
 import { colors, spacing, typography } from "@/constants/theme";
+import { useAppUIStore } from "@/stores/appUIStore";
+import { MANUAL_PROGRESS_COPY, manualProgressSavedToast } from "@/utils/contentDetailView";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import {
   useEpisodeProgress,
@@ -24,6 +26,7 @@ import {
 export default function EpisodesScreen() {
   const { id, libraryItemId, season: requestedSeason } = useLocalSearchParams<{ id: string; libraryItemId?: string; season?: string }>();
   const router = useRouter();
+  const addToast = useAppUIStore((state) => state.addToast);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { gutter } = getHomeLayout(width);
@@ -84,26 +87,26 @@ export default function EpisodesScreen() {
         }
         onSetManualProgress={(episode) => {
           if (!libraryItem) return;
-          Alert.alert(
-            "시청 진행 설정",
-            `${episode.episode_number}화까지 봤음으로 표시할까요?`,
-            [
-              { text: "취소", style: "cancel" },
-              {
-                text: "설정",
-                onPress: () => updateManualProgress.mutate(
-                  {
-                    libraryItemId: libraryItem.library_item_id,
-                    progress: {
-                      seasonNumber: selectedSeason?.season_number ?? null,
-                      episodeNumber: episode.episode_number
-                    }
-                  },
-                  { onError: (error) => Alert.alert("시청 진행 저장 실패", error.message) }
-                )
-              }
-            ]
-          );
+          if (libraryItem.statuses.includes("completed")) {
+            addToast(MANUAL_PROGRESS_COPY.completedNotice, "info");
+            return;
+          }
+          const previous = libraryItem.manual_watched_episode_number === null
+            ? null
+            : { seasonNumber: libraryItem.manual_watched_season_number, episodeNumber: libraryItem.manual_watched_episode_number };
+          updateManualProgress.mutate({
+            libraryItemId: libraryItem.library_item_id,
+            progress: { seasonNumber: selectedSeason?.season_number ?? null, episodeNumber: episode.episode_number }
+          }, {
+            onSuccess: () => addToast(manualProgressSavedToast(episode.episode_number), "success", {
+              actionLabel: MANUAL_PROGRESS_COPY.undo,
+              onAction: () => updateManualProgress.mutate({
+                libraryItemId: libraryItem.library_item_id,
+                progress: previous
+              }, { onError: () => addToast(MANUAL_PROGRESS_COPY.saveFailed, "error") })
+            }),
+            onError: () => addToast(MANUAL_PROGRESS_COPY.saveFailed, "error")
+          });
         }}
         onToggleProgress={(episode, watched) =>
           toggleProgress.mutate({ episode, watched, ...(libraryItem ? { libraryItem } : {}) })

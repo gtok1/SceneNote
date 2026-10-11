@@ -4,14 +4,15 @@ import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage as Image } from "@/components/common/AppImage";
-import { radius, spacing } from "@/constants/theme";
-import { describeNoKrProviders, DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink, pickInitialWatchCategory } from "@/utils/watchProviderDisplay";
+import { colors, radius, spacing, typography } from "@/constants/theme";
+import { describeNoKrProviders, describeWatchProviderScope, DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink, pickInitialWatchCategory } from "@/utils/watchProviderDisplay";
 import { useAppUIStore } from "@/stores/appUIStore";
 import {
   WATCH_PROVIDER_CATEGORIES,
   WATCH_PROVIDER_CATEGORY_LABEL,
   type WatchProvider,
   type WatchProviderCategory,
+  type WatchProviderScope,
   type WatchProvidersByCategory
 } from "@/types/watchProviders";
 
@@ -20,9 +21,11 @@ interface WatchProviderListProps {
   isLoading?: boolean;
   error?: string | null;
   otherRegions?: readonly string[];
+  scope?: WatchProviderScope | null;
+  laftelSearchUrl?: string | null;
 }
 
-export function WatchProviderList({ providers, isLoading = false, error = null, otherRegions = [] }: WatchProviderListProps) {
+export function WatchProviderList({ providers, isLoading = false, error = null, otherRegions = [], scope = null, laftelSearchUrl = null }: WatchProviderListProps) {
   const addToast = useAppUIStore(state => state.addToast);
   const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategory(providers));
   const providerIds = WATCH_PROVIDER_CATEGORIES.map(category =>
@@ -34,6 +37,7 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
   }, [providerIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const hasAnyProvider = WATCH_PROVIDER_CATEGORIES.some((category) => providers[category].length > 0);
   const activeProviders = providers[selectedCategory];
+  const scopeDescription = describeWatchProviderScope(scope);
 
   const openProvider = (provider: WatchProvider) => {
     const link = normalizeWatchProviderLink(provider.link);
@@ -107,8 +111,28 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
           ))}
         </View>
       ) : null}
+      {!isLoading && !error && hasAnyProvider && scopeDescription ? (
+        <Text style={styles.scopeHint}>{scopeDescription}</Text>
+      ) : null}
       {!isLoading && !error && activeProviders.some(provider => normalizeWatchProviderLink(provider.link) === DISNEY_PLUS_HOME_URL) ? (
         <Text style={styles.emptyText}>디즈니+ 홈으로 연결돼요. 로그인 후 작품명을 검색해 주세요.</Text>
+      ) : null}
+      {laftelSearchUrl ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="라프텔에서 찾아보기"
+          onPress={() => { void Linking.openURL(laftelSearchUrl).catch(() => {
+            addToast("시청 플랫폼을 열지 못했어요. 잠시 후 다시 시도해 주세요.", "error");
+          }); }}
+          style={({ pressed }) => [styles.laftelSearch, pressed ? styles.laftelPressed : null]}
+        >
+          <Ionicons name="search" size={16} color={colors.primarySoft} />
+          <View style={styles.laftelTextBox}>
+            <Text style={styles.laftelLabel}>라프텔에서 찾아보기</Text>
+            <Text style={styles.scopeHint}>제공 여부는 라프텔에서 확인해 주세요.</Text>
+          </View>
+          <Ionicons name="open-outline" size={16} color={colors.textSubtle} />
+        </Pressable>
       ) : null}
       <Text style={styles.attribution}>시청 정보 제공: JustWatch</Text>
     </View>
@@ -116,6 +140,11 @@ export function WatchProviderList({ providers, isLoading = false, error = null, 
 }
 
 const styles = StyleSheet.create({
+  scopeHint: { ...typography.caption, color: colors.textSubtle },
+  laftelSearch: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
+  laftelPressed: { opacity: 0.72 },
+  laftelTextBox: { flex: 1, minWidth: 0, gap: spacing.xs },
+  laftelLabel: { ...typography.label, color: colors.primarySoft },
   section: {
     backgroundColor: "#111827",
     borderRadius: radius.md,

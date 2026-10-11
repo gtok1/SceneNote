@@ -1,4 +1,6 @@
 import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
+import { parseStoredCrew } from "../_shared/contentCrew.ts";
+import { saveContentCrew } from "../_shared/contentCrewStore.ts";
 import { extractGenreNames, upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
@@ -56,6 +58,8 @@ Deno.serve(async (req: Request) => {
     try {
       const contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
       await updateContentSnapshot(adminClient, externalRow.content_id, contentMeta);
+      const crewResult = await saveContentCrew(adminClient, externalRow.content_id, contentMeta.crew);
+      if (crewResult === "failed") console.warn("content crew save failed");
 
       try {
         await upsertGenres(adminClient, externalRow.content_id, contentMeta.genres);
@@ -87,7 +91,8 @@ Deno.serve(async (req: Request) => {
           has_seasons: contentMeta.has_seasons,
           episode_count: contentMeta.episode_count,
           genres: contentMeta.genres,
-          cast: contentMeta.cast
+          cast: contentMeta.cast,
+          crew: contentMeta.crew
         },
         seasons: contentMeta.seasons,
         from_db: false
@@ -133,7 +138,8 @@ Deno.serve(async (req: Request) => {
             return sum + (season.episode_count ?? 0);
           }, 0) || null,
         genres: extractGenreNames(content.content_genres),
-        cast: []
+        cast: [],
+        crew: parseStoredCrew(content.crew)
       },
       seasons:
         seasons?.map(
@@ -173,7 +179,8 @@ Deno.serve(async (req: Request) => {
         has_seasons: contentMeta.has_seasons,
         episode_count: contentMeta.episode_count,
         genres: contentMeta.genres,
-        cast: contentMeta.cast
+        cast: contentMeta.cast,
+        crew: contentMeta.crew
       },
       seasons: contentMeta.seasons,
       from_db: false

@@ -26,6 +26,7 @@ import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/
 import {
   createSeasonOffsetsByNumber,
   resolveEpisodeProgress,
+  resolveLibraryItemProgress,
   syncManualProgressAfterToggle,
   toAbsoluteEpisodeNumber,
   toSeasonRelativeEpisodeNumber
@@ -394,6 +395,7 @@ function updateLibraryItemStatusesInCache(
               ...item,
               status: primaryStatus,
               statuses: normalizedStatuses,
+              ...resolveLibraryItemProgress(item, normalizedStatuses),
               watch_count:
                 watchCount !== undefined
                   ? Math.max(0, Math.floor(watchCount))
@@ -485,7 +487,8 @@ function updateLibraryItemManualProgressInCache(
           episodeCount: item.episode_count,
           watchedEpisodeCount: item.watched_episode_count,
           derivedWatchedThrough: progress === null ? item.derived_watched_through : null,
-          manualWatchedThrough: manualAbsolute
+          manualWatchedThrough: manualAbsolute,
+          completed: item.statuses.includes("completed")
         });
 
         return {

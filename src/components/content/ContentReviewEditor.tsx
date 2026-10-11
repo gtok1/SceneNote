@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { YearSelect } from "@/components/common/YearSelect";
 import { RatingInput } from "@/components/form/RatingInput";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useUpdateLibraryWatchDates } from "@/hooks/useLibrary";
+import { MANUAL_PROGRESS_COPY } from "@/utils/contentDetailView";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import { useContentReview, useSaveContentReview } from "@/hooks/useReviews";
 
 interface ContentReviewEditorProps {
@@ -95,7 +97,6 @@ export function ContentReviewEditor({
     } catch (error) {
       const message = error instanceof Error ? error.message : "본 시기를 확인해 주세요.";
       setSubmitError(message);
-      Alert.alert("본 시기 확인", message);
       return;
     }
 
@@ -132,9 +133,8 @@ export function ContentReviewEditor({
 
       onSaved();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "감상 기록을 저장하지 못했습니다.";
+      const message = userFacingErrorMessage(error, MANUAL_PROGRESS_COPY.reviewSaveFailed);
       setSubmitError(message);
-      Alert.alert("저장 실패", message);
     }
   };
 

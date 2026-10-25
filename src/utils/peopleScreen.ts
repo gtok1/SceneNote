@@ -1,4 +1,5 @@
-import type { PersonCategory, PersonSearchResult } from "@/types/people";
+import type { CastMember } from "@/types/content";
+import type { FavoritePerson, PersonCategory, PersonCategoryResult, PersonSearchResult, PersonSource } from "@/types/people";
 import { getHomeLayout } from "@/utils/homeLayout";
 import { formatPersonName } from "@/utils/japaneseName";
 
@@ -35,6 +36,51 @@ export function getPeopleLayout(width: number): PeopleLayout {
 
 export function personKey(person: Pick<PersonSearchResult, "source" | "external_id">): string {
   return `${person.source}:${person.external_id}`;
+}
+
+export function resolveCastMemberPerson(
+  member: Pick<CastMember, "id" | "source">,
+  isAnime: boolean
+): { source: PersonSource; category: PersonCategory; key: string } {
+  const source = member.source ?? (isAnime ? "anilist" : "tmdb");
+  const category = source === "anilist" || isAnime ? "voice_actor" : "actor";
+  return { source, category, key: personKey({ source, external_id: String(member.id) }) };
+}
+
+export function planFavoriteCategoryCorrection(
+  person: Pick<FavoritePerson, "source" | "category">
+): PersonCategory | null {
+  return person.source === "anilist" && person.category === "actor" ? "voice_actor" : null;
+}
+
+export const CATEGORY_SYNC_BATCH_SIZE = 20;
+
+export function selectFavoritesForCategorySync<T extends Pick<FavoritePerson, "source">>(favorites: readonly T[]): T[] {
+  return favorites.filter(person => person.source === "tmdb");
+}
+
+export function createCategorySyncBatches(
+  favorites: readonly Pick<FavoritePerson, "source" | "external_id">[],
+  size = CATEGORY_SYNC_BATCH_SIZE
+): string[][] {
+  if (!Number.isInteger(size) || size < 1) throw new RangeError("Batch size must be a positive integer");
+  const ids = selectFavoritesForCategorySync(favorites).map(person => person.external_id);
+  const batches: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) batches.push(ids.slice(index, index + size));
+  return batches;
+}
+
+export function planFavoriteCategorySync(
+  favorites: readonly Pick<FavoritePerson, "id" | "source" | "external_id" | "category">[],
+  results: readonly PersonCategoryResult[]
+): { id: string; category: PersonCategory }[] {
+  const byId = new Map(results.map(result => [result.external_id, result.category]));
+  const updates: { id: string; category: PersonCategory }[] = [];
+  for (const favorite of selectFavoritesForCategorySync(favorites)) {
+    const category = byId.get(favorite.external_id);
+    if (category != null && category !== favorite.category) updates.push({ id: favorite.id, category });
+  }
+  return updates;
 }
 
 export function personCategoryLabel(category: PersonCategory): "배우" | "성우" {

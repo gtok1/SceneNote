@@ -39,9 +39,9 @@ export type EmptyRecommendationContinuationDecision =
 export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_CONTINUATIONS = 6;
 export const MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS = 45_000;
 export const MAX_CONSECUTIVE_RECOMMENDATION_NO_PROGRESS_ATTEMPTS = 3;
-// Each request has a 12-second deadline. Do not start a request with a shorter
+// Each request has a 15-second deadline. Do not start a request with a shorter
 // remaining cycle budget, which would manufacture a timeout near the limit.
-export const MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS = 12_000;
+export const MINIMUM_AUTOMATIC_RECOMMENDATION_REQUEST_BUDGET_MS = 15_000;
 export const PERSONALIZED_RECOMMENDATION_BATCH_SIZE = 12;
 
 export function shouldAutoLoadNextRecommendationBatch(

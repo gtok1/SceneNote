@@ -40,7 +40,7 @@ async function collectTmdb(input: SimilarityWork,target:string): Promise<{anchor
   const detail = await tmdbFetch(`/${kind}/${input.external_id}`,key,{append_to_response:"keywords,credits,recommendations,similar",language:"ko-KR"});
   const anchor = normalizeTmdb(detail,kind,input);
   anchor.tags = keywordNames(detail.keywords); anchor.people = names(detail.credits?.cast).slice(0,12); anchor.studios = names(detail.production_companies);
-  const candidates = [...(detail.recommendations?.results ?? []),...(detail.similar?.results ?? [])].map((item:any)=>normalizeTmdb(item,kind)).map((item,index)=>({...item,provider_recommended:index < (detail.recommendations?.results?.length ?? 0)}));
+  const candidates: SimilarityWork[] = [...(detail.recommendations?.results ?? []),...(detail.similar?.results ?? [])].map((item:any)=>normalizeTmdb(item,kind)).map((item,index)=>({...item,provider_recommended:index < (detail.recommendations?.results?.length ?? 0)}));
   if (target === "anime") candidates.push(...await fetchAniListDiscovery(anchor.genres ?? []));
   if ((target === "drama" || target === "movie") && target !== (kind === "movie" ? "movie" : "drama")) candidates.push(...await fetchTmdbDiscovery(anchor.genres ?? [],target,key));
   return {anchor,candidates,warnings:["벡터 인프라가 없어 제공처 추천·태그·장르·공식 줄거리 신호를 사용했습니다."]};

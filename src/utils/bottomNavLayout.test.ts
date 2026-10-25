@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getBottomNavMetrics } from "./bottomNavLayout";
+import { getBottomNavMetrics, getNavItemVisual } from "./bottomNavLayout";
 
 describe("bottom navigation layout", () => {
   it("B-1 fits six tabs at 320 points", () => assert.deepEqual(getBottomNavMetrics(320, 6), { labelFontSize: 10, iconPillWidth: 44 }));
@@ -15,4 +15,23 @@ describe("bottom navigation layout", () => {
     assert.deepEqual(getBottomNavMetrics(Number.NaN, 6), expected);
   });
   it("B-7 clamps zero tabs to one", () => assert.deepEqual(getBottomNavMetrics(375, 0), { labelFontSize: 11, iconPillWidth: 56 }));
+});
+
+describe("bottom navigation pill states", () => {
+  it("B-8 preserves the active pill during hover and press", () => {
+    assert.deepEqual(getNavItemVisual({ active: true, hovered: true, pressed: true, keyboardFocused: false }), { pill: "active", focusRing: false });
+  });
+  it("B-9 highlights only the inactive hovered pill", () => {
+    assert.deepEqual(getNavItemVisual({ active: false, hovered: true, pressed: false, keyboardFocused: false }), { pill: "hover", focusRing: false });
+  });
+  it("B-10 highlights a pressed native pill without hover", () => {
+    assert.deepEqual(getNavItemVisual({ active: false, hovered: undefined, pressed: true, keyboardFocused: false }), { pill: "hover", focusRing: false });
+  });
+  it("B-11 leaves the idle inactive pill unpainted", () => {
+    assert.deepEqual(getNavItemVisual({ active: false, hovered: false, pressed: false, keyboardFocused: false }), { pill: "none", focusRing: false });
+  });
+  it("B-12 shows keyboard focus for active and inactive pills", () => {
+    assert.deepEqual(getNavItemVisual({ active: true, keyboardFocused: true }), { pill: "active", focusRing: true });
+    assert.deepEqual(getNavItemVisual({ active: false, keyboardFocused: true }), { pill: "none", focusRing: true });
+  });
 });

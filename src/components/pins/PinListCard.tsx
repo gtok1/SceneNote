@@ -15,10 +15,11 @@ interface PinListCardProps {
   posterWidth: number;
   padding: number;
   onPressPin: (id: string) => void;
+  variant?: "full" | "grouped";
 }
 
 export const PinListCard = memo(function PinListCard({
-  pin, spoilerRevealed, selected, pressAction, posterWidth, padding, onPressPin
+  pin, spoilerRevealed, selected, pressAction, posterWidth, padding, onPressPin, variant = "full"
 }: PinListCardProps) {
   const model = useMemo(() => createPinCardModel(pin, { spoilerRevealed }), [pin, spoilerRevealed]);
   return (
@@ -34,19 +35,20 @@ export const PinListCard = memo(function PinListCard({
         pressed && styles.pressed
       ]}
     >
-      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
+      {variant === "full" ? <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
         <AppImage
           contentFit="cover"
           source={model.posterUrl ? { uri: model.posterUrl } : null}
           style={[styles.poster, { width: posterWidth, height: posterWidth * 1.5 }]}
         />
-      </View>
+      </View> : null}
       <View style={styles.body}>
-        <Text numberOfLines={1} style={styles.title}>{model.title}</Text>
-        {model.subtitle ? <Text numberOfLines={1} style={styles.caption}>{model.subtitle}</Text> : null}
+        {variant === "full" ? <Text numberOfLines={1} style={styles.title}>{model.title}</Text> : null}
+        {model.episodeLabel ? <Text numberOfLines={1} style={variant === "grouped" ? styles.groupedEpisode : styles.caption}>{model.episodeLabel}</Text> : null}
         <View style={styles.meta}>
           <Text style={styles.time}>{model.timeLabel}</Text>
           {model.emotionLabel ? <Text style={styles.emotion}>{model.emotionLabel}</Text> : null}
+          {model.relativeDateLabel ? <Text style={styles.relativeDate}>{model.relativeDateLabel}</Text> : null}
         </View>
         {model.memoHidden ? (
           <View style={styles.maskedMemo}>
@@ -80,7 +82,9 @@ const styles = StyleSheet.create({
   poster: { borderRadius: radius.sm },
   body: { flex: 1, minWidth: 0, gap: spacing.xs },
   title: { ...typography.headline, color: colors.text },
+  groupedEpisode: { ...typography.label, color: colors.text },
   caption: { ...typography.caption, color: colors.textMuted },
+  relativeDate: { ...typography.caption, color: colors.textSubtle, fontVariant: ["tabular-nums"] },
   meta: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" },
   time: {
     ...typography.label, color: colors.primary, backgroundColor: colors.primarySoft,

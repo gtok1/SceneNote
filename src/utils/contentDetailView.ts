@@ -65,3 +65,50 @@ export function contentDetailSections(input: { columns: 1 | 2; inLibrary: boolea
   const side: ContentDetailSection[] = input.columns === 2 ? ["providers", "watchCount", "danger"] : [];
   return { main: main.filter(enabled), side: side.filter(enabled) };
 }
+
+/** Keep only real API episode numbers: never synthesize missing intermediate rows. */
+export function episodeChoiceNumbers(rows: readonly { episode_number: number }[]): number[] {
+  return [...new Set(rows.map(row => row.episode_number).filter(n => Number.isInteger(n) && n > 0))]
+    .sort((a, b) => a - b).slice(0, 200);
+}
+
+export function episodeChoiceSeasonNumber(
+  selected: number | null, registered: number | null, seasons: readonly { season_number: number }[]
+): number {
+  return selected ?? (seasons.length === 1 ? seasons[0]!.season_number : registered ?? seasons[0]?.season_number ?? 1);
+}
+
+export const EPISODE_CHOICE_MAX = 200;
+export type EpisodeChoiceMode =
+  | { kind: "count"; numbers: number[] }
+  | { kind: "released"; numbers: number[] }
+  | { kind: "manual" };
+export const EPISODE_CHOICE_MANUAL_COPY = "API에서 이 작품의 화수를 알려 주지 않아요. 본 회차를 직접 입력해 주세요.";
+
+export function resolveEpisodeChoiceMode(input: {
+  seasonEpisodeCount: number | null | undefined;
+  totalEpisodes: number | null;
+  releasedEpisodes: readonly { episode_number: number }[];
+}): EpisodeChoiceMode {
+  const count = input.seasonEpisodeCount ?? input.totalEpisodes;
+  if (count !== null && Number.isInteger(count) && count >= 1 && count <= EPISODE_CHOICE_MAX) {
+    return { kind: "count", numbers: Array.from({ length: count }, (_, i) => i + 1) };
+  }
+  const numbers = episodeChoiceNumbers(input.releasedEpisodes);
+  return numbers.length > 0 ? { kind: "released", numbers } : { kind: "manual" };
+}
+
+export function episodeChoiceInfoText(input: {
+  mode: EpisodeChoiceMode;
+  totalEpisodes: number | null;
+  isFetching: boolean;
+  isError: boolean;
+}): string | null {
+  if (input.mode.kind === "count") return null;
+  if (input.mode.kind === "released") {
+    return `API 공개 회차 ${input.mode.numbers.length}개 · 최근 ${input.mode.numbers.at(-1)}화${input.totalEpisodes === null ? " · 총 화수 미정" : ""}`;
+  }
+  if (input.isError) return "공개 회차를 불러오지 못했어요.";
+  if (input.isFetching) return "공개된 회차를 확인하고 있어요.";
+  return EPISODE_CHOICE_MANUAL_COPY;
+}

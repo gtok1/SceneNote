@@ -426,7 +426,9 @@ describe("window expansion, diversity, and refill behavior", () => {
 
     assert.equal(batch.profile_mode, "cold_start");
     assert.deepEqual(batch.items.map((item) => item.external_id), ["newer", "older-popular"]);
-    assert(batch.items.every((item) => item.recommendation_reason.includes("최신")));
+    // docs/33 D-7 replaced the misleading latest/popular exploration copy.
+    assert(batch.items.every((item) => item.recommendation_reason.includes("최근 공개작")));
+    assert(batch.items.every((item) => !item.recommendation_reason.includes("인기")));
   });
 
   it("includes older candidates without a fixed release-window cutoff", () => {

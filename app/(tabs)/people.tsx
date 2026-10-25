@@ -14,6 +14,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   useAddFavoritePerson,
   useDeleteFavoritePerson,
+  useFavoriteCategorySync,
   useFavoriteKoreanNameBackfill,
   useFavoritePeople,
   usePersonContentSearch
@@ -49,6 +50,7 @@ function PeopleScreen() {
   const search = usePersonContentSearch(debouncedQuery, category);
   const favorites = useFavoritePeople();
   useFavoriteKoreanNameBackfill(favorites.data);
+  useFavoriteCategorySync(favorites.data);
   const addFavorite = useAddFavoritePerson();
   const deleteFavorite = useDeleteFavoritePerson();
   const addToast = useAppUIStore((state) => state.addToast);

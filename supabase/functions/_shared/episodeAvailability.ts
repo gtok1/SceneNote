@@ -55,3 +55,29 @@ export function upcomingEpisodeFromDatedEpisodes(
     .sort((a, b) => (a.air_date ?? "").localeCompare(b.air_date ?? "") || a.episode_number - b.episode_number)[0];
   return upcoming?.air_date ? { episodeNumber: upcoming.episode_number, airDate: upcoming.air_date } : null;
 }
+
+export interface PublishedEpisode {
+  episode_number: number;
+  title: string | null;
+  air_date: string | null;
+  url?: string | null;
+}
+
+export function publishedStreamingEpisodes(rows: readonly { title?: string | null; url?: string | null }[]): PublishedEpisode[] {
+  const episodes = new Map<number, PublishedEpisode>();
+  for (const row of rows) {
+    if (!row.title || !row.url || !/^https?:\/\//i.test(row.url)) continue;
+    const match = /^(?:episode\s+|ep\.?\s*|제|第)?(\d+)\s*(?:화|話|회|[-–—:.]|$)/i.exec(row.title.trim())
+      ?? /^episode\s+(\d+)\b/i.exec(row.title.trim());
+    const number = match ? Number(match[1]) : 0;
+    if (!Number.isInteger(number) || number < 1 || episodes.has(number)) continue;
+    episodes.set(number, { episode_number: number, title: row.title, air_date: null, url: row.url });
+  }
+  return [...episodes.values()].sort((a, b) => a.episode_number - b.episode_number);
+}
+
+export function publishedDatedEpisodes(rows: readonly PublishedEpisode[], today: string): PublishedEpisode[] {
+  return rows.filter(row => Number.isInteger(row.episode_number) && row.episode_number > 0 &&
+    row.air_date && /^\d{4}-\d{2}-\d{2}$/.test(row.air_date) && row.air_date <= today)
+    .sort((a, b) => a.episode_number - b.episode_number);
+}

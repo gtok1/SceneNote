@@ -222,3 +222,30 @@ describe("origin_country from countryOfOrigin", () => {
     assert.deepEqual(result.origin_country, []);
   });
 });
+
+it("AS-1 expands a three-season TV sequel chain", () => {
+  const third = media(185756, "TV", 2026);
+  const second = media(178434, "TV", 2025, { edges: [sequel(third)] });
+  const first = media(164702, "TV", 2024, { edges: [sequel(second)] });
+  assert.deepEqual(expandDirectSeasonRelations([first]).map(({ item, seasonNumber }) => ({ id: item.id, seasonNumber })), [
+    { id: 164702, seasonNumber: undefined }, { id: 178434, seasonNumber: 2 }, { id: 185756, seasonNumber: 3 }
+  ]);
+});
+it("AS-2 caps a ten-season chain at season eight", () => {
+  const seasons = Array.from({ length: 10 }, (_, i) => media(i + 1, "TV", 2020 + i));
+  for (let i = 0; i < seasons.length - 1; i += 1) seasons[i]!.relations = { edges: [sequel(seasons[i + 1]!)] };
+  const expanded = expandDirectSeasonRelations([seasons[0]!]);
+  assert.equal(expanded.length, 8);
+  assert.deepEqual(expanded.map(item => item.seasonNumber), [undefined, 2, 3, 4, 5, 6, 7, 8]);
+});
+it("AS-3 prefers resolved season three even when its direct result comes first", () => {
+  const first = media(164702, "TV", 2024);
+  const second = media(178434, "TV", 2025);
+  const third = media(185756, "TV", 2026, { edges: [{ relationType: "PREQUEL", node: second }] });
+  first.relations = { edges: [sequel(second)] };
+  second.relations = { edges: [sequel(third)] };
+  const matches = dedupeAniListSearchMediaItems(expandDirectSeasonRelations([third, first])).filter(({ item }) => item.id === 185756);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0]?.resolved, true);
+  assert.equal(matches[0]?.seasonNumber, 3);
+});

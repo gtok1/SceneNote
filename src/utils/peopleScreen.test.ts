@@ -264,3 +264,91 @@ describe("peopleScreen helpers", () => {
     ]);
   });
 });
+
+describe("cast member person identity and favorite category corrections", () => {
+  it("CM-1 preserves TMDB source for an anime cast member", async () => {
+    const { resolveCastMemberPerson } = await import("./peopleScreen");
+    assert.deepEqual(resolveCastMemberPerson({ id: 76933, source: "tmdb" }, true), {
+      source: "tmdb", category: "voice_actor", key: "tmdb:76933"
+    });
+  });
+
+  it("CM-2 resolves AniList cast as AniList voice actor", async () => {
+    const { resolveCastMemberPerson } = await import("./peopleScreen");
+    assert.deepEqual(resolveCastMemberPerson({ id: 102170, source: "anilist" }, true), {
+      source: "anilist", category: "voice_actor", key: "anilist:102170"
+    });
+  });
+
+  it("CM-3 resolves live-action TMDB cast as actor", async () => {
+    const { resolveCastMemberPerson } = await import("./peopleScreen");
+    assert.deepEqual(resolveCastMemberPerson({ id: 531736, source: "tmdb" }, false), {
+      source: "tmdb", category: "actor", key: "tmdb:531736"
+    });
+  });
+
+  it("CM-4 retains legacy source fallback for responses without source", async () => {
+    const { resolveCastMemberPerson } = await import("./peopleScreen");
+    assert.deepEqual(resolveCastMemberPerson({ id: 1 }, true), {
+      source: "anilist", category: "voice_actor", key: "anilist:1"
+    });
+    assert.deepEqual(resolveCastMemberPerson({ id: 1 }, false), {
+      source: "tmdb", category: "actor", key: "tmdb:1"
+    });
+  });
+
+  it("FC-1 leaves a TMDB actor unchanged when reading favorites", async () => {
+    const { planFavoriteCategoryCorrection } = await import("./peopleScreen");
+    assert.equal(planFavoriteCategoryCorrection({ source: "tmdb", category: "actor" }), null);
+  });
+
+  it("FC-2 promotes an AniList actor favorite to voice actor", async () => {
+    const { planFavoriteCategoryCorrection } = await import("./peopleScreen");
+    assert.equal(planFavoriteCategoryCorrection({ source: "anilist", category: "actor" }), "voice_actor");
+  });
+
+  it("FC-3 leaves existing voice-actor favorites unchanged for either source", async () => {
+    const { planFavoriteCategoryCorrection } = await import("./peopleScreen");
+    assert.equal(planFavoriteCategoryCorrection({ source: "tmdb", category: "voice_actor" }), null);
+    assert.equal(planFavoriteCategoryCorrection({ source: "anilist", category: "voice_actor" }), null);
+  });
+});
+
+describe("favorite person category sync", () => {
+  it("CS-1 selects only TMDB favorites in their original order", async () => {
+    const { selectFavoritesForCategorySync } = await import("./peopleScreen");
+    const A = person({ external_id: "A", source: "tmdb" });
+    const B = person({ external_id: "B", source: "anilist" });
+    const C = person({ external_id: "C", source: "tmdb" });
+    assert.deepEqual(selectFavoritesForCategorySync([A, B, C]), [A, C]);
+  });
+
+  it("CS-2 batches 45 TMDB IDs into 20, 20, 5 and excludes AniList", async () => {
+    const { createCategorySyncBatches } = await import("./peopleScreen");
+    const tmdb = Array.from({ length: 45 }, (_, index) => person({ external_id: String(index + 1) }));
+    const anilist = Array.from({ length: 3 }, (_, index) => person({ source: "anilist", external_id: String(index + 100) }));
+    const input = [...tmdb.slice(0, 10), ...anilist, ...tmdb.slice(10)];
+    const batches = createCategorySyncBatches(input);
+    assert.deepEqual(batches.map(batch => batch.length), [20, 20, 5]);
+    assert.deepEqual(batches.flat(), tmdb.map(item => item.external_id));
+    assert.deepEqual(createCategorySyncBatches([]), []);
+  });
+
+  it("CS-3 updates only changed TMDB categories and ignores null, AniList and unknown IDs", async () => {
+    const { planFavoriteCategorySync } = await import("./peopleScreen");
+    const favorites = [
+      { id: "1", source: "tmdb", external_id: "76933", category: "voice_actor" },
+      { id: "2", source: "tmdb", external_id: "24651", category: "voice_actor" },
+      { id: "3", source: "tmdb", external_id: "84620", category: "actor" },
+      { id: "4", source: "anilist", external_id: "102170", category: "voice_actor" }
+    ] as const;
+    const results = [
+      { external_id: "76933", category: "actor" },
+      { external_id: "24651", category: "voice_actor" },
+      { external_id: "84620", category: null },
+      { external_id: "102170", category: "actor" },
+      { external_id: "999", category: "actor" }
+    ] as const;
+    assert.deepEqual(planFavoriteCategorySync(favorites, results), [{ id: "1", category: "actor" }]);
+  });
+});

@@ -4,7 +4,9 @@ import { normalizeGenreNames } from "./genres.ts";
 import { hasTmdbAnimationGenre } from "./tmdbClassification.ts";
 import {
   koreaDateOnly,
-  releasedEpisodeFromAniList,
+  publishedStreamingEpisodes,
+  publishedDatedEpisodes,
+  type PublishedEpisode,
   releasedEpisodeFromDatedEpisodes,
   upcomingEpisodeFromAniList,
   upcomingEpisodeFromDatedEpisodes
@@ -231,6 +233,7 @@ function mapTmdbCast(cast: TmdbCastMember[] | undefined): CastMemberMeta[] {
     .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999))
     .slice(0, 12)
     .map((member, index) => ({
+      source: "tmdb",
       id: member.id as number,
       name: member.name?.trim() ?? "",
       original_name: member.original_name?.trim() || null,
@@ -495,7 +498,7 @@ interface AniListDetailResponse {
   errors?: { message?: string }[];
 }
 
-function mapAniListVoiceActors(media: AniListDetailResponse["data"] extends { Media?: infer Media } ? Media : never): CastMemberMeta[] {
+function mapAniListVoiceActors(media: NonNullable<NonNullable<AniListDetailResponse["data"]>["Media"]>): CastMemberMeta[] {
   const edges = media?.characters?.edges ?? [];
   const seen = new Set<number>();
   const cast: CastMemberMeta[] = [];
@@ -508,6 +511,7 @@ function mapAniListVoiceActors(media: AniListDetailResponse["data"] extends { Me
 
     seen.add(voiceActor.id);
     cast.push({
+      source: "anilist",
       id: voiceActor.id,
       name,
       original_name: voiceActor.name?.full?.trim() || null,
@@ -750,6 +754,8 @@ export async function fetchEpisodeAvailability(params: {
   releasedEpisodeNumber: number | null;
   upcomingEpisodeNumber: number | null;
   nextAirDate: string | null;
+  releasedEpisodes: PublishedEpisode[];
+  releasedEpisodesSource: string;
 }> {
   if (params.source === "anilist") {
     const endpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
@@ -758,6 +764,7 @@ export async function fetchEpisodeAvailability(params: {
         Media?: {
           status?: string | null;
           episodes?: number | null;
+          streamingEpisodes?: { title?: string | null; url?: string | null }[];
           nextAiringEpisode?: { episode: number; airingAt: number } | null;
         } | null;
       };
@@ -768,32 +775,33 @@ export async function fetchEpisodeAvailability(params: {
           status
           episodes
           nextAiringEpisode { episode airingAt }
+          streamingEpisodes { title url }
         }
       }`,
       variables: { id: Number.parseInt(params.externalId, 10) }
     });
     if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList airing query failed");
-    if (!payload.data?.Media) return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null };
-    const releasedEpisodeNumber = releasedEpisodeFromAniList(
-      payload.data.Media.status,
-      payload.data.Media.episodes,
-      payload.data.Media.nextAiringEpisode,
-      Math.floor(now.getTime() / 1000)
-    );
+    if (!payload.data?.Media) return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null, releasedEpisodes: [], releasedEpisodesSource: "anilist_streaming" };
+    const releasedEpisodes = publishedStreamingEpisodes(payload.data.Media.streamingEpisodes ?? []);
+    const releasedEpisodeNumber = releasedEpisodes.at(-1)?.episode_number ?? null;
     const upcoming = upcomingEpisodeFromAniList(payload.data.Media.nextAiringEpisode, Math.floor(now.getTime() / 1000));
     return {
       releasedEpisodeNumber,
+      releasedEpisodes,
+      releasedEpisodesSource: "anilist_streaming",
       upcomingEpisodeNumber: upcoming?.episodeNumber ?? null,
       nextAirDate: upcoming?.airDate ?? null
     };
   }
 
-  if (params.source === "kitsu") return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null };
+  if (params.source === "kitsu") return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null, releasedEpisodes: [], releasedEpisodesSource: "unavailable" };
   const episodes = await fetchEpisodesForSeason(params);
   const todayInKorea = koreaDateOnly(now);
   const upcoming = upcomingEpisodeFromDatedEpisodes(episodes, todayInKorea);
   return {
     releasedEpisodeNumber: releasedEpisodeFromDatedEpisodes(episodes, todayInKorea),
+    releasedEpisodes: publishedDatedEpisodes(episodes, todayInKorea),
+    releasedEpisodesSource: params.source,
     upcomingEpisodeNumber: upcoming?.episodeNumber ?? null,
     nextAirDate: upcoming?.airDate ?? null
   };

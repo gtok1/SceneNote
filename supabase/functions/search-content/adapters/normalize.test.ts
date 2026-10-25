@@ -309,3 +309,39 @@ it("CF-3 preserves all results for empty compact queries", () => {
   const rows = [result("A"), result("B")];
   assert.deepEqual(filterResultsByCompactQuery(rows, ""), rows);
 });
+
+const animeFollowUpInput = {
+  query: "감정스킬로", fallbackRan: true, sources: ["tmdb", "anilist"], remainingMs: 5000,
+  fallbackResults: [result("전생 귀족, 감정 스킬로 성공하다", null, { external_source: "tmdb", content_type: "anime" })],
+  primaryVariants: createSearchQueryVariants("감정스킬로")
+};
+it("AF-1 follows a fallback TMDB anime with its Korean title", () => {
+  assert.deepEqual(spacingContract.planAniListAnimeFollowUp(animeFollowUpInput), { reason: "run", variants: [
+    { query: "전생 귀족, 감정 스킬로 성공하다", matchMode: "compact-title", compactQuery: "감정스킬로" }
+  ] });
+});
+it("AF-2 requires a word-split fallback", () => {
+  assert.deepEqual(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, fallbackRan: false }), { variants: [], reason: "no_fallback" });
+});
+it("AF-3 requires AniList among primary sources", () => {
+  assert.deepEqual(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, sources: ["tmdb"] }), { variants: [], reason: "no_anilist" });
+});
+it("AF-4 rejects dramas, non-TMDB anime and non-Korean titles", () => {
+  for (const item of [result("드라마"), result("애니", null, { external_source: "anilist", content_type: "anime" }), result("Tensei Kizoku", null, { content_type: "anime" })]) {
+    assert.deepEqual(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, fallbackResults: [item] }), { variants: [], reason: "no_anime" });
+  }
+});
+it("AF-5 honors the 2500ms remaining-time boundary", () => {
+  assert.deepEqual(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, remainingMs: 2499 }), { variants: [], reason: "time" });
+  assert.equal(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, remainingMs: 2500 }).reason, "run");
+});
+it("AF-6 deduplicates compact titles and limits follow-up to two works", () => {
+  const plan = spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, fallbackResults: ["애니 A", "애니  A", "애니 B", "애니 C"].map(title => result(title, null, { content_type: "anime" })) });
+  assert.equal(plan.reason, "run");
+  assert.deepEqual(plan.variants.map(v => v.query), ["애니 A", "애니 B"]);
+});
+it("AF-7 skips titles already queried in primary variants", () => {
+  assert.deepEqual(spacingContract.planAniListAnimeFollowUp({ ...animeFollowUpInput, primaryVariants: [
+    ...animeFollowUpInput.primaryVariants, { query: "전생 귀족, 감정 스킬로 성공하다", matchMode: "direct", compactQuery: "감정스킬로" }
+  ] }), { variants: [], reason: "no_anime" });
+});

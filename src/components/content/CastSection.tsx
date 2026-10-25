@@ -3,11 +3,12 @@ import { DashboardPanel } from "@/components/profile/DashboardPanel";
 import { PersonAvatar } from "@/components/people/PersonAvatar";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { CastMember } from "@/types/content";
+import { resolveCastMemberPerson } from "@/utils/peopleScreen";
 interface CastSectionProps { cast: CastMember[]; isAnime: boolean; favoriteKeys: ReadonlySet<string>; pending: boolean; columns: 1 | 2; onAdd: (member: CastMember) => void; onOpen: (member: CastMember) => void }
 export function CastSection({ cast, isAnime, favoriteKeys, pending, columns, onAdd, onOpen }: CastSectionProps) {
   return <DashboardPanel title={isAnime ? "성우" : "출연 배우"} subtitle="누르면 좋아하는 인물에 등록돼요. 등록된 인물은 상세로 이동해요.">
     <View style={styles.grid}>{cast.slice(0, 8).map(member => {
-      const registered = favoriteKeys.has(`${isAnime ? "anilist" : "tmdb"}:${member.id}`);
+      const registered = favoriteKeys.has(resolveCastMemberPerson(member, isAnime).key);
       return <Pressable key={`${member.id}:${member.character ?? ""}`} accessibilityRole="button" accessibilityState={{ selected: registered }} disabled={pending} onPress={() => registered ? onOpen(member) : onAdd(member)} style={[styles.item, { width: columns === 2 ? "48.5%" : "100%", backgroundColor: registered ? colors.primarySoft : colors.surfaceMuted }, pending ? { opacity: 0.6 } : null]}>
         <PersonAvatar name={member.name} profileUrl={member.profile_url} size={40} />
         <View style={styles.copy}>

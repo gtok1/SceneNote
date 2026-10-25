@@ -15,6 +15,7 @@ import { ContentReviewEditor } from "@/components/content/ContentReviewEditor";
 import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import { WatchProviderList } from "@/components/content/WatchProviderList";
 import { createLaftelSearchLink } from "@/utils/watchProviderDisplay";
+import { resolveWatchProviderMediaType, supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
 import { normalizeWatchStatuses } from "@/constants/status";
 import { colors, spacing } from "@/constants/theme";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
@@ -33,6 +34,7 @@ import { useWatchProviders } from "@/hooks/useWatchProviders";
 import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
+import { resolveCastMemberPerson } from "@/utils/peopleScreen";
 import { createCrewSummary } from "@/utils/contentCrew";
 import { createAirDateLabel, createEpisodeCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
@@ -52,6 +54,7 @@ import { WatchCountCard } from "@/components/content/WatchCountCard";
 import { ContentOverviewCard } from "@/components/content/ContentOverviewCard";
 import { CastSection } from "@/components/content/CastSection";
 import { LibraryDangerZone } from "@/components/content/LibraryDangerZone";
+import { resolveWatchSeasonNumber } from "../../supabase/functions/_shared/watchProviderSeason";
 
 function parseSeasonParam(value: string | undefined): number | null {
   if (!value) return null;
@@ -117,21 +120,6 @@ export default function ContentDetailScreen() {
     params.externalId ?? dbContent?.source_id,
     (params.contentType ?? dbContent?.content_type) === "movie" ? "movie" : "tv"
   );
-  const watchProviderSource = params.source ?? dbDetailSource;
-  const watchProviderExternalId = params.externalId ?? dbContent?.source_id;
-  const watchProviderMediaType =
-    (externalDetail.data?.content.content_type ?? params.contentType ?? dbContent?.content_type) === "movie"
-      ? "movie"
-      : "tv";
-  const watchProviderTitle = externalDetail.data?.content.title_primary ?? params.title ?? dbContent?.title_primary;
-  const watchProviders = useWatchProviders({
-    source: watchProviderSource,
-    externalId: watchProviderExternalId,
-    mediaType: watchProviderMediaType,
-    title: watchProviderTitle,
-    originalTitle: externalDetail.data?.content.title_original ?? params.originalTitle ?? dbContent?.title_original ?? null,
-    airYear: externalDetail.data?.content.air_year ?? (params.airYear ? Number(params.airYear) : null) ?? dbContent?.air_year ?? null
-  });
   const resolvedContentId = externalDetail.data?.content.content_id ?? params.id;
   const requestedSeason = parseSeasonParam(params.season);
   const libraryMatch = resolveContentLibraryItem(library.data ?? [], {
@@ -140,6 +128,38 @@ export default function ContentDetailScreen() {
     seasonNumber: requestedSeason
   });
   const libraryItem = libraryMatch.kind === "none" ? undefined : libraryMatch.item;
+  const watchProviderSource = params.source ?? dbDetailSource;
+  const watchProviderExternalId = params.externalId ?? dbContent?.source_id;
+  const watchProviderHasSeasons = externalDetail.data?.content.has_seasons ??
+    (params.hasSeasons === "true" ? true : params.hasSeasons === "false" ? false : null);
+  const watchProviderMediaType = resolveWatchProviderMediaType({
+    source: watchProviderSource,
+    contentType: externalDetail.data?.content.content_type ?? params.contentType ?? dbContent?.content_type,
+    hasSeasons: watchProviderHasSeasons
+  });
+  const watchProviderTitle = externalDetail.data?.content.title_primary ?? params.title ?? dbContent?.title_primary;
+  const watchProviderOriginalTitle = externalDetail.data?.content.title_original ?? params.originalTitle ?? dbContent?.title_original ?? null;
+  const watchProviderSeason = watchProviderSource ? resolveWatchSeasonNumber({
+    source: watchProviderSource,
+    mediaType: watchProviderMediaType,
+    seasonNumber: requestedSeason ?? libraryItem?.season_number ?? null,
+    titles: [watchProviderOriginalTitle, watchProviderTitle]
+  }) : null;
+  const requireWatchProviderSeason = watchProviderSeason !== null || (watchProviderMediaType === "tv" &&
+    (watchProviderSource === "anilist" || (Boolean(params.libraryItemId) && !libraryItem)));
+  const watchProviders = useWatchProviders({
+    source: watchProviderSource,
+    externalId: watchProviderExternalId,
+    mediaType: watchProviderMediaType,
+    title: watchProviderTitle,
+    originalTitle: watchProviderOriginalTitle,
+    airYear: externalDetail.data?.content.air_year ?? (params.airYear ? Number(params.airYear) : null) ?? dbContent?.air_year ?? null,
+    airDate: externalDetail.data?.content.air_date ?? params.airDate ?? dbContent?.air_date ?? null,
+    seasonNumber: watchProviderSeason,
+    hasSeasons: watchProviderHasSeasons,
+    metadataLoading: externalDetail.isLoading,
+    seasonSelectionLoading: requestedSeason === null && library.isLoading && (!isExternal || Boolean(params.libraryItemId))
+  });
   const seasons = useSeasons(libraryItem?.content_id);
   const selectedStatuses = normalizeWatchStatuses(libraryItem?.statuses ?? (libraryItem ? [libraryItem.status] : []));
   const addToast = useAppUIStore((state) => state.addToast);
@@ -260,13 +280,13 @@ export default function ContentDetailScreen() {
 
   const addCastMember = (member: CastMember) => {
     if (!view) return;
-    const isVoiceActor = view.contentType === "anime";
+    const { source, category } = resolveCastMemberPerson(member, view.contentType === "anime");
 
     addFavoritePerson.mutate(
       {
-        source: isVoiceActor ? "anilist" : "tmdb",
+        source,
         external_id: String(member.id),
-        category: isVoiceActor ? "voice_actor" : "actor",
+        category,
         name: member.name,
         original_name: member.original_name,
         profile_url: member.profile_url,
@@ -281,14 +301,12 @@ export default function ContentDetailScreen() {
 
   const openCastMember = (member: CastMember) => {
     if (!view) return;
-    const isVoiceActor = view.contentType === "anime";
-    const source = isVoiceActor ? "anilist" : "tmdb";
-    const category = isVoiceActor ? "voice_actor" : "actor";
+    const { source, category, key } = resolveCastMemberPerson(member, view.contentType === "anime");
 
     router.push({
       pathname: "/people/[id]",
       params: {
-        id: `${source}:${member.id}`,
+        id: key,
         source,
         externalId: String(member.id),
         category
@@ -393,7 +411,10 @@ export default function ContentDetailScreen() {
           item={progressLibraryItem ?? libraryItem} onOpenEpisodes={openEpisodes} onSave={saveManualProgress} totalEpisodes={resolvedEpisodeCount} />
       </View> : null;
       case "watchCount": return libraryItem ? <WatchCountCard key={key} watchCount={libraryItem.watch_count} isCompleted={selectedStatuses.includes("completed")} isSaving={updateWatchCount.isPending} onSave={saveWatchCount} /> : null;
-      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} providers={watchProviders.data.providers} otherRegions={watchProviders.data.other_regions ?? []} scope={watchProviders.data.provider_scope ?? null} laftelSearchUrl={view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle) : null} />;
+      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading}
+        response={watchProviders.data} seasonNumber={watchProviderSeason} requireSeasonMatch={requireWatchProviderSeason}
+        onRetry={watchProviderExternalId && supportsWatchProviderLookup({ source: watchProviderSource, mediaType: watchProviderMediaType }) ? watchProviders.refetch : null}
+        laftelSearchUrl={view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle, watchProviderSeason) : null} />;
       case "review": return libraryItem ? <ContentReviewEditor key={key} contentId={libraryItem.content_id} contentAirDate={view.airDate} contentEndDate={view.endDate} contentAirYear={view.airYear} firstWatchedAt={libraryItem.first_watched_at} lastWatchedAt={libraryItem.last_watched_at} libraryItemId={libraryItem.library_item_id} onSaved={() => addToast("내 감상을 저장했어요.", "success")} /> : null;
       case "overview": return <ContentOverviewCard key={key} overview={view.overview} />;
       case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} pending={addFavoritePerson.isPending} columns={layout.mainWidth >= 520 ? 2 : 1} onAdd={addCastMember} onOpen={openCastMember} />;

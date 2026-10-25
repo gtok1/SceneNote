@@ -1,4 +1,4 @@
-import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, selectTasteFillItems, shouldPrefetchTasteFill, planTasteFill } from "../_shared/recommendationTasteFill.ts";
+import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, initializeTasteFillProgress, selectTasteFillItems, shouldPrefetchTasteFill, planTasteFill, recommendationScanBudget } from "../_shared/recommendationTasteFill.ts";
 import {
   hasKoreanDisplayTitle,
   scanRecommendationCatalog,
@@ -28,7 +28,7 @@ import {
   fetchRecommendationProviderPage
 } from "../_shared/recommendationProviders.ts";
 import { attachKrOttProviders } from "../_shared/watchProviders.ts";
-import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
+import { createPersistentRecommendationCache, type RecommendationCache } from "../_shared/recommendationCache.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, toAppliedDiscoveryFilters, type DiscoveryFilterInput } from "../_shared/discoveryFilters.ts";
 import {
   filterRecommendationsForUser,
@@ -39,7 +39,7 @@ import { mergeLibraryRowsByContent } from "./libraryRowMerge.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, createUserClient, requireUser } from "../_shared/supabase.ts";
 
-interface PersonalizedRecommendationRequest {
+interface PersonalizedRecommendationRequest extends DiscoveryFilterInput {
   action?: "recommend" | "record_impressions" | "record_feedback";
   limit?: number;
   media_type?: RecommendationMediaType;
@@ -215,7 +215,7 @@ Deno.serve(async (req: Request) => {
     // Cache only public provider metadata. Account filters and ranking are
     // applied below on every request; user records still use the RLS client.
     const cacheClient = createAdminClient();
-    const providerCache = createPersistentRecommendationCache({
+    const persistentProviderCache = createPersistentRecommendationCache({
       async read(key, source) {
         const { data, error } = await cacheClient.from("external_search_cache")
           .select("response_json,expires_at")
@@ -232,8 +232,20 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
       }
     }, Date.now, 800, requestDeadline);
+    let cacheReads = 0;
+    let cacheHits = 0;
+    const providerCache: RecommendationCache = {
+      async get<T>(key: string, source: Parameters<RecommendationCache["get"]>[1]): Promise<T | null> {
+        cacheReads += 1;
+        const value = await persistentProviderCache.get<T>(key, source);
+        if (value !== null) cacheHits += 1;
+        return value;
+      },
+      set: persistentProviderCache.set
+    };
+    const budget = recommendationScanBudget({ hasCursor: Boolean(validated.value.cursor) });
     let keywordLookupLimited = false;
-    const keywordLookupBudget = { remaining: 16 };
+    const keywordLookupBudget = { remaining: budget.keywordLookups };
     const scanStartedAt = Date.now();
     const discoveryFilters = validated.value.discoveryFilters;
     const needsKeywordLookup = (candidate: RecommendationCandidate) =>
@@ -270,10 +282,11 @@ Deno.serve(async (req: Request) => {
     const profile = buildPreferenceProfile(libraryItems, feedback);
     const setupDoneAt = Date.now();
     const queries = deriveTasteFillQueries({ profile, discoveryFilters, mediaType: validated.value.mediaType, userFilters: filters });
-    const pending = queries.filter(query => !cursorState.taste[query.key]?.done);
+    const taste = initializeTasteFillProgress(queries, cursorState.taste);
+    const pending = queries.filter(query => !taste[query.key].done);
     const asOfDate = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10);
     const prefetched = shouldPrefetchTasteFill({ remainingMs: requestDeadline - Date.now(), pendingQueryCount: pending.length });
-    const prefetchPromise = prefetched ? Promise.allSettled(pending.map(query => fetchTasteFillPage(query, cursorState.taste[query.key]?.page ?? 1, {
+    const prefetchPromise = prefetched ? Promise.allSettled(pending.map(query => fetchTasteFillPage(query, taste[query.key].page, {
       filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, asOfDate
     }))) : null;
     const catalogStartedAt = Date.now();
@@ -289,16 +302,15 @@ Deno.serve(async (req: Request) => {
       excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
       candidateFilter,
-      maxMonthsPerRequest: 3,
-      maxProviderRoundsPerRequest: 3,
+      maxMonthsPerRequest: budget.maxMonths,
+      maxProviderRoundsPerRequest: budget.maxRounds,
       // Fast cache hits may fill the batch in this call. Reserve the full
       // provider/keyword timeout before starting any further cold round.
-      canContinue: () => Date.now() - scanStartedAt < 1_000 && keywordLookupBudget.remaining > 0,
+      canContinue: () => Date.now() - scanStartedAt < budget.scanMs && keywordLookupBudget.remaining > 0,
       feedback
     });
 
     const catalogDoneAt = cursorState.catalogDone ? catalogStartedAt : Date.now();
-    const taste = { ...cursorState.taste };
     let fill: typeof result.items = [];
     const plan = planTasteFill({ itemCount: result.items.length, limit: validated.value.limit, remainingMs: requestDeadline - Date.now(), pendingQueryCount: pending.length, prefetched });
     if (plan.action !== "skip") {
@@ -344,11 +356,22 @@ Deno.serve(async (req: Request) => {
     const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
     const catalogDone = cursorState.catalogDone || !result.nextCursor || !result.hasMore;
     const nextCursor = encodeTasteFillCursor({ catalog: catalogDone ? null : result.nextCursor, catalogDone, taste });
+    let ottLookups = 0;
     const itemsWithProviders = await attachKrOttProviders(
       items,
-      (kind, tmdbId) => fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline }),
+      (kind, tmdbId) => {
+        ottLookups += 1;
+        return fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline });
+      },
       { deadlineMs: requestDeadline }
     );
+    let impressionsSaved = 0;
+    try {
+      impressionsSaved = await recordRecommendationImpressions(userClient, user.id, itemsWithProviders);
+    } catch {
+      // Recommendation delivery must not fail because best-effort history failed.
+      console.error("personalized-recommendations response impression write failed");
+    }
     const diagnostics = {
       setup_ms: setupDoneAt - requestStartedAt,
       catalog_ms: catalogDoneAt - catalogStartedAt,
@@ -357,7 +380,14 @@ Deno.serve(async (req: Request) => {
       catalog_items: result.items.length,
       taste_fill_items: fill.length,
       taste_fill: plan.reason,
-      keyword_lookups_left: keywordLookupBudget.remaining
+      keyword_lookups_left: keywordLookupBudget.remaining,
+      cache_reads: cacheReads,
+      cache_hits: cacheHits,
+      keyword_lookups_used: budget.keywordLookups - keywordLookupBudget.remaining,
+      ott_lookups: ottLookups,
+      library_rows: libraryItems.length,
+      impressions_saved: impressionsSaved,
+      scan_budget: budget.label
     };
     if (includeDebug) console.info("personalized-recommendations taste fill", { catalogItems: result.items.length, tasteFill: fill.length, queries: queries.length, diagnostics });
     return json({

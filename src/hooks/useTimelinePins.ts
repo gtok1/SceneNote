@@ -92,6 +92,7 @@ export function useCreatePin() {
         queryClient.invalidateQueries({ queryKey: queryKeys.pins.byEpisode(user.id, pin.episode_id) });
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.tags.all(user.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
     }
   });
 }
@@ -112,6 +113,7 @@ export function useUpdatePin(pinId: string | undefined) {
         queryClient.invalidateQueries({ queryKey: queryKeys.pins.byEpisode(user.id, pin.episode_id) });
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.tags.all(user.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
     }
   });
 }

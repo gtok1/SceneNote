@@ -66,7 +66,7 @@ export async function searchContent({
     "search-content",
     {
       ...(signal ? { signal } : {}),
-      timeout: 10_000,
+      timeout: 14_000,
       body: {
         query: normalizedQuery,
         media_type: mediaType,

@@ -4,6 +4,7 @@ import type { AdapterSearchParams, AdapterSearchResponse, SearchResult } from ".
 const TMDB_LANGUAGE = "ko-KR";
 const TMDB_ANIMATION_GENRE_ID = 16;
 const MAX_SEASON_RELATION_DEPTH = 8;
+export const MAX_EXPANDED_SEASON_NUMBER = 8;
 
 function createAniListMediaFields(relationDepth: number): string {
   return `
@@ -215,21 +216,25 @@ export async function searchAniList({
 
 export function expandDirectSeasonRelations(mediaItems: AniListMedia[]): AniListSearchMediaItem[] {
   const expanded: AniListSearchMediaItem[] = [];
-  const seenIds = new Set<number>();
+  const directIds = new Set<number>();
+  const resolvedIds = new Set<number>();
 
   for (const [index, base] of mediaItems.entries()) {
-    if (!seenIds.has(base.id)) {
+    if (!directIds.has(base.id) && !resolvedIds.has(base.id)) {
       expanded.push({ item: base, base, resolved: false });
-      seenIds.add(base.id);
+      directIds.add(base.id);
     }
 
     if (index >= 3 || hasEligiblePrequel(base)) continue;
 
-    const sequel = resolveSeasonFromRelations(base, 2);
-    if (!sequel || seenIds.has(sequel.id)) continue;
+    for (let seasonNumber = 2; seasonNumber <= MAX_EXPANDED_SEASON_NUMBER; seasonNumber += 1) {
+      const season = resolveSeasonFromRelations(base, seasonNumber);
+      if (!season) break;
+      if (resolvedIds.has(season.id)) continue;
 
-    expanded.push({ item: sequel, base, resolved: true, seasonNumber: 2 });
-    seenIds.add(sequel.id);
+      expanded.push({ item: season, base, resolved: true, seasonNumber });
+      resolvedIds.add(season.id);
+    }
   }
 
   return expanded;

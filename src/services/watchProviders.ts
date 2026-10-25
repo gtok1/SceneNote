@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SearchResult } from "@/types/content";
 import type { WatchProvidersByCategory, WatchProvidersResponse } from "@/types/watchProviders";
+import { supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
 
 export const emptyWatchProviders: WatchProvidersByCategory = {
   flatrate: [],
@@ -16,8 +17,10 @@ export async function getWatchProviders(params: {
   title: string | null | undefined;
   originalTitle?: string | null;
   airYear?: number | null;
+  airDate?: string | null;
+  seasonNumber?: number | null;
 }): Promise<WatchProvidersResponse> {
-  if (params.source !== "tmdb" && params.source !== "anilist") {
+  if (!supportsWatchProviderLookup(params)) {
     return createEmptyWatchProviders(params.externalId);
   }
 
@@ -29,6 +32,8 @@ export async function getWatchProviders(params: {
       title: params.title,
       original_title: params.originalTitle,
       air_year: params.airYear,
+      air_date: params.airDate,
+      season_number: params.seasonNumber,
       watch_region: "KR"
     }
   });

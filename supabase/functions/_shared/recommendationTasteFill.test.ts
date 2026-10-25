@@ -42,3 +42,58 @@ it("TF-2 plans full, empty, prefetched, fetched and time-limited fill in order",
     assert.deepEqual(firstBatchFill.planTasteFill({ itemCount, limit, remainingMs, pendingQueryCount, prefetched }), { action, reason });
   }
 });
+
+it("keeps unstarted taste queries resumable after the catalog is exhausted", () => {
+  const queries = deriveTasteFillQueries({ ...base, profile: profile() });
+  const taste = firstBatchFill.initializeTasteFillProgress(queries, {});
+  const cursor = encodeTasteFillCursor({ catalog: null, catalogDone: true, taste });
+
+  assert.ok(cursor);
+  const resumed = decodeTasteFillCursor(cursor);
+  assert.equal(resumed.catalogDone, true);
+  assert.deepEqual(resumed.taste, {
+    "drama-KR:KR:": { page: 1, done: false },
+    "anime:JP:": { page: 1, done: false }
+  });
+});
+
+it("preserves a failed taste query while another query completes", () => {
+  const queries = deriveTasteFillQueries({ ...base, profile: profile() });
+  const taste = firstBatchFill.initializeTasteFillProgress(queries, {
+    "drama-KR:KR:": { page: 2, done: true }
+  });
+  const cursor = encodeTasteFillCursor({ catalog: null, catalogDone: true, taste });
+
+  assert.ok(cursor);
+  assert.deepEqual(decodeTasteFillCursor(cursor).taste, {
+    "drama-KR:KR:": { page: 2, done: true },
+    "anime:JP:": { page: 1, done: false }
+  });
+});
+
+it("does not keep exhausted discovery alive through obsolete taste queries", () => {
+  const queries = deriveTasteFillQueries({ ...base, discoveryFilters: { mediaTypes: ["movie"] } });
+  const previous = {
+    "drama-KR:KR:": { page: 1, done: false },
+    "movie::romance|comedy": { page: 2, done: true }
+  };
+  const taste = firstBatchFill.initializeTasteFillProgress(queries, previous);
+
+  assert.equal(encodeTasteFillCursor({ catalog: null, catalogDone: true, taste }), null);
+  assert.equal(previous["drama-KR:KR:"].done, false);
+  assert.notEqual(taste["movie::romance|comedy"], previous["movie::romance|comedy"]);
+});
+
+it("SB-1 preserves the first-request recommendation scan budget", async () => {
+  const budget = await import("./recommendationTasteFill.ts");
+  assert.deepEqual(budget.recommendationScanBudget({ hasCursor: false }), {
+    scanMs: 1000, keywordLookups: 16, maxMonths: 3, maxRounds: 3, label: "first"
+  });
+});
+
+it("SB-2 expands the continuation recommendation scan budget", async () => {
+  const budget = await import("./recommendationTasteFill.ts");
+  assert.deepEqual(budget.recommendationScanBudget({ hasCursor: true }), {
+    scanMs: 4000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation"
+  });
+});

@@ -735,6 +735,8 @@ export async function getEpisodes(contentId: string, seasonId: string): Promise<
 }
 
 export interface EpisodeAvailability {
+  releasedEpisodes: { episode_number: number; title: string | null; air_date: string | null; url?: string | null }[];
+  releasedEpisodesSource: string | null;
   releasedEpisodeNumber: number | null;
   upcomingEpisodeNumber: number | null;
   nextAirDate: string | null;
@@ -742,6 +744,8 @@ export interface EpisodeAvailability {
 
 export async function getEpisodeAvailability(contentId: string, seasonId: string): Promise<EpisodeAvailability> {
   const { data, error } = await supabase.functions.invoke<{
+    released_episodes?: EpisodeAvailability["releasedEpisodes"];
+    released_episodes_source?: string;
     released_episode_number?: number | null;
     upcoming_episode_number?: number | null;
     next_air_date?: string | null;
@@ -754,6 +758,8 @@ export async function getEpisodeAvailability(contentId: string, seasonId: string
   const fallbackEpisodes = data?.episodes ?? [];
   const fallbackUpcoming = upcomingEpisodeFromKnownDates(fallbackEpisodes);
   return {
+    releasedEpisodes: data?.released_episodes ?? [],
+    releasedEpisodesSource: data?.released_episodes_source ?? null,
     releasedEpisodeNumber: typeof data?.released_episode_number === "number"
       ? data.released_episode_number
       : releasedEpisodeFromKnownDates(fallbackEpisodes),

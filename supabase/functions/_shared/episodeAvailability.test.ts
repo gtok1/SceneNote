@@ -57,3 +57,26 @@ describe("released episode availability", () => {
     assert.equal(upcomingEpisodeFromDatedEpisodes([{ episode_number: 12, air_date: "2026-09-23" }], "2026-09-24"), null);
   });
 });
+
+it("published stream rows preserve sparse episode numbers without filling gaps", async () => {
+  const { publishedStreamingEpisodes } = await import("./episodeAvailability");
+  const rows = publishedStreamingEpisodes([
+    { title: "Episode 3 - Third", url: "https://example.org/3" },
+    { title: "Episode 1 - First", url: "http://example.org/1" },
+    { title: "Episode 3 - Duplicate", url: "https://example.org/duplicate" },
+    { title: "Trailer", url: "https://example.org/trailer" },
+    { title: "Episode 4 - No link", url: null }
+  ]);
+  assert.deepEqual(rows.map(row => row.episode_number), [1, 3]);
+  assert.deepEqual(publishedStreamingEpisodes([]), []);
+});
+it("published episode rows exclude future and undated entries", async () => {
+  const { publishedDatedEpisodes } = await import("./episodeAvailability");
+  const rows = publishedDatedEpisodes([
+    { episode_number: 1, title: "One", air_date: "2026-10-01" },
+    { episode_number: 3, title: "Three", air_date: "2026-10-14" },
+    { episode_number: 4, title: "Four", air_date: "2026-10-21" },
+    { episode_number: 2, title: "Unknown", air_date: null }
+  ], "2026-10-16");
+  assert.deepEqual(rows.map(row => row.episode_number), [1, 3]);
+});

@@ -13,8 +13,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { colors, radius, spacing, typography } from "@/constants/theme";
+import { useEpisodeAvailability } from "@/hooks/useAiringAvailability";
 import { confirmDestructive } from "@/utils/confirmDestructive";
-import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, isEpisodeProgressCompletedMode } from "@/utils/contentDetailView";
+import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, resolveEpisodeChoiceMode, episodeChoiceInfoText, episodeChoiceSeasonNumber, isEpisodeProgressCompletedMode } from "@/utils/contentDetailView";
 import type { LibraryListItem } from "@/types/library";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
@@ -61,6 +62,18 @@ export function EpisodeProgressCard({
   }, [initialDraft]);
 
   const selectedSeason = seasons.find((season) => season.season_number === selectedSeasonNumber);
+  const availability = useEpisodeAvailability(
+    item.content_id, episodeChoiceSeasonNumber(selectedSeasonNumber, item.season_number, seasons),
+    !completedMode
+  );
+  const choiceMode = resolveEpisodeChoiceMode({
+    seasonEpisodeCount: selectedSeason?.episode_count,
+    totalEpisodes,
+    releasedEpisodes: availability.data?.releasedEpisodes ?? []
+  });
+  const choiceInfo = episodeChoiceInfoText({
+    mode: choiceMode, totalEpisodes, isFetching: availability.isFetching, isError: availability.isError
+  });
   const upperBound = selectedSeason?.episode_count
     ?? totalEpisodes
     ?? MAX_MANUAL_EPISODE_NUMBER;
@@ -168,6 +181,15 @@ export function EpisodeProgressCard({
         </View>
       ) : null}
 
+      {!completedMode && choiceInfo !== null ? (
+        <View style={styles.availabilityInfo}>
+          <Text accessibilityLiveRegion="polite" style={styles.availabilityText}>{choiceInfo}</Text>
+          {choiceMode.kind === "manual" && availability.isError ? <Pressable accessibilityRole="button" onPress={() => void availability.refetch()} style={styles.quickButton}>
+            <Text style={styles.availabilityText}>다시 시도</Text>
+          </Pressable> : null}
+        </View>
+      ) : null}
+
       {!completedMode && hasSeasonSelector ? (
         <View style={styles.section}>
           <Text style={styles.label}>시즌</Text>
@@ -202,7 +224,7 @@ export function EpisodeProgressCard({
 
       {!completedMode ? <View style={styles.section}>
         <Text style={styles.label}>여기까지 봤어요</Text>
-        {totalEpisodes !== null && upperBound <= 200 ? (
+        {choiceMode.kind !== "manual" ? (
           <View accessibilityRole="radiogroup" style={styles.episodeChoicesSection}>
             <Text style={styles.choiceHint}>회차 빠른 선택</Text>
             <HorizontalChoiceRail
@@ -211,9 +233,9 @@ export function EpisodeProgressCard({
               itemStride={60}
               nextLabel="다음 회차 보기"
               previousLabel="이전 회차 보기"
-              selectedIndex={Math.max(0, draftEpisodeNumber - 1)}
+              selectedIndex={Math.max(0, choiceMode.numbers.indexOf(draftEpisodeNumber))}
             >
-              {Array.from({ length: upperBound }, (_, index) => index + 1).map((episodeNumber) => {
+              {choiceMode.numbers.map((episodeNumber) => {
                 const selected = episodeNumber === draftEpisodeNumber;
                 return (
                   <Pressable
@@ -234,7 +256,7 @@ export function EpisodeProgressCard({
             </HorizontalChoiceRail>
           </View>
         ) : null}
-        <View style={styles.stepper}>
+        {choiceMode.kind === "manual" ? <View style={styles.stepper}>
           <Pressable
             accessibilityLabel="시청 회차 1 줄이기"
             accessibilityRole="button"
@@ -276,7 +298,7 @@ export function EpisodeProgressCard({
           >
             <Ionicons color={colors.text} name="add" size={20} />
           </Pressable>
-        </View>
+        </View> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View> : null}
 
@@ -457,6 +479,8 @@ function getErrorMessage(reason: string): string {
 }
 
 const styles = StyleSheet.create({
+  availabilityInfo: { gap: spacing.sm },
+  availabilityText: { ...typography.caption, color: colors.textMuted },
   completedHint: { ...typography.caption, color: colors.textMuted },
   card: {
     backgroundColor: colors.surface,

@@ -22,6 +22,44 @@ const baseFilters: LibraryFilterState = {
 };
 
 describe("library filters", () => {
+  for (const searchQuery of ["감정스킬로", "감정 스킬로", "감 정스킬로", "감정스", "  감정\t스킬로　 "]) {
+    it(`finds a spaced title with query ${JSON.stringify(searchQuery)}`, () => {
+      const anime = { ...item("appraisal", "anime", []), title_primary: "전생 귀족, 감정 스킬로 성공하다 3기" };
+      const result = filterLibraryItems([anime, item("unrelated", "anime", [])], { ...baseFilters, searchQuery });
+      assert.deepEqual(result.map((entry) => entry.content_id), ["appraisal"]);
+    });
+  }
+
+  it("ignores whitespace in original titles, crew and cast while preserving case-insensitive search", () => {
+    const entries = [
+      { ...item("original", "anime", []), title_original: "The First Slam Dunk" },
+      { ...item("crew", "movie", []), crew: [crewMember(1, "봉 준호")] },
+      { ...item("cast", "movie", []), cast: [{ id: 2, name: "김 태리", original_name: "Kim Tae Ri", character: "구 산영", profile_url: null, order: 0 }] }
+    ];
+    for (const [searchQuery, expected] of [
+      ["firstslamdunk", "original"], ["봉준호", "crew"], ["김태리", "cast"], ["KIMTAERI", "cast"], ["구산영", "cast"]
+    ] as const) {
+      assert.deepEqual(filterLibraryItems(entries, { ...baseFilters, searchQuery }).map((entry) => entry.content_id), [expected]);
+    }
+  });
+
+  it("keeps other filters active and treats whitespace-only queries as empty", () => {
+    const entries = [
+      { ...item("anime", "anime", ["판타지"]), title_primary: "감정 스킬로", rating: 8 },
+      { ...item("movie", "movie", ["판타지"]), title_primary: "감정 스킬로", rating: 8 }
+    ];
+    const filters = { ...baseFilters, contentTypeFilter: "anime" as const, genreFilter: "판타지", ratingFilter: 8, year: "2026" };
+    for (const searchQuery of ["감정스킬로", " \t　"]) {
+      assert.deepEqual(filterLibraryItems(entries, { ...filters, searchQuery }).map((entry) => entry.content_id), ["anime"]);
+    }
+    assert.deepEqual(filterLibraryItems(entries, { ...filters, searchQuery: "감정스킬로", year: "2025" }), []);
+  });
+
+  it("does not form compact matches across separate fields", () => {
+    const entry = { ...item("split", "movie", []), title_primary: "감정", title_original: "스킬로" };
+    assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, searchQuery: "감정스킬로" }), []);
+  });
+
   it("serializes multiple genres for URL-safe filter state", () => {
     const serialized = serializeGenreFilters(["드라마", "코미디", "드라마"]);
     assert.equal(serialized, "드라마|코미디");

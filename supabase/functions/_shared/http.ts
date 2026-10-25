@@ -18,11 +18,15 @@ export function jsonError(status: number, code: string, message: string, extra?:
   return json({ error: code, message, ...(extra ?? {}) }, status);
 }
 
-export async function parseJson<T>(
+export async function parseJson<T extends object>(
   req: Request
 ): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
   try {
-    return { ok: true, value: (await req.json()) as T };
+    const value: unknown = await req.json();
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return { ok: false, message: "JSON body must be an object" };
+    }
+    return { ok: true, value: value as T };
   } catch {
     return { ok: false, message: "Invalid JSON body" };
   }

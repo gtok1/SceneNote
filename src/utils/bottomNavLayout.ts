@@ -1,5 +1,19 @@
 export const BOTTOM_NAV_MAX_WIDTH = 640;
 
+export type NavPillTone = "active" | "hover" | "none";
+
+export function getNavItemVisual(input: {
+  active: boolean;
+  hovered?: boolean | undefined;
+  pressed?: boolean | undefined;
+  keyboardFocused: boolean;
+}): { pill: NavPillTone; focusRing: boolean } {
+  return {
+    pill: input.active ? "active" : input.hovered || input.pressed ? "hover" : "none",
+    focusRing: input.keyboardFocused
+  };
+}
+
 export function getBottomNavMetrics(windowWidth: number, itemCount: number): { labelFontSize: 10 | 11; iconPillWidth: number } {
   const width = Number.isFinite(windowWidth) && windowWidth > 0 ? windowWidth : 375;
   const count = Math.max(1, Math.floor(itemCount));

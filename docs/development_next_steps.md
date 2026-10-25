@@ -1,5 +1,89 @@
 # SceneNote Development Next Steps
 
+## 라이브러리 성우·출연배우 2명 표시 (2026-10-25)
+
+- 검색 추천과 같은 표시를 요청받아 라이브러리 `ContentCard`·`ContentGalleryCard`의 확장 기능 플래그에 묶인 출연진 표시를 공용 `ContentCast`로 교체했다. 검색의 `RecommendationCast`도 이를 재사용한다. 기존 이름 정렬·중복 제거·한글 변환·애니메이션 영화 성우 판정을 공유한다. 출연진이 있으면 저장값을 사용하고 없으면 빠른 보기와 같은 상세 Query 캐시(10분)를 사용한다. 영화/TV 조회 구분, 로딩·실패·정보 없음 안내를 유지하며 수동 작품은 외부 조회하지 않는다. 사용처가 사라진 `useLibraryItemCast`는 제거했다.
+- 전체 `npm test` **1349/1349**, typecheck·lint·diff 검사 통과. 공용 순수 함수의 기존 테스트로 출연 순서·2명 제한·빈 이름/중복 제거·한글 변환·영화 조회·성우 분류를 검증했다. 서버·DB·사용자 감상 기록 변경 및 배포 없음.
+- 실제 로그인한 8081 웹에서 갤러리·자세히 보기 모두 단다단 3기 성우 ‘하나에 나츠키 · 와카야마 시온’, 100일의 거짓말 배우 ‘김유정 · 진영’, 영화 개인적인 택시 배우 2명 표시를 확인했다. 갤러리 375/768/1440 및 자세히 375에서 이름 표시와 가로 넘침 없음을 확인했다. 보기·viewport 복원, 증빙 `/tmp/scenenote-library-cast-{desktop,mobile}.png`. iOS/Android 실기기·큰 글자, 수동 작품·강제 조회 실패 상태는 실제 환경에서 미검증이다. 외부 API 조회를 기존 상세 경로로 실행해 확인했으며 인증 정보를 추출하지 않았다.
+
+## 검색 추천 카드 성우·출연배우 표시 (2026-10-24)
+
+- 영화 누락 정정: 표시 대상을 모든 콘텐츠 유형으로 넓히고, 영화 조회를 TV 고정에서 `movie`로 수정했다. 갤러리·목록 모두 영화 출연진 최대 2명을 표시하며 애니메이션 영화는 정규화한 추천/상세 장르로 성우를 구분한다. cast가 없을 때도 영역을 유지하고 정보 없음 안내를 표시한다. 배우 이름·추정 데이터를 추가하지 않는다.
+- 검증: 기준선 1334/1334 → 전체 1336/1336, typecheck·lint 통과. 기존 movie 제외 기대값을 새 요구인 출연배우 표시로 정정했고 영화/TV 조회 경로·애니메이션 영화 장르별 회귀 2개를 추가했다. 실제 로그인 8081 웹 갤러리와 목록에서 ‘두잉 라이프’, ‘인생, 사랑하다’, ‘텐징’ 출연진 2명을 확인했다. 375/768/1440px 문서 가로 넘침 없음. 증빙 `/tmp/scenenote-movie-cast-desktop.png`. 애니메이션 영화 라벨은 자동 테스트로 검증했고 실작품 수동 사례는 이번 추천 묶음에 없어 미검증이다. 네이티브 실기기 검증 환경 부재는 동일하며 서버·DB·사용자 감상 기록 변경과 배포 없음.
+
+
+- 후속 요청: 검색 기본 보기를 갤러리로 바꾸고 기존 저장 버전 0도 한 번 갤러리로 이관한다(이후 선택은 저장). 성우 이름은 공용 `formatPersonName`을 재사용해 API 로마자 읽기의 한글 표기를 우선 표시하며 원문만 있거나 변환 불가면 원문을 보존한다. 구 서버 cast에 source가 없는 경우 작품 source를 적용한다. 이름 하드코딩·추가 API 요청·서버 변경 없음.
+- 후속 검증: 이름 회귀 4개(한글 변환/기존 한글 우선/변환 불가/구 source 누락), 전체 1334/1334·typecheck·lint 통과. 실제 로그인 웹에서 첫 진입 갤러리 선택과 ‘카쿠마 아이 · 미키 시니치로’, ‘코시미즈 아미 · 스자키 아야’ 표시를 확인했다(자동 음역은 공식 한글 표기와 다를 수 있음). 375px 문서 넘침 없음. 증빙 `/tmp/scenenote-cast-korean-gallery.png`. 네이티브 검증 환경 부재는 동일하다.
+
+
+- 사용자 요청으로 추천 갤러리·목록 제목 아래에 애니 성우, 드라마 출연배우를 API 출연 순서로 최대 2명 표시한다. 공통 `RecommendationCast`가 빠른 보기의 상세 조회·캐시를 재사용하고, 순수 함수가 빈 이름·인물 중복을 제거한다. 조회가 늦거나 실패해도 추천·추가·완료 동작은 대기시키지 않는다. API가 1명만 주면 1명만 표시하며 임의 이름을 채우지 않는다.
+- 기준선 테스트 1326/1326 → 변경 후 1330/1330, typecheck·lint 통과. 새 테스트는 유형별 라벨, API 출연 순서/원본 보존, 빈 이름·중복 성우, 공급자 identity·정보 부족을 검증한다. 실제 로그인 웹 8081에서 갤러리·목록의 성우 2명과 드라마 ‘당신이 잠든 사이에’의 ‘수지 · 이종석’을 확인했다. 375/768/1440px 문서 가로 넘침 없음. 첫 추천 조회의 운영 546 오류는 재시도 후 정상 응답했으며 이 작업에서 서버 수정·배포는 하지 않았다. 증빙 `/tmp/scenenote-recommendation-cast-desktop.png`, `/tmp/scenenote-recommendation-cast-mobile.png`.
+- iOS/Android 실기기·큰 글자·스크린리더는 실행 환경 부재로 미검증이다(`simctl` 없음). 사용자 감상 기록은 변경하지 않았다. 인물 이름은 기존 상세 API의 이름을 사용하므로 공급자에 따라 일본어 원문일 수 있다.
+
+## 템빨 넷플릭스 누락 정정 (2026-10-20)
+
+- 사용자가 실제 넷플릭스 제공 작품의 누락을 신고했다. AniList 212888의 선공개일(2026-09-27)과 TMDB 324502 시즌 1의 TV 방영일(2026-10-02)이 달을 넘기면서 직전 같은 월 판정이 실패했다. 정확한 시즌 1 API에는 Netflix·Watcha·TVING이 있으며 [넷플릭스 공식 페이지](https://www.netflix.com/kr/title/82948047)도 에피소드 3개를 표시했다. 운영 v4는 `lookup_version` 없는 `scope:content`를 반환해 앱에서 차단되는 별도 배포 불일치도 실제 로그인 웹 응답으로 확인했다. 증빙 `/tmp/scenenote-temppal-production-before.json`.
+- [54 §16](54_anime_sequel_watch_providers_fixes_spec.md#16-2026-10-20-후속-정정--템빨-누락과-구서버-캐시)에 따라 같은 시즌 번호·연도를 유지하면서 날짜 차이 7일 이내로 보정한다. 다른 기수·인접 연도·합쳐진 1기 추정은 금지한다. 구계약 캐시는 1시간을 기다리지 않고 다음 포커스당 1회 재조회하고, 정상 v2 미확인 캐시는 TTL을 유지한다. 구응답 때문에 조회하지 못하는 안내를 실제 데이터 미확인과 구별했다.
+- 회귀 검증: 서버 새 회귀 수정 전 83/88 → 수정 후 88/88. 최종 전체 **1326/1326**, typecheck·lint·웹 export(종료 0, Expo 종료 강제 정리 안내 포함)·Deno get-watch-providers 검사·diff 검사 통과. 로그 `/tmp/scenenote-temppal-final-{tests,typecheck,lint,build}.log`. 실제 TMDB와 수정 helper 재검증에서 `/tv/324502/season/1/watch/providers`만 조회해 시즌 1 제공처를 얻었다(`/tmp/scenenote-overgeared-season-fixed.jsonl`).
+- 실제 핸들러 fixture 23/23 통과(템빨 5일 차이 성공·8일 차이 거절·앞선 3기 오매칭 차단 포함). 인증과 외부 fetch는 모사이며 운영 앱과 분리한 검사다. 결과 `/tmp/scenenote-watch-providers-handler-validation.json`. 단일 함수 격리 배포 후보 `/tmp/scenenote-ott-deploy-candidate`와 SHA manifest·롤백 안내를 준비했다(`/tmp/scenenote-ott-deployment-readiness.md`).
+- 사용자 단독 함수 배포 승인 후 `get-watch-providers`만 격리 후보에서 배포했다. 직전 CLI 연결 프로젝트·앱 대상 일치와 운영 v4, 후보 11개 파일의 SHA 일치를 재확인했다. 배포 후 **v5 ACTIVE·verify_jwt=true**, 다른 13개 함수의 버전·상태·설정 불변, 무인증 POST 401을 확인했다. 내려받은 v5의 정규화 실행 코드 SHA는 승인 후보와 같다. DB·secret·사용자 기록 변경 없음. 운영 백업 `/tmp/scenenote-ott-production-backup`, 배포 로그 `/tmp/scenenote-ott-deploy.log`, 검증 `/tmp/scenenote-ott-deployment-verification.json`.
+- 배포 후 실제 로그인 웹: 템빨은 `lookup_version:2`, 요청 시즌 1·`scope:season`·TMDB 시즌 1로 **넷플릭스·티빙·왓챠**가 표시됐다. 데스크톱 1440px·모바일 375px에서 확인했고 모바일 문서 폭 375로 가로 넘침이 없다. 사용자가 기존에 열어둔 탭에도 세 제공처가 표시되는 것을 확인했다. 전생 귀족 3기는 요청 시즌 3·`scope:null`·빈 제공처로 확인돼 이전 시즌 넷플릭스가 섞이지 않는다. 임시 진단 코드를 제거하고 QA 탭·viewport를 정리했다. 증빙 `/tmp/scenenote-temppal-deployed-{desktop,mobile}.png`, `/tmp/scenenote-temppal-deployed-response.json`, `/tmp/scenenote-season3-deployed-response.json`.
+- iOS/Android 실기기·큰 글자·스크린리더는 실행 환경이 없어 미검증이다. 서버 응답의 운영 확인과 네이티브 화면 검증은 구분한다. 추천 배지 변경의 `personalized-recommendations` 배포는 이번 승인 범위에 포함되지 않아 남아 있다.
+
+## 작품의 선택 시즌 기준 OTT 정정 (2026-10-20)
+
+- 사용자 신고 작품은 AniList 185756의 3기다. 기존 시리즈 전체 제공처를 3기 화면에 보여주던 동작을 [54의 후속 계약 §15](54_anime_sequel_watch_providers_fixes_spec.md#15-2026-10-20-후속-정정--선택한-시즌의-제공처만-표시)으로 대체했다. AniList는 원제 기수·방영일로 TMDB 시즌을 검증하고, TMDB 명시 시즌은 시즌 제공처 API만 조회한다. 시즌이 없거나 모호하면 미확인이며 시리즈 제공처로 채우지 않는다. 정확한 시즌의 200 응답은 국내 정보가 비어도 해당 시즌의 해외 정보만 보존하고, 404와 구별한다.
+- 앱은 버전 2·선택 시즌 일치가 확인된 응답만 표시하고 구서버의 시리즈 응답도 차단한다. “시즌 3 기준”·미확인 안내·재시도를 추가했으며, 캐시는 시즌·제목·방영일별로 분리한다. 라프텔 검색에도 기수를 넣는다. 추천의 시리즈 ID만으로 붙던 AniList/명시 시즌 OTT 배지는 보류하며 후보 개수·순서·필터는 유지한다.
+- 실데이터: TMDB 237150은 시즌 1(2024-04-07, 29화)만 반환해 새 helper는 3기 제공처를 조회하지 않고 미확인으로 처리했다. 대조 작품 전슬 4기는 `/tv/82684/season/4/watch/providers`에서 KR 왓챠·티빙을 반환했다. [넷플릭스 공식 페이지](https://www.netflix.com/kr/title/81769856)의 시즌 2개 표시는 3기 제공 근거가 아니다. 라프텔 공식 검색의 3기(47318)에 1화 재생하기 링크가 있음을 확인했지만, 이 수동 확인을 앱의 자동 제공처 데이터로 하드코딩하지 않았다. 로그 `/tmp/scenenote-ott-probe.jsonl`, `/tmp/scenenote-ott-live-check.jsonl`.
+- 실제 로그인 웹 8081: 신고된 상세의 375·1440px에서 시리즈의 넷플릭스 등 목록이 사라지고 시즌 3 미확인 안내가 표시됨을 확인했다. 문서 폭은 화면 폭과 같고 재시도 버튼은 높이 44px다. 다시 확인하기 뒤에도 잘못된 제공처가 없으며 라프텔에서 3기 찾아보기는 해당 검색 결과를 연다. 증빙 `/tmp/scenenote-season-ott-{desktop,mobile}.png`. 기존 서버를 재사용하고 검증용 탭·viewport 설정을 정리했으며 감상 기록을 변경하지 않았다.
+- 실제 핸들러를 인증 모사·외부 fetch fixture로 실행한 21/21 사례가 통과했다(선택 시즌 URL, 합쳐진 시즌 차단, 같은 연도 후속기, 200 해외/빈 응답과 404 구별, 입력 400·공급자 오류 503). 이 검사는 운영 인증·배포 검증이 아니다. 결과 `/tmp/scenenote-watch-providers-handler-validation.json`.
+- 최종 자동 검사: `npm test` **1316/1316**, typecheck·lint·웹 build(export)·Edge 16개 Deno check·diff 공백 검사 통과. 로그 `/tmp/scenenote-season-ott-{tests,typecheck,lint,build}.log`, `/tmp/scenenote-watch-season-deno.log`. 웹 export는 종료 코드 0이며 export 뒤 Expo의 종료 강제 정리 안내가 남았다. 리뷰 후 AniList 극장판의 TV 오입력·구서버 캐시 차단, 네이티브 스택의 포커스 복귀 시 TTL 재검사도 보완했다. 네이티브 포커스 동작은 코드/정적 검사까지이며 실기기 실행 증거와 구분한다.
+- 운영 배포·DB·secret 변경은 하지 않았다. 클라이언트는 구응답의 오표시를 막지만 새 시즌 조회에는 `get-watch-providers`, 추천 배지에는 `personalized-recommendations` 재배포가 필요하다. iOS/Android 실기기·큰 글자·스크린리더와 새 서버 배포 후 실제 앱의 성공 제공처 표시는 실행 환경/배포 범위 밖이어서 미검증이다. 제목에 기수 표식이 없는 AniList 후속작, TMDB가 여러 기수를 한 시즌으로 합친 작품, AniList 극장판은 자동 제공처가 미확인으로 남을 수 있다.
+
+## 모바일·웹 사용성 중심 코드 점검 (2026-10-20)
+
+- 검색 입력에 44pt 이상 지우기 버튼·포커스 유지를 추가하고 자동 대문자/자동 교정을 끈다. 검색 목록은 키보드가 열린 상태에서 행동을 누를 수 있게 하고 스크롤 시 키보드를 닫는다. 검색 추가 실패·라이브러리 진행 저장/상태 제안·핀 저장/삭제 오류를 기존 한국어 토스트 흐름으로 맞췄다. 핀 삭제는 공통 확인, 저장 중 태그 변경 차단을 적용했다. 토스트 행동/닫기 버튼은 최소 44×44pt로 보완했다. 라이브러리 목록·갤러리의 `anime` 등 내부 코드는 기존 분류 규칙의 한국어 표시명을 사용한다.
+- 기록 변경 뒤 오래된 값이 남던 경로를 보완했다. 라이브러리 추가/상태 변경/삭제와 핀 생성/수정은 프로필 통계도 무효화한다. 인물 한글 이름을 자동으로 되돌릴 때 기존 자동 보정 캐시도 stale 처리한다. 초기 인증 조회가 늦거나 최신 인증 이벤트와 순서가 뒤바뀌어 세션을 잃는 문제를 고치고 계정 변경/자동 로그아웃 때 Query 캐시를 비운다. 현재 데이터 흐름은 [08](08_frontend_architecture.md)에 반영했다.
+- 영화 핀의 제목 보강이 TV 상세를 조회하던 문제를 고치고 작품 핀을 시즌→회차→시간순으로 정렬한다. 추천 취향 보충은 아직 조회하지 못한 질의도 커서에 남겨 시간 제한/일부 실패를 목록 끝으로 오인하지 않게 했다. Edge JSON 본문·검색 인자 검증, 에피소드 조회의 관계 응답 정규화와 기존 Deno 타입 오류도 수정했다.
+- 자동 검증: 시작 전체 테스트 1253/1254, 최종 `npm test` **1284/1284**, `npm run typecheck`, `npm run lint`(오류·경고 0), `npm run build`(웹 export), Edge Function **16개 Deno check**, `git diff --check` 통과. 기존 실패 1건은 docs/33의 “최근 공개작” 계약을 여전히 “최신”으로 검사하던 기대 문구를 정정했으며 추천 순서/모드 검증은 유지한다. 새 회귀는 인증 순서 7개·JSON 검증 12개·취향 보충 커서 3개·핀 제목 보강 5개·에피소드 관계 응답 3개다. 로그는 `/tmp/scenenote-audit-final2-{test,typecheck,lint,build}.log`, `/tmp/scenenote-audit-deno-fixed.log`. 인물 자동 이름 복원은 실제 mutation 콜백과 격리 QueryClient/QueryObserver로 재조회 1→2회도 확인했다.
+- 실제 로그인 Chrome 웹(8081): 검색 320/375/768/1440px에서 가로 넘침 없음, 지우기 버튼 44×48px·입력 포커스 유지, 320px 필터 시트의 적용/취소 노출·취소 후 포커스 복귀를 확인했다. 375px 라이브러리의 2열 갤러리·6개 탭·한국어 유형, 에피소드→핀 작성 맥락을 확인했다. 잘못된 시간 `12:3x`는 원문과 오류를 유지하고 저장을 막았으며, 입력을 비우고 취소해 기록은 저장하지 않았다. 격리된 실제 ToastViewport의 320/375px 행동·닫기·44pt 영역도 실행 확인했다(증빙 `/tmp/scenenote-audit-ui/toast-375.png`). 임시 QA 파일/탭은 제거했다. 오래된 번들을 내주던 기존 Expo 프로세스만 확인해 같은 8081 포트로 재기동했다.
+- 미검증: iOS/Android 실기기·가상 키보드·VoiceOver/TalkBack·큰 글자, 실제 계정의 저장/삭제 성공 및 강제 네트워크 실패, 운영 Edge 응답. `simctl` 실행 도구/연결 기기가 없어 네이티브 검증은 남긴다. DB·secret·운영 배포와 감상/핀 기록 변경은 하지 않았다. 서버 수정의 운영 반영에는 해당 Edge Function 재배포가 필요하다.
+- 남은 설계 충돌: `enrichLibraryMetadata`의 진행 분자는 전체 시즌 누계지만 분모는 선택 시즌 화수로 덮어써 `13/10`처럼 보일 수 있다(예: 1기 10화 + 2기 3화 시청, 2기 총 10화). docs/17의 작품 전체 진행 유지와 docs/48의 시즌 범위 유보를 먼저 정리해야 한다. 시즌 기준/작품 전체 기준을 임의 변경하거나 상한으로 숨기지 않았으며, 다음 작업에서 진행 표시 계약을 확정해야 한다.
+
+## 라이브러리 공백 무시 검색 (2026-10-16)
+
+- 사용자 캡처의 `감정스킬로`가 `감정 스킬로`에 일치하지 않던 원인은 `filterLibraryItems`의 공백 포함 문자열 비교였다. 기존 검색에 각 필드·검색어의 공백 제거 비교를 추가했다. 제목·원제·제작진·출연진에 적용하고 다른 필터·정렬은 유지한다. 목록·갤러리와 웹·네이티브는 같은 순수 필터를 사용한다.
+- 관련 테스트 16/16 통과. 새 사례 8개 중 6개가 수정 전 실패했고 수정 후 모두 통과했다(붙여 쓰기·임의 띄어쓰기·짧은 검색어·탭/전각 공백·원제/인물·필터 유지·필드 경계). typecheck 통과, lint 오류 0/기존 `batchedQuery.test.ts` 경고 1, diff 검사 통과.
+- 실제 로그인 웹·iOS·Android 화면 수동 검증은 이번 작업에서 실행하지 않았다(순수 필터 실행으로 검증). 서버·DB 변경 및 배포 없음. 기존 다른 작업의 변경은 보존했다.
+
+## 회차 선택을 실제 공개 에피소드 목록으로 전환 (2026-10-16)
+
+- 사용자 후속 요청으로 앞선 nextAiringEpisode 기반 공개 회차 추정을 교체했다. 회차 선택은 fetch-episodes availability_only의 `released_episodes` 행만 사용한다. AniList는 streamingEpisodes의 제목에 명시된 번호와 HTTP(S) 링크, TMDB/TVmaze는 실제 에피소드 목록의 공개일이 지난 행을 쓴다. 다음 방영 정보는 예정일 안내에만 남기며 공개 회차 계산에는 사용하지 않는다. 빈 목록에 총 화수나 추정 수치를 넣지 않는다.
+- 선택 번호는 API 목록 그대로이며 [1,3]이면 2를 생성하지 않는다. 이전 전체 화수/공개 최댓값 기반 선택 수 테스트는 새 요구에 맞춰 명시 번호 테스트로 변경했다. 기존 테스트 기준선 1233/1234에서 최종 1235/1236, 기존 추천 엔진 실패 1건 유지. 스트리밍 목록 정규화·날짜 필터 새 회귀 2개는 구현 전 실패, 후 통과. typecheck 통과, lint 오류 0/기존 batchedQuery.test.ts 경고 1, Edge 전체 번들 문법·diff 검사 통과.
+- 실제 API 검증: AniList 185756은 streamingEpisodes=[] 반환. 운영 상세도 source=anilist_streaming, episodes=[]를 받아 목록 부재 안내와 직접 입력을 표시한다. 이 작품의 라프텔 공개 3화를 API로 확보한 것은 아니며 임의 대체하지 않았다. AniList 16498의 실제 streamingEpisodes 25행은 25개 번호 모두 변환됨 확인(HTTP 링크 포함). 로그 `/tmp/scenenote-released-list-{before,red,after,typecheck,lint}.log`, 표본 `/tmp/scenenote-published-list-sample.json`, 화면 `/tmp/scenenote-published-list-empty.png`.
+- 사용자 배포 요청이 이어지는 범위에서 fetch-episodes만 배포했다. 최종 v10 ACTIVE, verify_jwt=true 확인. DB·사용자 기록 변경 없음. 임시 로컬 응답 진단 코드 제거. iOS/Android 실기기·API 목록 제공 작품의 네이티브 선택 동작은 환경 부재로 미검증. 실제 OTT별 제공 회차와 AniList 스트리밍 링크 목록의 지역 차이는 남는다.
+
+## 총 화수 미정 작품의 회차 선택 복구 (2026-10-16)
+
+- 사용자 신고는 0이라는 시청 값이 아니라 1·2·3화 빠른 선택 영역 누락이었다. `EpisodeProgressCard`가 총 화수 null이면 선택 영역을 숨기고 공개 회차를 조회하지 않았다. AniList 3기는 별도 콘텐츠인데 등록 표시 기수 3과 실제 시즌 행 1이 달라 조회가 연결되지 않는 문제도 확인했다.
+- 기존 공개 회차 훅을 `useEpisodeAvailability`로 재사용하도록 분리하고, 실제 시즌을 골라 조회한 공개 회차로 빠른 선택을 표시한다. 총 화수 미정 표시·기존 입력 상한·진행 분모·완료 판정·개인 시청 기록은 유지한다. 조회 중/없음/실패 안내와 재시도 추가.
+- 자동: 시작 1231/1232, 최종 1233/1234 통과, 기존 추천 엔진 실패 1건만 유지. 공개 회차 선택 수 회귀는 구현 전 실패·후 통과, 독립 AniList 후속기의 실제 시즌 선택 회귀 추가. typecheck·lint·diff 검사 통과. 로그 `/tmp/scenenote-airing-choices-{before,red,after,typecheck,lint}.log`.
+- 실제 8081 작품 상세: 운영 API가 공개 3화를 반환하고 현재 3화까지 공개 안내 및 1·2·3화 radio 표시. 3화 선택 시 입력 3 반영을 확인한 뒤 입력을 0으로 복원했으며 저장하지 않았다. 375·768 폭에서 문서 폭이 화면 폭과 같음 확인, 1440 화면 증빙 `/tmp/scenenote-airing-choices-fixed.png`. viewport 복원. 임시 진단 로그 제거. 서버·DB 배포 불필요(기존 API 정상). iOS/Android 실기기·큰 글자는 실행 환경 부재로 미검증.
+
+## 검색 종료 문구 정렬 (2026-10-16)
+
+- 검색 결과 끝의 `모든 결과를 확인했습니다.`만 Text로 직접 렌더링돼 FlashList의 확장 여백 끝에 붙던 문제를 수정했다. `app/search.tsx`에서 기존 `loadMoreFooter`로 감싸 중앙 정렬·64pt 최소 높이·상하 여백을 재사용하고, 문구는 typography.caption·textMuted·줄바꿈 가능한 스타일로 표시한다. 추천 스켈레톤·공용 꼬리말 스타일·검색 동작은 변경하지 않았다.
+- 웹 8081 실제 검색에서 1440·768·375 폭의 중앙 정렬 확인. 375·768 문서 폭은 각각 화면 폭과 같고 가로 넘침 없음, 중앙 오차 0px. 768 갤러리에서도 중앙 정렬과 꼬리말 높이 64 확인. 보기 모드와 viewport 복원. 증빙 `/tmp/scenenote-search-footer-fixed.png`.
+- npm test 1231/1232(기존 추천 엔진 실패 1개), typecheck·lint 통과. 새 단위 테스트는 스타일 감싸기 변경이라 추가하지 않았다. iOS/Android 실기기와 큰 글자 검증은 실행 환경 부재로 미검증이다. 서버 배포·DB 변경 없음.
+
+## 애니 검색 전체 시즌 운영 배포 (2026-10-16)
+
+- 사용자 배포 요청에 따라 앱 설정과 CLI 연결 프로젝트 일치를 확인하고 `search-content`만 `--use-api`로 배포했다. 운영 **v28 ACTIVE, verify_jwt=true** 확인. docs/62의 2~8기 펼치기 및 AniList 후속 조회와 커밋된 docs/56의 짧은 검색어 보정이 함께 반영됐다. 다른 함수·DB·secret 변경 없음.
+- 구현 검사: `npm test` 1231/1232(기존 추천 엔진 실패 1개), typecheck·lint·esbuild·diff 검사 통과, TMDB 골든 전후 23/23. AS-1~AS-3·AF-1~AF-7은 구현 전 전부 실패, 구현 후 전부 통과. 기존 1·2단계와 공용 조회 헬퍼 및 기존 테스트 보존 확인.
+- 실제 8081 웹, 기존 로그인 세션 사용: `감정스킬로`에서 AniList 1기·2기·3기 세 카드와 3기 제목 확인. 응답 word_split_fallback=true, anime_follow_up=true, 재조회 cached=true. 전체 제목은 같은 세 카드와 두 플래그 false. `너말고`는 `너 말고 다른 연애` 포함 2개, word split만 true. `오징어게임`은 기존 시즌 결과와 두 플래그 false. 네 응답 모두 failedSources=[] 확인. 카드 추가·완료와 로그인 대행 없음.
+- 증빙: `/tmp/scenenote62-deployed-seasons.png`, `/tmp/scenenote62-deploy-responses.json`, `/tmp/scenenote62-deployed-functions.json`, `/tmp/scenenote62-deploy-drift.log`. 플래그 확인용 임시 로컬 진단 코드는 원래 파일과 바이트 단위로 동일하게 복원. 기존 서버 재시작 없음.
+- iOS M-4는 simctl 도구가 없어 미검증. edge:drift는 미커밋 코드 때문에 배포 후에도 search-content uncommitted로 표시하며 v28 배포 성공과 구분한다. 다른 함수들의 배포 불일치는 이번 범위 밖이다.
+
 ## 검색 추천의 라이브러리 조회 오류 정정 (2026-10-10)
 
 - 검색 화면의 추천 영역에서 `라이브러리 정보를 불러오지 못해 취향을 분석할 수 없습니다`를 재현했다. 임시 오류 진단으로 시즌 조회의 `Bad Request`, 작품 ID 628개를 확인했다. `getLibraryItems`의 메타데이터 보강에서 전체 UUID를 한 `.in()` URL로 요청하던 것을 100개 ID씩 분할하여 요청 길이를 줄였다. 진단 코드는 제거했다.

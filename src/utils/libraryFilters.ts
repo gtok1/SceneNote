@@ -60,6 +60,7 @@ export function serializeGenreFilters(genres: readonly string[]): string {
 
 export function filterLibraryItems(items: LibraryListItem[], filters: LibraryFilterState): LibraryListItem[] {
   const normalizedSearchQuery = filters.searchQuery.trim().toLocaleLowerCase();
+  const compactSearchQuery = normalizedSearchQuery.replace(/\s+/gu, "");
   const yearFilter = normalizeYearFilter(filters.year);
   const selectedGenres = parseGenreFilters(filters.genreFilter);
   const searchedItems = items.filter((item) => {
@@ -72,17 +73,17 @@ export function filterLibraryItems(items: LibraryListItem[], filters: LibraryFil
     if (filters.ratingFilter !== "all" && item.rating !== filters.ratingFilter) return false;
     if (!normalizedSearchQuery) return true;
 
-    const searchableText = [
+    const searchableFields = [
       item.title_primary,
       item.title_original,
       ...(item.crew ?? []).flatMap((member) => [member.name, member.original_name]),
       ...(item.cast ?? []).flatMap((member) => [member.name, member.original_name, member.character])
     ]
-      .filter(Boolean)
-      .join(" ")
-      .toLocaleLowerCase();
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLocaleLowerCase());
 
-    return searchableText.includes(normalizedSearchQuery);
+    return searchableFields.join(" ").includes(normalizedSearchQuery) ||
+      searchableFields.some((value) => value.replace(/\s+/gu, "").includes(compactSearchQuery));
   });
 
   return sortByYear(filterByYear(searchedItems, yearFilter), filters.sortOrder);

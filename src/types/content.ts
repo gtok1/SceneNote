@@ -45,6 +45,7 @@ export interface CrewMember {
 }
 
 export interface CastMember {
+  source?: "tmdb" | "anilist";
   id: number;
   name: string;
   original_name: string | null;

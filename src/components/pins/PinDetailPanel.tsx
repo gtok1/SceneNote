@@ -6,7 +6,7 @@ import { AppImage } from "@/components/common/AppImage";
 import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
 import type { TimelinePin } from "@/types/pins";
 import { createCrewSummary } from "@/utils/contentCrew";
-import { createPinCardModel, PINS_SCREEN_COPY } from "@/utils/pinListUi";
+import { createPinCardModel, getPinAddAccessibilityLabel, PIN_CONTEXT_COPY, PINS_SCREEN_COPY, type PinPanelTimeline } from "@/utils/pinListUi";
 
 interface PinDetailPanelProps {
   pin: TimelinePin | null;
@@ -16,17 +16,23 @@ interface PinDetailPanelProps {
   onRevealSpoiler: () => void;
   onOpenDetail: () => void;
   onShare: () => void;
+  timeline: PinPanelTimeline | null;
+  onSelectTimelinePin: (id: string) => void;
+  onOpenContent: () => void;
+  onAddPin: () => void;
+  onOpenAllPins: () => void;
 }
 
 export function PinDetailPanel({
-  pin, width, spoilerRevealed, canShare, onRevealSpoiler, onOpenDetail, onShare
+  pin, width, spoilerRevealed, canShare, onRevealSpoiler, onOpenDetail, onShare,
+  timeline, onSelectTimelinePin, onOpenContent, onAddPin, onOpenAllPins
 }: PinDetailPanelProps) {
   const crew = createCrewSummary(pin?.content_crew, 2);
   const model = useMemo(() => pin ? createPinCardModel(pin, { spoilerRevealed }) : null, [pin, spoilerRevealed]);
   return (
     <View style={[styles.panel, { width }]}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        {model ? (
+        {model && pin ? (
           <>
             <View style={styles.header}>
               <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
@@ -65,11 +71,58 @@ export function PinDetailPanel({
               <Ionicons accessible={false} color={colors.surface} name="open-outline" size={18} />
               <Text style={styles.actionText}>{PINS_SCREEN_COPY.openDetail}</Text>
             </Pressable>
+            <View style={styles.secondaryActions}>
+              <Pressable accessibilityRole="button" onPress={onOpenContent}
+                style={({ pressed }) => [styles.action, styles.share, styles.secondaryAction, pressed && styles.pressed]}>
+                <Ionicons accessible={false} color={colors.primary} name="film-outline" size={18} />
+                <Text style={[styles.actionText, styles.shareText]}>{PIN_CONTEXT_COPY.openContent}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={getPinAddAccessibilityLabel(pin)} onPress={onAddPin}
+                style={({ pressed }) => [styles.action, styles.share, styles.secondaryAction, pressed && styles.pressed]}>
+                <Ionicons accessible={false} color={colors.primary} name="add-circle-outline" size={18} />
+                <Text style={[styles.actionText, styles.shareText]}>{PIN_CONTEXT_COPY.addPin}</Text>
+              </Pressable>
+            </View>
             {canShare ? (
               <Pressable accessibilityRole="button" onPress={onShare} style={({ pressed }) => [styles.action, styles.share, pressed && styles.pressed]}>
                 <Ionicons accessible={false} color={colors.primary} name="share-social-outline" size={18} />
                 <Text style={[styles.actionText, styles.shareText]}>{PINS_SCREEN_COPY.share}</Text>
               </Pressable>
+            ) : null}
+            {timeline ? (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.timelineSection}>
+                  <View style={styles.timelineHeader}>
+                    <Text style={styles.timelineTitle}>{timeline.title}</Text>
+                    <Pressable accessibilityRole="button" accessibilityLabel={PIN_CONTEXT_COPY.showAllPinsLabel}
+                      onPress={onOpenAllPins} style={({ pressed }) => [styles.showAll, pressed && styles.pressed]}>
+                      <Text style={styles.shareTextLabel}>{PIN_CONTEXT_COPY.showAllPins}</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.timelineRows}>
+                    {timeline.items.map(item => {
+                      const content = (
+                        <>
+                          <View style={[styles.timelineDot, item.current && styles.currentDot]} />
+                          <View style={styles.timelineCopy}>
+                            <Text style={styles.timelineLabel}>{item.label}</Text>
+                            <Text numberOfLines={1} style={[styles.caption, item.memoEmpty && styles.emptyMemo]}>{item.memo}</Text>
+                          </View>
+                        </>
+                      );
+                      return item.current ? (
+                        <View key={item.id} accessible accessibilityLabel={item.accessibilityLabel} accessibilityState={{ selected: true }}
+                          style={[styles.timelineRow, styles.currentRow]}>{content}</View>
+                      ) : (
+                        <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.accessibilityLabel}
+                          accessibilityHint={PIN_CONTEXT_COPY.timelineSelectHint} onPress={() => onSelectTimelinePin(item.id)}
+                          style={({ pressed }) => [styles.timelineRow, pressed && styles.pressed]}>{content}</Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              </>
             ) : null}
           </>
         ) : (
@@ -126,6 +179,23 @@ const styles = StyleSheet.create({
   actionText: { ...typography.label, color: colors.surface, flexShrink: 1 },
   share: { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: StyleSheet.hairlineWidth },
   shareText: { color: colors.primary },
+  secondaryActions: { flexDirection: "row", gap: spacing.sm },
+  secondaryAction: { flex: 1, minWidth: 0 },
+  timelineHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  timelineTitle: { ...typography.label, color: colors.text, fontVariant: ["tabular-nums"], flexShrink: 1 },
+  showAll: { minHeight: 44, minWidth: 44, justifyContent: "center", paddingHorizontal: spacing.sm },
+  shareTextLabel: { ...typography.label, color: colors.primary },
+  timelineSection: { gap: spacing.xs },
+  timelineRows: { gap: spacing.xs },
+  timelineRow: {
+    flexDirection: "row", gap: spacing.sm, alignItems: "center", minHeight: 44,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.md
+  },
+  timelineDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: colors.border },
+  currentDot: { backgroundColor: colors.primary },
+  currentRow: { backgroundColor: colors.primarySoft },
+  timelineCopy: { flex: 1, minWidth: 0 },
+  timelineLabel: { ...typography.label, color: colors.text, fontVariant: ["tabular-nums"] },
   pressed: { opacity: 0.72 },
   empty: { alignItems: "center", gap: spacing.md, paddingVertical: spacing.xl },
   emptyTitle: { ...typography.headline, color: colors.text, textAlign: "center" },

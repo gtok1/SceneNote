@@ -5,12 +5,13 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing } from "@/constants/theme";
-import { useLibraryItemCast } from "@/hooks/useLibraryItemCast";
+import { ContentCast } from "@/components/content/ContentCast";
 import { useAiringAvailability } from "@/hooks/useAiringAvailability";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { createContinueWatchingLabel } from "@/utils/continueWatching";
 import { createCrewSummary } from "@/utils/contentCrew";
+import { CONTENT_TYPE_LABELS, libraryContentCategory } from "@/utils/libraryFilters";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { WatchStatusBadge } from "./WatchStatusBadge";
 
@@ -29,7 +30,6 @@ export const ContentCard = memo(function ContentCard({
   onOpenProgressSetting,
   compact = false
 }: ContentCardProps) {
-  const cast = useLibraryItemCast(item, 2);
   const crew = createCrewSummary(item.crew, 1);
   const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
   const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
@@ -62,16 +62,17 @@ export const ContentCard = memo(function ContentCard({
           </Text>
         ) : null}
         <Text numberOfLines={1} style={[styles.meta, compact ? styles.metaCompact : null]}>
-          {[airDateLabel, item.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+          {[airDateLabel, CONTENT_TYPE_LABELS[libraryContentCategory(item)], episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
         </Text>
         <GenreBadgeList genres={item.genres} maxVisible={2} />
         {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={1} style={[styles.cast, compact ? styles.castCompact : null]}>{crew.text}</Text> : null}
-        {cast.length ? (
-          <Text numberOfLines={1} style={[styles.cast, compact ? styles.castCompact : null]}>
-            {item.content_type === "anime" ? "성우" : "출연"}:{" "}
-            {cast.map((member) => member.name).join(", ")}
-          </Text>
-        ) : null}
+        <ContentCast
+          source={item.source_api}
+          externalId={item.source_id}
+          contentType={item.content_type}
+          genres={item.genres}
+          cast={item.cast}
+        />
         {EXTENDED_FEATURES_ENABLED && reviewLabel ? (
           <Text numberOfLines={1} style={[styles.review, compact ? styles.reviewCompact : null]}>
             {reviewLabel}

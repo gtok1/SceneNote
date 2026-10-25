@@ -2,7 +2,6 @@ import { EXTENDED_FEATURES_ENABLED, SHARE_FEATURES_ENABLED } from "@/constants/f
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { KeyboardAvoidingView, Platform ,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -38,6 +37,7 @@ import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } 
 import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useAppUIStore } from "@/stores/appUIStore";
 import { getSavedListPosition } from "@/stores/listScrollStore";
 import { useListScrollRestoration } from "@/hooks/useListScrollRestoration";
 import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
@@ -59,6 +59,7 @@ import {
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(["wishlist", "watching", "dropped", "completed"]);
 
@@ -68,6 +69,7 @@ type ShareFeedback =
   | { status: "error"; message: string; url?: undefined };
 
 export default function LibraryScreen() {
+  const addToast = useAppUIStore((state) => state.addToast);
   const params = useLocalSearchParams<{
     status?: string;
     libraryType?: string;
@@ -202,23 +204,25 @@ export default function LibraryScreen() {
             ]);
             updateStatuses.mutate(
               { libraryItemId: item.library_item_id, statuses },
-              { onError: (error) => Alert.alert("상태 변경 실패", error.message) }
+              { onError: (error) => addToast(userFacingErrorMessage(error, "상태를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요."), "error") }
             );
           };
 
           if (suggestion === "mark_completed") {
-            Alert.alert("모든 화를 시청했습니다", "완료로 표시할까요?", [
-              { text: "나중에", style: "cancel" },
-              { text: "완료로 표시", onPress: () => updateSuggestedStatus("completed") }
-            ]);
+            addToast("모든 화를 봤어요. 완료로 표시할까요?", "info", {
+              actionLabel: "완료로 표시",
+              onAction: () => updateSuggestedStatus("completed"),
+              durationMs: 8000
+            });
           } else if (suggestion === "mark_watching") {
-            Alert.alert("시청을 시작했습니다", "보는 중으로 바꿀까요?", [
-              { text: "유지", style: "cancel" },
-              { text: "보는 중으로 변경", onPress: () => updateSuggestedStatus("watching") }
-            ]);
+            addToast("시청을 시작했어요. 보는 중으로 바꿀까요?", "info", {
+              actionLabel: "보는 중으로 변경",
+              onAction: () => updateSuggestedStatus("watching"),
+              durationMs: 8000
+            });
           }
         },
-        onError: (error) => Alert.alert("시청 진행 저장 실패", error.message)
+        onError: (error) => addToast(userFacingErrorMessage(error, "시청 진행을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."), "error")
       }
     );
   };

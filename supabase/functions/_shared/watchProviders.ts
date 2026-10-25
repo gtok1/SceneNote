@@ -1,5 +1,6 @@
 import { normalizeTitleForMatch } from "./titleMatch.ts";
 import { DISNEY_PLUS_HOME_URL } from "./watchProviderLinks.ts";
+import { pickTmdbSeasonForWatch, resolveWatchAirYear, resolveWatchSeasonNumber } from "./watchProviderSeason.ts";
 import type { RecommendationExternalId } from "./recommendationEngine.ts";
 
 export type WatchProviderCategory = "flatrate" | "free" | "rent" | "buy";
@@ -168,10 +169,15 @@ export interface KrOttLookupTarget {
   external_source: string;
   external_id: string;
   content_type: string;
+  season_number?: number | null;
   external_ids?: Readonly<Record<string, string | number | null | undefined>> | readonly RecommendationExternalId[] | null;
 }
 export type KrWatchRegionFetcher = (kind: "tv" | "movie", tmdbId: string) => Promise<TmdbWatchProviderRegion | null>;
 export function resolveTmdbLookupKey(item: KrOttLookupTarget): { kind: "tv" | "movie"; tmdbId: string } | null {
+  // A series id cannot establish availability for a separate anime work or season.
+  // This recommendation fetcher only supports content-wide provider endpoints.
+  if (item.content_type !== "movie" && (item.season_number != null
+    || (item.content_type === "anime" && item.external_source !== "tmdb"))) return null;
   const externalTmdbId = Array.isArray(item.external_ids)
     ? item.external_ids.find(entry => (entry.api_source ?? entry.external_source ?? entry.source) === "tmdb")?.external_id
     : (item.external_ids as Readonly<Record<string, string | number | null | undefined>> | null | undefined)?.tmdb;
@@ -200,7 +206,7 @@ export async function attachKrOttProviders<T extends KrOttLookupTarget>(
   return result;
 }
 
-export type WatchProviderScope = "content" | "season" | "series";
+export type WatchProviderScope = "content" | "season";
 export interface AnimeSeasonMarkerStrip { base: string; hadMarker: boolean }
 
 export function stripAnimeSeasonMarkers(title: string | null | undefined): AnimeSeasonMarkerStrip {
@@ -247,55 +253,60 @@ export function pickTmdbSeasonForAirYear(
       ? [{ number: season.season_number, year: airYear }] : [];
   });
   const exact = candidates.filter(season => season.year === year);
-  if (exact.length) return exact.length === 1 ? exact[0].number : null;
-  const adjacent = candidates.filter(season => Math.abs(season.year - year) <= 1);
-  return adjacent.length === 1 ? adjacent[0].number : null;
+  return exact.length === 1 ? exact[0]?.number ?? null : null;
 }
 
 export interface TmdbWatchProvidersPayload { results?: Record<string, TmdbWatchProviderRegion | undefined> }
 export interface AniListWatchLookupDeps {
   searchTv(query: string): Promise<TmdbTvSearchItem[]>;
   getTvSeasons(tmdbId: number): Promise<TmdbSeasonSummary[]>;
-  getProviders(target: { tmdbId: number; seasonNumber: number | null }): Promise<TmdbWatchProvidersPayload>;
+  // A 404 is unknown; a successful payload with no KR providers is still season-scoped.
+  getProviders(target: { tmdbId: number; seasonNumber: number }): Promise<TmdbWatchProvidersPayload | null>;
 }
 export interface AniListWatchLookupResult {
   tmdbId: number;
-  seasonNumber: number | null;
-  scope: WatchProviderScope;
+  seasonNumber: number;
+  scope: "season";
   payload: TmdbWatchProvidersPayload;
 }
 
-// TMDB puts sequels under a series' first-season year. Series-wide providers can
-// include OTT services carrying only season one (docs/54 §2.2), so prefer season data.
+// A direct title match still identifies a series, not the requested AniList work.
+// Only a confirmed matching season can supply providers (docs/54 §15).
 export async function lookupAniListWatchProviders(
-  input: { titles: readonly (string | null | undefined)[]; year: number | null },
+  input: {
+    titles: readonly (string | null | undefined)[];
+    year: number | null;
+    airDate?: string | null;
+    seasonNumber?: number | null;
+    mediaType?: "movie" | "tv";
+  },
   deps: AniListWatchLookupDeps
 ): Promise<AniListWatchLookupResult | null> {
+  const requestedSeason = resolveWatchSeasonNumber({ ...input, source: "anilist", mediaType: input.mediaType ?? "tv" });
+  const year = resolveWatchAirYear(input.year, input.airDate);
+  if (requestedSeason === null || year === null) return null;
+  const matchInput = { titles: input.titles, year };
   const queries = [...new Set(input.titles.map(title => title?.trim()).filter((title): title is string => Boolean(title)))];
   const results: TmdbTvSearchItem[] = [];
   for (const query of queries) results.push(...await deps.searchTv(query));
-  const direct = matchTmdbAnimeForAniList(input, results);
-  if (direct !== null) {
-    return { tmdbId: direct, seasonNumber: null, scope: "content", payload: await deps.getProviders({ tmdbId: direct, seasonNumber: null }) };
-  }
-  const strips = input.titles.map(stripAnimeSeasonMarkers);
-  if (!strips.some(strip => strip.hadMarker)) return null;
-  const searched = new Set(queries.map(normalizeTitleForMatch));
-  for (const strip of strips) {
-    const key = normalizeTitleForMatch(strip.base);
-    if (!strip.hadMarker || !key || searched.has(key)) continue;
-    searched.add(key);
-    results.push(...await deps.searchTv(strip.base));
-  }
-  const tmdbId = matchTmdbAnimeSeriesForSequel(input, results);
-  if (tmdbId === null) return null;
-  const seasonNumber = pickTmdbSeasonForAirYear(await deps.getTvSeasons(tmdbId), input.year);
-  if (seasonNumber !== null) {
-    const payload = await deps.getProviders({ tmdbId, seasonNumber });
-    const region = payload.results?.KR;
-    if ([region?.flatrate, region?.free, region?.ads, region?.rent, region?.buy].some(providers => (providers?.length ?? 0) > 0)) {
-      return { tmdbId, seasonNumber, scope: "season", payload };
+  let tmdbId = matchTmdbAnimeForAniList(matchInput, results);
+  if (tmdbId === null) {
+    const strips = input.titles.map(stripAnimeSeasonMarkers);
+    if (!strips.some(strip => strip.hadMarker)) return null;
+    const searched = new Set(queries.map(normalizeTitleForMatch));
+    for (const strip of strips) {
+      const key = normalizeTitleForMatch(strip.base);
+      if (!strip.hadMarker || !key || searched.has(key)) continue;
+      searched.add(key);
+      results.push(...await deps.searchTv(strip.base));
     }
+    tmdbId = matchTmdbAnimeSeriesForSequel(matchInput, results);
   }
-  return { tmdbId, seasonNumber: null, scope: "series", payload: await deps.getProviders({ tmdbId, seasonNumber: null }) };
+  if (tmdbId === null) return null;
+  const seasonNumber = pickTmdbSeasonForWatch(await deps.getTvSeasons(tmdbId), {
+    seasonNumber: requestedSeason, year, airDate: input.airDate ?? null
+  });
+  if (seasonNumber === null) return null;
+  const payload = await deps.getProviders({ tmdbId, seasonNumber });
+  return payload === null ? null : { tmdbId, seasonNumber, scope: "season", payload };
 }

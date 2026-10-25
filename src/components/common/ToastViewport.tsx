@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAppUIStore, type AppToast } from "@/stores/appUIStore";
 
 const TOAST_TYPE_LABEL: Record<AppToast["type"], string> = {
@@ -59,7 +59,7 @@ export function ToastViewport() {
                   removeToast(toast.id);
                   toast.onAction?.();
                 }}
-                style={styles.actionButton}
+                style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
               >
                 <Text style={styles.actionText}>{toast.actionLabel}</Text>
               </Pressable>
@@ -67,9 +67,8 @@ export function ToastViewport() {
             <Pressable
               accessibilityLabel="알림 닫기"
               accessibilityRole="button"
-              hitSlop={8}
               onPress={() => removeToast(toast.id)}
-              style={styles.closeButton}
+              style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
             >
               <Text accessibilityElementsHidden style={styles.closeText}>
                 ×
@@ -122,11 +121,11 @@ const styles = StyleSheet.create({
   },
   messageGroup: {
     flex: 1,
+    minWidth: 0,
     gap: 2
   },
   typeLabel: {
-    fontSize: 11,
-    fontWeight: "900"
+    ...typography.micro
   },
   typeLabelSuccess: {
     color: colors.success
@@ -138,32 +137,36 @@ const styles = StyleSheet.create({
     color: colors.primary
   },
   message: {
+    ...typography.label,
     color: colors.text,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18
+    flexShrink: 1
   },
   closeButton: {
     alignItems: "center",
-    borderRadius: radius.sm,
-    height: 32,
+    borderRadius: radius.pill,
+    minHeight: 44,
     justifyContent: "center",
-    width: 32
+    minWidth: 44,
+    flexShrink: 0
   },
   actionButton: {
     alignItems: "center",
-    borderRadius: radius.sm,
-    minHeight: 32,
+    borderRadius: radius.pill,
+    minHeight: 44,
+    minWidth: 44,
+    justifyContent: "center",
+    flexShrink: 0,
     paddingHorizontal: spacing.sm
   },
   actionText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "900"
+    ...typography.label,
+    color: colors.primary
   },
   closeText: {
-    color: colors.textMuted,
-    fontSize: 22,
-    lineHeight: 24
+    ...typography.title,
+    color: colors.textMuted
+  },
+  pressed: {
+    opacity: 0.72
   }
 });

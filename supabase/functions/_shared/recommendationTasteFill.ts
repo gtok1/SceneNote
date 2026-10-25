@@ -41,6 +41,18 @@ export function deriveTasteFillQueries(input: {
 }
 
 export interface TasteFillCursorState { catalog: string | null; catalogDone: boolean; taste: Record<string, { page: number; done: boolean }> }
+
+export function initializeTasteFillProgress(
+  queries: readonly Pick<TasteFillQuery, "key">[],
+  previous: TasteFillCursorState["taste"]
+): TasteFillCursorState["taste"] {
+  // A skipped or failed first fetch is still pending. Track every active query
+  // before fetching so catalog exhaustion cannot discard its continuation.
+  return Object.fromEntries(queries.map(({ key }) => [key, {
+    ...(previous[key] ?? { page: 1, done: false })
+  }]));
+}
+
 const initialState = (): TasteFillCursorState => ({ catalog: null, catalogDone: false, taste: {} });
 export function decodeTasteFillCursor(raw: string | null | undefined): TasteFillCursorState {
   if (!raw) return initialState();
@@ -101,4 +113,18 @@ export function planTasteFill(input: {
   if (input.prefetched) return { action: "use_prefetch", reason: "prefetched" };
   if (input.remainingMs >= TASTE_FILL_MIN_REMAINING_MS) return { action: "fetch_now", reason: "fetched" };
   return { action: "skip", reason: "time" };
+}
+
+export interface RecommendationScanBudget {
+  scanMs: number;
+  keywordLookups: number;
+  maxMonths: number;
+  maxRounds: number;
+  label: "first" | "continuation";
+}
+
+export function recommendationScanBudget(input: { hasCursor: boolean }): RecommendationScanBudget {
+  return input.hasCursor
+    ? { scanMs: 4_000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation" }
+    : { scanMs: 1_000, keywordLookups: 16, maxMonths: 3, maxRounds: 3, label: "first" };
 }

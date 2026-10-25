@@ -17,6 +17,7 @@ import type { DateSortOrder } from "@/utils/contentSort";
 import { COUNTRY_FILTER_OPTIONS } from "@/utils/countryFilter";
 import { createGenreFilterOptions } from "@/utils/genre";
 import { normalizeDiscoveryGenre } from "../../../supabase/functions/_shared/discoveryFilters";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 type SelectedMediaType = Exclude<MediaTypeFilter, "all">;
 const FILTERS: { label: string; value: SelectedMediaType }[] = [
@@ -109,6 +110,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
     const [draft, setDraft] = useState(() => createSearchFilterDraft(filters));
     const [applyError, setApplyError] = useState<string | null>(null);
     const [isApplying, setIsApplying] = useState(false);
+    const inputRef = useRef<TextInput>(null);
     const applyInFlight = useRef(false);
     const saving = isApplying || isSavingFilters;
     const activeFilterCount = filtersReady
@@ -138,9 +140,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
         setFiltersOpen(false);
       } catch (error) {
         setApplyError(
-          error instanceof Error
-            ? error.message
-            : "검색 조건을 저장하지 못했어요. 다시 시도해 주세요."
+          userFacingErrorMessage(error, "검색 조건을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.")
         );
       } finally {
         applyInFlight.current = false;
@@ -169,16 +169,35 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
     return (
       <View style={styles.container}>
         <View style={styles.inputRow}>
-          <TextInput
-            accessibilityLabel="콘텐츠 검색어"
-            autoFocus={autoFocus}
-            onChangeText={onChangeText}
-            onSubmitEditing={onSubmit}
-            placeholder="작품명, 배우·성우 이름으로 검색"
-            returnKeyType="search"
-            style={styles.input}
-            value={value}
-          />
+          <View style={styles.inputField}>
+            <TextInput
+              ref={inputRef}
+              accessibilityLabel="콘텐츠 검색어"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus={autoFocus}
+              onChangeText={onChangeText}
+              onSubmitEditing={onSubmit}
+              placeholder="작품명, 배우·성우 이름으로 검색"
+              placeholderTextColor={colors.textSubtle}
+              returnKeyType="search"
+              style={[styles.input, value.length > 0 && styles.inputWithClear]}
+              value={value}
+            />
+            {value.length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="검색어 지우기"
+                onPress={() => {
+                  onChangeText("");
+                  inputRef.current?.focus();
+                }}
+                style={({ pressed }) => [styles.clearButton, pressed && styles.clearButtonPressed]}
+              >
+                <Ionicons color={colors.textMuted} name="close-circle" size={20} />
+              </Pressable>
+            ) : null}
+          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: !filtersReady }}
@@ -419,6 +438,27 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: "row",
     gap: spacing.sm
+  },
+  inputField: {
+    flex: 1,
+    minWidth: 0
+  },
+  inputWithClear: {
+    paddingRight: 44
+  },
+  clearButton: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.pill
+  },
+  clearButtonPressed: {
+    backgroundColor: colors.surfaceMuted
   },
   input: {
     minWidth: 0,

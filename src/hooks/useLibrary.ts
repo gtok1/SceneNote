@@ -98,6 +98,7 @@ export function useAddToLibrary(options?: { libraryRefresh?: "immediate" | "debo
       addContentToLibrary(result, status),
     onSuccess: () => {
       if (user) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
         if (options?.libraryRefresh === "debounced") {
           let scheduler = libraryRefreshSchedulers.get(user.id);
           if (!scheduler) {
@@ -138,6 +139,7 @@ export function useUpdateLibraryStatus() {
     onSuccess: () => {
       if (user) {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id), refetchType: "inactive" });
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
       }
     }
   });
@@ -170,6 +172,7 @@ export function useUpdateLibraryStatuses() {
     onSuccess: () => {
       if (user) {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id), refetchType: "inactive" });
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
       }
     }
   });
@@ -194,6 +197,7 @@ export function useDeleteLibraryItem() {
     onSuccess: () => {
       if (user) {
         queryClient.invalidateQueries({ queryKey: queryKeys.library.all(user.id), refetchType: "inactive" });
+        queryClient.invalidateQueries({ queryKey: queryKeys.profile.stats(user.id) });
       }
     }
   });

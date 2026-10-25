@@ -24,7 +24,8 @@ import { supabase } from "@/lib/supabase";
 import { AppProviders } from "@/providers/AppProviders";
 import { useAuthStore } from "@/stores/authStore";
 import { getAuthLinkSession } from "@/utils/authLinks";
-import { getBottomNavMetrics } from "@/utils/bottomNavLayout";
+import { getBottomNavMetrics, getNavItemVisual } from "@/utils/bottomNavLayout";
+import { useInputModality } from "@/hooks/useInputModality";
 
 export default function RootLayout() {
   return (
@@ -181,12 +182,13 @@ function GlobalBottomNav() {
   const session = useAuthStore((state) => state.session);
   const segments = useSegments();
   const [focusedHref, setFocusedHref] = useState<NavHref | null>(null);
+  const getInputModality = useInputModality();
   const activeHref = getActiveNavHref(pathname, searchParams);
 
   if (!session || segments[0] !== "(tabs)") return null;
 
   return (
-    <View style={[styles.bottomNav, { paddingBottom: insets.bottom, paddingLeft: Math.max(4, insets.left), paddingRight: Math.max(4, insets.right) }]}>
+    <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 6), paddingLeft: Math.max(4, insets.left), paddingRight: Math.max(4, insets.right) }]}>
       <View style={styles.navRow}>
         {visibleNavItems.map((item) => {
           const active = item.href === activeHref;
@@ -199,19 +201,29 @@ function GlobalBottomNav() {
               accessibilityState={{ selected: active }}
               aria-current={active ? "page" : undefined}
               key={item.href}
-              onBlur={() => setFocusedHref(null)}
-              onFocus={() => setFocusedHref(item.href)}
+              onBlur={() => setFocusedHref(current => current === item.href ? null : current)}
+              onFocus={() => setFocusedHref(getInputModality() === "keyboard" ? item.href : null)}
+              onPressIn={() => {
+                if (getInputModality() === "pointer") setFocusedHref(current => current === item.href ? null : current);
+              }}
               onPress={() => router.replace(item.href)}
-              style={({ hovered }) => [
-                styles.navItem,
-                hovered ? styles.navItemHovered : null,
-                focusedHref === item.href ? styles.navItemFocused : null
-              ]}
+              style={styles.navItem}
             >
-              <View style={[styles.navIcon, { width: metrics.iconPillWidth }, active ? styles.navIconActive : null]}>
-                <Icon active={active} color={active ? colors.primary : colors.textMuted} size={24} />
-              </View>
-              <Text numberOfLines={1} style={[styles.navLabel, { fontSize: metrics.labelFontSize }, active ? styles.navLabelActive : null]}>{item.label}</Text>
+              {({ hovered, pressed }) => {
+                const visual = getNavItemVisual({ active, hovered: Boolean(hovered), pressed, keyboardFocused: focusedHref === item.href });
+                return (
+                  <>
+                    <View style={[
+                      styles.navIcon, { width: metrics.iconPillWidth },
+                      visual.pill === "active" ? styles.navIconActive : visual.pill === "hover" ? styles.navIconHovered : null,
+                      visual.focusRing ? styles.navIconFocusRing : null
+                    ]}>
+                      <Icon active={active} color={active ? colors.primary : colors.textMuted} size={24} />
+                    </View>
+                    <Text numberOfLines={1} style={[styles.navLabel, { fontSize: metrics.labelFontSize }, active ? styles.navLabelActive : null]}>{item.label}</Text>
+                  </>
+                );
+              }}
             </Pressable>
           );
         })}
@@ -274,7 +286,7 @@ const styles = StyleSheet.create({
   },
   navItem: {
     alignItems: "center",
-    borderRadius: radius.md,
+    outlineStyle: "none" as never,
     flex: 1,
     minWidth: 0,
     gap: 2,
@@ -283,10 +295,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative"
   },
-  navItemHovered: {
-    backgroundColor: "#EFF6FF"
+  navIconHovered: {
+    backgroundColor: colors.surfaceMuted
   },
-  navItemFocused: {
+  navIconFocusRing: {
     outlineColor: colors.primary,
     outlineOffset: 2,
     outlineStyle: "solid",

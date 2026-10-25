@@ -213,7 +213,7 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
 
   const { data, error } = await supabase.functions.invoke<PersonalizedRecommendationsApiResponse>(
     "personalized-recommendations",
-    { body, timeout: 10_000, ...(input.signal ? { signal: input.signal } : {}) }
+    { body, timeout: 14_000, ...(input.signal ? { signal: input.signal } : {}) }
   );
   if (error) {
     const response = error.context instanceof Response ? error.context : null;

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 
+import { RecommendationCast } from "@/components/content/RecommendationCast";
 import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing, typography } from "@/constants/theme";
@@ -58,6 +59,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
         </View>
         <View style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>{result.title_primary}</Text>
+              <RecommendationCast result={result} />
           {presentation.watchProviderLabel ? (
             <View accessibilityLabel={`시청 가능: ${presentation.watchProviderLabel}`} style={styles.watchProviderRow}>
               <Ionicons name="tv-outline" size={12} color={colors.primary} />

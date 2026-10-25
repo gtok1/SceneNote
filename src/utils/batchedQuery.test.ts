@@ -16,7 +16,7 @@ it("splits 628 content IDs into bounded queries without omissions", async () => 
   assert.deepEqual(result.data, ids);
 });
 it("reads additional pages and resets pagination for each ID batch", async () => {
-  const calls: Array<[string[], number, number]> = [];
+  const calls: [string[], number, number][] = [];
   const result = await readBatchedRows(["a", "b"], async (ids, from, to) => {
     calls.push([ids, from, to]);
     const rows = ids[0] === "a" ? [1, 2, 3] : [4];

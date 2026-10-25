@@ -84,8 +84,18 @@ describe("KR OTT provider contracts", () => {
   it("W-26 resolves TMDB movies", async () => {
     const calls:string[]=[];await attachKrOttProviders([target("tmdb","200","movie")],async(kind,id)=>{calls.push(`${kind}:${id}`);return null;});assert.deepEqual(calls,["movie:200"]);
   });
-  it("W-27 resolves AniList items with a TMDB external id", async () => {
-    const calls:string[]=[];await attachKrOttProviders([target("anilist","999","anime","260463")],async(kind,id)=>{calls.push(`${kind}:${id}`);return null;});assert.deepEqual(calls,["tv:260463"]);
+  it("W-27 leaves non-TMDB anime series references unconfirmed", async () => {
+    const calls:string[]=[];
+    const result=await attachKrOttProviders([target("anilist","999","anime","260463"),target("kitsu","888","anime","260463")],async(kind,id)=>{calls.push(`${kind}:${id}`);return {flatrate:[p(8)]};});
+    assert.deepEqual(calls,[]);
+    assert.deepEqual(result.map(item=>item.watch_providers_kr),[null,null]);
+  });
+  it("does not fetch series providers for explicit season recommendations", async () => {
+    const calls:string[]=[];
+    const result=await attachKrOttProviders([{...target("tmdb","100","kdrama"),season_number:3},{...target("tmdb","200","movie"),season_number:1}],async(kind,id)=>{calls.push(`${kind}:${id}`);return {flatrate:[p(8)]};});
+    assert.deepEqual(calls,["movie:200"]);
+    assert.equal(result[0]?.watch_providers_kr,null);
+    assert.deepEqual(result[1]?.watch_providers_kr,[{provider_id:8,name:"넷플릭스"}]);
   });
   it("W-28 leaves unmatched AniList items without a fetch", async () => {
     let calls=0;const result=await attachKrOttProviders([target("anilist","999")],async()=>{calls++;return null;});assert.equal(calls,0);assert.equal(result[0]?.watch_providers_kr,null);
@@ -154,33 +164,93 @@ describe("anime sequel watch provider contracts", () => {
   it("W-48 permits unknown source years", () => assert.equal(sequel.matchTmdbAnimeSeriesForSequel({titles:["X 第3期"],year:null},[anime(30,"X",2010)]),30));
   it("W-49 picks a unique exact air-year season", () => { assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,2026),4); assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,2024),3); });
   it("W-50 rejects distant seasons and specials", () => assert.equal(sequel.pickTmdbSeasonForAirYear([season(0,"2023-10-23"),season(1,"2023-10-22")],2025),null));
-  it("W-51 picks only a unique adjacent-year season", () => { assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2022-01-01"),season(2,"2023-01-01")],2024),2); assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2023-01-01"),season(2,"2025-01-01")],2024),null); });
+  it("W-51 never estimates an adjacent-year season", () => { assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2022-01-01"),season(2,"2023-01-01")],2024),null); assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2023-01-01"),season(2,"2025-01-01")],2024),null); });
   it("W-52 rejects multiple exact-year seasons", () => assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,"2024-04-01"),season(2,"2024-10-01")],2024),null));
   it("W-53 rejects absent years, seasons, dates and specials", () => { assert.equal(sequel.pickTmdbSeasonForAirYear(slimeSeasons,null),null); assert.equal(sequel.pickTmdbSeasonForAirYear(null,2026),null); assert.equal(sequel.pickTmdbSeasonForAirYear([season(0,"2026-01-01")],2026),null); assert.equal(sequel.pickTmdbSeasonForAirYear([season(1,null)],2026),null); });
-  it("W-54 preserves direct-match request counts", async () => {
+  it("W-54 resolves a direct match to its first season before fetching providers", async () => {
     const a=anime(260463,"黄泉のツガイ",2026,{name:"황천의 츠가이",first_air_date:"2026-04-04"});
-    const f=lookupFixture({searches:{"黄泉のツガイ":[a],"황천의 츠가이":[a]}});
-    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["黄泉のツガイ","황천의 츠가이"],year:2026},f.deps),{tmdbId:260463,seasonNumber:null,scope:"content",payload:kr(97)});
-    assert.deepEqual(f.calls,[["search","黄泉のツガイ"],["search","황천의 츠가이"],["providers",{tmdbId:260463,seasonNumber:null}]]);
+    const f=lookupFixture({searches:{"黄泉のツガイ":[a],"황천의 츠가이":[a]},seasons:[season(1,"2026-04-04")]});
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["黄泉のツガイ","황천의 츠가이"],year:2026},f.deps),{tmdbId:260463,seasonNumber:1,scope:"season",payload:kr(97)});
+    assert.deepEqual(f.calls,[["search","黄泉のツガイ"],["search","황천의 츠가이"],["seasons",260463],["providers",{tmdbId:260463,seasonNumber:1}]]);
   });
   it("W-55 fetches only the matched slime fourth season providers", async () => {
     const f=slimeFixture();
     assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:4,scope:"season",payload:kr(97,1883)});
     assert.deepEqual(f.calls,[["search",slimeOriginal],["search",slimeKorean],["search","転生したらスライムだった件"],["seasons",82684],["providers",{tmdbId:82684,seasonNumber:4}]]);
   });
-  it("W-56 uses series providers for merged apothecary seasons", async () => {
+  it("W-56 leaves merged apothecary seasons unconfirmed", async () => {
     const a=anime(220542,"薬屋のひとりごと",2023,{name:"약사의 혼잣말",first_air_date:"2023-10-22"});
     const f=lookupFixture({searches:{"薬屋のひとりごと 第2期":[a],"薬屋のひとりごと":[a]},seasons:[season(0,"2023-10-23"),season(1,"2023-10-22")],provider:()=>kr(8,283)});
-    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["薬屋のひとりごと 第2期"],year:2025},f.deps),{tmdbId:220542,seasonNumber:null,scope:"series",payload:kr(8,283)});
-    assert.deepEqual(f.calls,[["search","薬屋のひとりごと 第2期"],["search","薬屋のひとりごと"],["seasons",220542],["providers",{tmdbId:220542,seasonNumber:null}]]);
+    assert.equal(await sequel.lookupAniListWatchProviders({titles:["薬屋のひとりごと 第2期"],year:2025},f.deps),null);
+    assert.deepEqual(f.calls,[["search","薬屋のひとりごと 第2期"],["search","薬屋のひとりごと"],["seasons",220542]]);
   });
-  it("W-57 falls back from empty season providers to series providers", async () => {
+  it("W-57 preserves confirmed empty season providers without series fallback", async () => {
     const f=slimeFixture(true);
-    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:null,scope:"series",payload:kr(8)});
-    assert.deepEqual(f.calls,[["search",slimeOriginal],["search",slimeKorean],["search","転生したらスライムだった件"],["seasons",82684],["providers",{tmdbId:82684,seasonNumber:4}],["providers",{tmdbId:82684,seasonNumber:null}]]);
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:4,scope:"season",payload:{results:{}}});
+    assert.deepEqual(f.calls,[["search",slimeOriginal],["search",slimeKorean],["search","転生したらスライムだった件"],["seasons",82684],["providers",{tmdbId:82684,seasonNumber:4}]]);
   });
   it("W-58 performs no sequel calls for unmarked remakes", async () => { const f=lookupFixture({searches:{"うる星やつら":[anime(1,"うる星やつら",1981)]}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["うる星やつら"],year:2022},f.deps),null); assert.deepEqual(f.calls,[["search","うる星やつら"]]); });
   it("W-59 performs no season or provider calls without candidates", async () => { const f=lookupFixture({searches:{}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["X 第2期"],year:2025},f.deps),null); assert.deepEqual(f.calls,[["search","X 第2期"],["search","X"]]); });
   it("W-60 does not repeat an already searched base title", async () => { const f=lookupFixture({searches:{}}); assert.equal(await sequel.lookupAniListWatchProviders({titles:["X 第2期","X"],year:2025},f.deps),null); assert.deepEqual(f.calls,[["search","X 第2期"],["search","X"]]); });
   it("W-61 propagates TMDB dependency errors unchanged", async () => { const f=lookupFixture({searches:{}}); f.deps.searchTv=async()=>{throw Error("TMDB anime search error: 500");}; await assert.rejects(async()=>sequel.lookupAniListWatchProviders({titles:["X"],year:2025},f.deps),{message:"TMDB anime search error: 500"}); });
+});
+
+
+describe("season-specific watch provider regressions", () => {
+  it("matches Tempal's advance premiere to season one and fetches only that season's Netflix providers", async () => {
+    const original="テムパル～アイテムの力～";
+    const title="템빨 ~아이템의 힘~";
+    const a=anime(324502,original,2026,{name:title,first_air_date:"2026-10-02"});
+    const f=lookupFixture({searches:{[original]:[a],[title]:[a]},seasons:[{...season(1,"2026-10-02"),episode_count:12}]});
+    const paths:string[]=[];
+    f.deps.getProviders=async({tmdbId,seasonNumber})=>{
+      paths.push(`/tv/${tmdbId}/season/${seasonNumber}/watch/providers`);
+      return kr(8,97,1796,1883);
+    };
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[original,title],year:2026,airDate:"2026-09-27",seasonNumber:1},f.deps),
+      {tmdbId:324502,seasonNumber:1,scope:"season",payload:kr(8,97,1796,1883)});
+    assert.deepEqual(paths,["/tv/324502/season/1/watch/providers"]);
+    assert.deepEqual(f.calls,[["search",original],["search",title],["seasons",324502]]);
+  });
+  it("preserves foreign providers from the matched season when KR is empty", async () => {
+    const payload={results:{JP:{flatrate:[p(8)]}}};
+    const f=slimeFixture();
+    f.deps.getProviders=async()=>payload;
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),{tmdbId:82684,seasonNumber:4,scope:"season",payload});
+  });
+  it("leaves a missing season provider endpoint unconfirmed", async () => {
+    const f=slimeFixture();
+    f.deps.getProviders=async()=>null;
+    assert.equal(await sequel.lookupAniListWatchProviders({titles:[slimeOriginal,slimeKorean],year:2026},f.deps),null);
+  });
+  it("does not use a merged first season for the requested third work", async () => {
+    const original="転生貴族、鑑定スキルで成り上がる 第3期";
+    const base="転生貴族、鑑定スキルで成り上がる";
+    const a=anime(237150,base,2024,{first_air_date:"2024-04-07"});
+    const f=lookupFixture({searches:{[original]:[],[base]:[a]},seasons:[{...season(1,"2024-04-07"),episode_count:29}],provider:()=>kr(8,97,1883,283)});
+    assert.equal(await sequel.lookupAniListWatchProviders({titles:[original],year:2026,seasonNumber:1},f.deps),null);
+    assert.deepEqual(f.calls,[["search",original],["search",base],["seasons",237150]]);
+  });
+  it("requires a season match even when localized title directly matches", async () => {
+    const f=lookupFixture({searches:{X:[anime(1,"X",2024)]},seasons:[season(1,"2024-04-07")]});
+    assert.equal(await sequel.lookupAniListWatchProviders({titles:["X","X 第3期"],year:2024},f.deps),null);
+    assert.equal(f.calls.some(call=>call[0]==="providers"),false);
+  });
+  it("matches differing season numbering only by a unique exact date", async () => {
+    const f=lookupFixture({searches:{X:[anime(1,"X",2024)]},seasons:[season(2,"2024-10-01")]});
+    assert.deepEqual(await sequel.lookupAniListWatchProviders({titles:["X","X 第3期"],year:2024,airDate:"2024-10-01"},f.deps),{tmdbId:1,seasonNumber:2,scope:"season",payload:kr(97)});
+    assert.deepEqual(f.calls.at(-1),["providers",{tmdbId:1,seasonNumber:2}]);
+  });
+  it("does not query TV for AniList movies", async () => {
+    const f=lookupFixture({searches:{X:[anime(1,"X",2024)]},seasons:[season(1,"2024-10-01")]});
+    assert.equal(await sequel.lookupAniListWatchProviders({titles:["X"],year:2024,mediaType:"movie"},f.deps),null);
+    assert.deepEqual(f.calls,[]);
+  });
+  it("rejects conflicting title seasons and absent dates before API calls", async () => {
+    for(const input of [{titles:["X 第2期","X Season 3"],year:2024},{titles:["X"],year:null}]) {
+      const f=lookupFixture({searches:{}});
+      assert.equal(await sequel.lookupAniListWatchProviders(input,f.deps),null);
+      assert.deepEqual(f.calls,[]);
+    }
+  });
 });

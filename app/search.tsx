@@ -1,6 +1,6 @@
 import { PEOPLE_FEATURES_ENABLED, SEARCH_RECOMMENDATIONS_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -26,6 +26,7 @@ import { ThemeReductionSheet } from "@/components/content/ThemeReductionSheet";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { useContentSearch } from "@/hooks/useContentSearch";
+import { useSearchRequestQuery } from "@/hooks/useSearchRequestQuery";
 import { useAddToLibrary, useLibrary } from "@/hooks/useLibrary";
 import { useAddFavoritePerson, useFavoritePeople, usePersonContentSearch } from "@/hooks/usePeople";
 import { usePersonalizedRecommendations } from "@/hooks/usePersonalizedRecommendations";
@@ -87,6 +88,7 @@ export default function SearchScreen() {
   }>({ previousOffsetY: null, lastRequestedCursor: null });
   useEffect(() => { if (!focused || !online) { anchorGeneration.current += 1; anchorController.current?.abort(); } return () => { anchorGeneration.current += 1; anchorController.current?.abort(); }; }, [focused, online, user?.id]);
   const query = useSearchUiStore((state) => state.query);
+  const { requestQuery, flush: flushRequestQuery } = useSearchRequestQuery(query);
   const setQuery = useSearchUiStore((state) => state.setQuery);
   const mediaTypes = useSearchUiStore((state) => state.mediaTypes);
   const mediaType: MediaTypeFilter = mediaTypes.length === 1 ? mediaTypes[0] ?? "all" : "all";
@@ -132,8 +134,8 @@ export default function SearchScreen() {
   const viewMode = useSearchUiStore((state) => state.viewMode);
   const setViewMode = useSearchUiStore((state) => state.setViewMode);
   const [similarIntent, setSimilarIntent] = useState<Extract<ParsedSearchIntent, { mode: "similarity" }> | null>(null);
-  const search = useContentSearch(query, mediaType, countryFilters, { genres: genreFilters, mediaTypes, enabled: searchFilterPreferences.isReady && focused && online && !similarIntent && parseSearchIntent(query).mode !== "similarity" && query.trim().length >= 2 });
-  const personSearch = usePersonContentSearch(searchFilterPreferences.isReady ? query : "", "all");
+  const search = useContentSearch(requestQuery, mediaType, countryFilters, { genres: genreFilters, mediaTypes, enabled: searchFilterPreferences.isReady && focused && online && !similarIntent && parseSearchIntent(query).mode !== "similarity" && requestQuery.length >= 2 });
+  const personSearch = usePersonContentSearch(searchFilterPreferences.isReady ? requestQuery : "", "all");
   const favoritePeople = useFavoritePeople();
   const favoritePersonKeys = new Set((favoritePeople.data ?? []).map(person => `${person.source}:${person.external_id}`));
   const library = useLibrary("all");
@@ -327,16 +329,24 @@ export default function SearchScreen() {
     if (SEARCH_RECOMMENDATIONS_ENABLED && intent.mode === "similarity") { void resolveAndStartSimilarity(intent); return; }
     addSearchHistoryQuery(value);
     setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setAnchorResolutionError(null);
-    void search.refetch(); if (PEOPLE_FEATURES_ENABLED) void personSearch.refetch();
+    if (!flushRequestQuery(value) && requestQuery.length >= 2) {
+      void search.refetch(); if (PEOPLE_FEATURES_ENABLED) void personSearch.refetch();
+    }
   };
   const refetch = () => { if (!searchFilterPreferences.isReady || !online || !focused) return; if (similarAnchor && similarIntent) { void similarSearch.refetch(); } else runSearch(query); };
   const searchFromHistory = (historyQuery: string) => {
     if (!searchFilterPreferences.isReady) return;
     setQuery(historyQuery);
+    const requestChanged = flushRequestQuery(historyQuery);
     addSearchHistoryQuery(historyQuery);
     const intent = parseSearchIntent(historyQuery);
     if (intent.mode === "similarity") void resolveAndStartSimilarity(intent);
-    else { anchorGeneration.current += 1; setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setIsResolvingAnchor(false); }
+    else {
+      anchorGeneration.current += 1; setSimilarIntent(null); setSimilarAnchor(null); setAnchorCandidates([]); setIsResolvingAnchor(false);
+      if (!requestChanged && requestQuery.length >= 2) {
+        void search.refetch(); if (PEOPLE_FEATURES_ENABLED) void personSearch.refetch();
+      }
+    }
   };
 
   const resolveAndStartSimilarity = async (intent: Extract<ParsedSearchIntent, { mode: "similarity" }>) => {
@@ -419,12 +429,7 @@ export default function SearchScreen() {
         onSuccess: () => {
           setAddedSearchKeys((previous) => new Set(previous).add(searchSeasonIdentity(result)));
         },
-        onError: (error) => {
-          Alert.alert(
-            "라이브러리 추가 실패",
-            `${error.message}\n\n로그인 상태, Edge Function 배포 상태, 외부 API secret 설정을 확인하세요.`
-          );
-        },
+        onError: () => addToast(recommendationAddFailureToast(status), "error"),
         onSettled: () => {
           setPendingSearchKey(null);
         }
@@ -683,6 +688,8 @@ export default function SearchScreen() {
           )
         ) : (
         <FlashList showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           maintainVisibleContentPosition={{ disabled: true }}
           ref={resultListRef}
           onLoad={scrollRestoration.onLoad}
@@ -1117,7 +1124,9 @@ export default function SearchScreen() {
                 </Pressable>
               </View>
             ) : !search.hasNextPage && displayedResults.length > 0 ? (
-              <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>모든 결과를 확인했습니다.</Text>
+              <View style={styles.loadMoreFooter}>
+                <Text accessibilityLiveRegion="polite" style={styles.searchEndText}>모든 결과를 확인했습니다.</Text>
+              </View>
             ) : null
           ) : showRecommendationFeed ? (
             topUp.active ? (
@@ -1771,6 +1780,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: "700"
+  },
+  searchEndText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    flexShrink: 1,
+    textAlign: "center"
   },
   loadMoreErrorText: {
     color: colors.danger,

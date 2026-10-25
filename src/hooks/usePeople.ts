@@ -5,16 +5,18 @@ import { useMemo } from "react";
 import {
   addFavoritePerson,
   applyResolvedKoreanName,
+  classifyPeople,
   deleteFavoritePerson,
   getFavoritePeople,
   getPersonDetail,
   resolvePersonNames,
   searchPersonContent,
+  setFavoritePersonCategory,
   setFavoriteKoreanName
 } from "@/services/people";
 import { useAuthStore } from "@/stores/authStore";
 import type { FavoritePerson, PersonCategory, PersonSearchResult, PersonSource } from "@/types/people";
-import { personKey } from "@/utils/peopleScreen";
+import { createCategorySyncBatches, personKey, planFavoriteCategorySync, selectFavoritesForCategorySync } from "@/utils/peopleScreen";
 import { selectFavoritesNeedingKoreanName } from "@/utils/personKoreanName";
 
 export function usePersonContentSearch(query: string, category: PersonCategory | "all" = "all") {
@@ -42,14 +44,21 @@ export function usePersonDetail(
   externalId: string | undefined,
   category: PersonCategory | undefined
 ) {
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
   return useQuery({
     queryKey: ["person-detail", "v3-ko", source, externalId, category],
-    queryFn: () =>
-      getPersonDetail({
+    queryFn: async () => {
+      const data = await getPersonDetail({
         source: source as PersonSource,
         externalId: externalId ?? "",
         category: category as PersonCategory
-      }),
+      });
+      if (data.category !== category && user) {
+        await queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] });
+      }
+      return data;
+    },
     enabled: PEOPLE_FEATURES_ENABLED && Boolean(source && externalId && category),
     staleTime: 10 * 60_000
   });
@@ -72,6 +81,37 @@ export function useDeleteFavoritePerson() {
   return useMutation({
     mutationFn: (id: string) => deleteFavoritePerson(id),
     onSuccess: () => (user ? queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] }) : undefined)
+  });
+}
+
+export function useFavoriteCategorySync(favorites: FavoritePerson[] | undefined): void {
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const candidates = useMemo(() => selectFavoritesForCategorySync(favorites ?? []), [favorites]);
+  const signature = useMemo(() => candidates.map(personKey).sort().join(","), [candidates]);
+
+  useQuery({
+    queryKey: ["favorite-category-sync", user?.id ?? "anonymous", signature],
+    enabled: PEOPLE_FEATURES_ENABLED && Boolean(user) && candidates.length > 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      let changedCount = 0;
+      for (const ids of createCategorySyncBatches(candidates)) {
+        try {
+          const results = await classifyPeople(ids);
+          const batchFavorites = candidates.filter(person => ids.includes(person.external_id));
+          const updates = planFavoriteCategorySync(batchFavorites, results);
+          await Promise.all(updates.map(update => setFavoritePersonCategory(update.id, update.category)));
+          changedCount += updates.length;
+        } catch {
+          // 요청 실패는 조용히 넘기고 다른 묶음은 계속 확인한다.
+        }
+      }
+      if (user && changedCount > 0) await queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] });
+      return changedCount;
+    }
   });
 }
 
@@ -107,6 +147,16 @@ export function useSetFavoriteKoreanName() {
 
   return useMutation({
     mutationFn: ({ id, nameKo }: { id: string; nameKo: string | null }) => setFavoriteKoreanName(id, nameKo),
-    onSuccess: () => (user ? queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] }) : undefined)
+    onSuccess: async (_data, { nameKo }) => {
+      if (!user) return;
+      if (nameKo === null) {
+        // 되돌린 이름은 최신 목록에서 후보를 다시 계산한 뒤 같은 묶음이라도 자동으로 채운다.
+        await queryClient.invalidateQueries({
+          queryKey: ["favorite-korean-names", user.id],
+          refetchType: "none"
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] });
+    }
   });
 }

@@ -654,6 +654,8 @@ interface EpisodeProgressCardProps {
 ```
 (총 화수를 모르므로 `전부 봤음` 버튼을 숨긴다.)
 
+2026-10-16 보완(사용자 후속 요청 반영): `useEpisodeAvailability` → `fetch-episodes` availability_only의 `released_episodes` 목록을 회차 선택에 사용한다. AniList는 `streamingEpisodes`의 명시된 번호와 링크가 있는 항목, TMDB/TVmaze는 실제 에피소드 목록 중 공개일이 지난 항목만 반환한다. 다음 방영 회차에서 빼기·총 화수까지 번호 생성·누락 번호 채우기를 하지 않는다. 최대 200개의 실제 번호를 선택으로 표시하고 총 화수·진행 분모·완료 판정과는 분리한다. 목록 부재·오류는 안내하며 직접 입력은 유지한다. 독립 AniList 후속기는 실제 시즌 행으로 조회한다.
+
 #### 표시 상태
 
 | 상태 | 조건 | 표현 |

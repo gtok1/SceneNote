@@ -3,12 +3,14 @@ import type {
   FavoritePerson,
   KoreanNameSource,
   PersonCategory,
+  PersonCategoryResult,
   PersonContentSearchResponse,
   PersonDetail,
   PersonSearchResult,
   PersonSource
 } from "@/types/people";
 import { romanizeHangulPersonQuery } from "@/utils/personNameRomanization";
+import { planFavoriteCategoryCorrection } from "@/utils/peopleScreen";
 
 export async function searchPersonContent(query: string, category: PersonCategory | "all" = "all") {
   const normalizedQuery = query.trim();
@@ -60,7 +62,11 @@ export async function getPersonDetail(params: {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("인물 상세 응답이 비어 있습니다");
   if (data.category !== params.category) {
-    void updateFavoritePersonCategoryByExternalId(data.source, data.external_id, data.category);
+    try {
+      await updateFavoritePersonCategoryByExternalId(data.source, data.external_id, data.category);
+    } catch {
+      // 카테고리 저장 실패가 상세 조회의 성공을 막지 않는다.
+    }
   }
   return data;
 }
@@ -78,6 +84,28 @@ export async function getFavoritePeople(): Promise<FavoritePerson[]> {
   const people = (data ?? []) as FavoritePerson[];
   const correctedPeople = await Promise.all(people.map(correctFavoritePersonCategory));
   return correctedPeople;
+}
+
+export async function classifyPeople(externalIds: string[]): Promise<PersonCategoryResult[]> {
+  const { data, error } = await supabase.functions.invoke<{ results: PersonCategoryResult[] }>("classify-people", {
+    body: { people: externalIds.map(external_id => ({ external_id })) }
+  });
+  if (error) throw new Error(error.message);
+  return data?.results ?? [];
+}
+
+export async function setFavoritePersonCategory(id: string, category: PersonCategory): Promise<void> {
+  try {
+    await ((supabase as never as { from: (table: string) => unknown }).from("favorite_people") as {
+      update: (row: { category: PersonCategory }) => {
+        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+      };
+    })
+      .update({ category })
+      .eq("id", id);
+  } catch {
+    // 동기화 실패는 저장된 목록 표시를 막지 않는다.
+  }
 }
 
 type FavoritePeopleTable = { from: (table: string) => unknown };
@@ -208,33 +236,8 @@ export async function deleteFavoritePerson(id: string): Promise<void> {
 }
 
 async function correctFavoritePersonCategory(person: FavoritePerson): Promise<FavoritePerson> {
-  if (person.category === "voice_actor" || person.source === "anilist") {
-    return person.category === "voice_actor" ? person : updateFavoritePersonCategory(person, "voice_actor");
-  }
-
-  if (looksLikeVoiceActorFavorite(person)) {
-    return updateFavoritePersonCategory(person, "voice_actor");
-  }
-
-  return person;
-}
-
-function looksLikeVoiceActorFavorite(person: FavoritePerson): boolean {
-  const text = [person.name, person.original_name, ...person.known_for].join(" ").toLowerCase();
-  const animeHints = [
-    "anime",
-    "ポケットモンスター",
-    "나루토",
-    "건방진 천사",
-    "주술회전",
-    "귀멸",
-    "포켓몬",
-    "드래곤볼",
-    "원피스",
-    "명탐정 코난"
-  ];
-
-  return animeHints.some((hint) => text.includes(hint.toLowerCase()));
+  const category = planFavoriteCategoryCorrection(person);
+  return category ? updateFavoritePersonCategory(person, category) : person;
 }
 
 async function updateFavoritePersonCategory(

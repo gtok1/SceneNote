@@ -46,7 +46,7 @@
 | [41 추천 취향 보충 레인](41_taste_fill_recommendations_spec.md) | 빈 추천 원인 실측, 최신 레인 뒤 취향·필터·국내 OTT 보충, 결합 커서 | 신규: 미구현 |
 | [42 추천 추가 지연 개선](42_recommendation_add_latency_spec.md) | 카드 단위 잠금·즉시 토스트·일괄 보충·라이브러리 재조회 디바운스·서버 빠른 경로/병렬/응답 뒤 작업 | 신규: 미구현 |
 | [43 추천 추가 오입력 방지](43_recommendation_add_misclick_fixes_spec.md) | 클릭한 카드 위치 유지·identity 검증·동기 중복 잠금·자동 보충 경쟁 방지 | 구현 및 격리 웹 검사, 실제 계정·네이티브 미검증 |
-| [44 핀 탭 SaaS 개편](44_pins_tab_saas_redesign_spec.md) | 감정 개수 칩·접히는 필터 카드·포스터 카드·960 미리보기 패널, 좁은 화면 카드 → 상세, 31 U-1·U-7 흡수 | 신규: 미구현 |
+| [44 핀 탭 SaaS 개편](44_pins_tab_saas_redesign_spec.md) | 감정 개수 칩·접히는 필터 카드·포스터 카드·960 미리보기 패널, 좁은 화면 카드 → 상세, 31 U-1·U-7 흡수 | 구현·커밋(`c6a0e7e`, `pinListUi` 테스트 통과 확인). 수동 확인 기록 없음 |
 | [45 추천 연도 필터 배포 어긋남](45_recommendation_year_filter_deploy_skew_fixes_spec.md) | 연도 선택 시 빈 추천 원인 실측(운영 v20 연도 미지원), 재배포 + `applied_filters` 감지·전용 빈 상태 | 구현, `personalized-recommendations` v21 배포(2026-10-05 11:30). 웹 M-1은 사용자 캡처로 2025년 추천 표시 확인, iOS(M-3) 남음 |
 | [46 추천 카드 완료 버튼](46_recommendation_complete_action_spec.md) | 추천 카드·빠른 보기에 "완료"(바로 완료 등록), "추가"는 그대로, 상태별 문구·잠금 공유 | 구현(코드 확인), 수동 미검증 |
 | [47 추천 추가 묶음 12개 채우기](47_recommendation_batch_topup_spec.md) | 스크롤 묶음 목표(보이는 개수+12)까지 자동 이어 찾기, 스크롤 판정 목표 기준, 원인 분해 개발 기록 | 신규: 미구현 |
@@ -56,9 +56,18 @@
 | [51 추천 영화↔드라마 같은 작품 제외](51_recommendation_cross_type_library_match_fixes_spec.md) | 라이브러리 영화 항목과 추천 TV 항목 같은 작품 판정, 앱·서버 공유 함수 | 구현, `personalized-recommendations` v22 배포(2026-10-10). 수동 확인 남음 |
 | [52 추천 첫 묶음 채우기](52_recommendation_first_batch_fill_spec.md) | 취향 보충 미리 받기·준비 조회 병렬화·진단 값, 이어 찾기 중 빈자리 스켈레톤 | 구현, `personalized-recommendations` v22 배포(2026-10-10 17:43). 로그인 수동 확인(M-1~M-3) 남음 |
 | [53 이어 찾기 스켈레톤 정렬](53_recommendation_topup_skeleton_alignment_fixes_spec.md) | 스켈레톤을 첫 로딩과 같은 감싸기로 실제 카드 열에 맞춤 | 신규: 미구현 |
-| [54 애니 후속 시즌 보러가기·라프텔 찾아보기](54_anime_sequel_watch_providers_fixes_spec.md) | 후속 시즌 TMDB 보완 매칭·시즌 제공처(없으면 시리즈 + 안내), TMDB에 없는 라프텔은 검색 링크로만 | 신규: 미구현. 구현 후 `get-watch-providers` 재배포 필요 |
+| [54 애니 후속 시즌 보러가기·라프텔 찾아보기](54_anime_sequel_watch_providers_fixes_spec.md) | **15~16장 후속 정정:** 선택 시즌 검증, 시리즈 대체 금지·캐시 분리, 템빨의 선공개/TV 방영일 차이 보정·구응답 재조회. 라프텔은 검색 링크로만 | get-watch-providers v5 배포·템빨 및 3기 실응답 확인(2026-10-20). 추천 함수 배포는 별도, 자세한 검증은 development_next_steps 참조 |
 | [55 붙여 쓴 한국어 검색어 띄어쓰기 보정](55_korean_search_spacing_fallback_spec.md) | 1단계에 맞는 결과가 없을 때만 TMDB 2단계 띄어쓰기 질의, 골든 띄어쓰기 사례 7개 | 구현(`npm test` 1125/1126, 골든 19/19), `search-content` v27 배포(2026-10-11 22:53). 로그인 수동 확인(M-1~M-4) 남음 |
-| [56 붙여 쓴 검색어 글자 수 조건 제거](56_korean_search_spacing_length_fixes_spec.md) | 짧은 검색어("너말고")도 공백 뺀 제목 기준으로 2단계 보정, 입력 중 자모 제외 | 신규: 미구현. 구현 후 `search-content` 재배포 필요 |
+| [56 붙여 쓴 검색어 글자 수 조건 제거](56_korean_search_spacing_length_fixes_spec.md) | 짧은 검색어("너말고")도 공백 뺀 제목 기준으로 2단계 보정, 입력 중 자모 제외 | 구현·커밋(`bfcc3fd`). `search-content` 재배포 전(운영 v27은 docs/55까지) |
+| [57 하단 탭 상태 표시 정리](57_bottom_nav_state_style_fixes_spec.md) | 호버·선택·키보드 포커스를 아이콘 알약 하나로 통일, 클릭 후 테두리 제거, 하단 여백 | 구현(코드 확인, 클라이언트만). 웹·앱 수동 확인 남음 |
+| [58 배우·성우 판정 정정](58_person_category_classification_fixes_spec.md) | TMDB 출연작 비율로 양방향 판정, 앱 추측 삭제, 등록 직후 확인, 출연진 출처 | 구현(`npm test` 1162/1163), `get-person-detail` v11 배포(2026-10-13 20:15). 출연진 출처는 `get-content-detail` 배포(docs/50 순서) 후 반영. 수동 확인 M-1~M-5 남음 |
+| [59 좋아하는 인물 판정 동기화](59_favorite_person_category_sync_spec.md) | 인물 탭을 열 때 서버 판정(`classify-people`)으로 저장된 배우·성우를 맞춤 | 구현(`npm test` 1166/1167), `classify-people` v1 배포(2026-10-13 20:45, 무인증 401 확인). 로그인 수동 확인 M-1~M-3 남음 |
+| [60 핀 탭 맥락 패널·작품별 묶음·시즌 표기](60_pins_tab_context_and_grouping_fixes_spec.md) | 패널 "이 작품의 핀" 타임라인·작품 보기·핀 추가, 작품별 머리글 묶음, 카드 상대 날짜, `PIN_SELECT` 시즌 임베드(운영 구문 200 확인) | 구현(미커밋). 2026-10-15 검증: `npm test` 1199/1200(무관 기존 실패 1), typecheck·lint 통과, 토큰 검사 0줄. 사용자 캡처로 웹 패널 타임라인·상대 날짜·시즌 표기("시즌 3 · 86화") 확인. 작품별 묶음·375·iOS 수동 확인 남음 |
+| [61 핀 탭 갤러리 보기](61_pins_gallery_view_spec.md) | 포스터 격자 갤러리를 기본으로(라이브러리 갤러리와 같은 틀·열), 목록 전환·기기 저장, 작품별 장면 카드, 목록 패널 간격 | 구현(미커밋, 2026-10-15 Claude 직접). `npm test` 1221/1222(무관 기존 실패 1), typecheck·lint 통과, 토큰 검사 0줄, 웹 번들 빌드 확인. 로그인 화면 수동 확인 M-1~M-5 남음 |
+| [62 애니 검색 후속 시즌 누락](62_anime_search_all_seasons_fixes_spec.md) | AniList 시즌 펼치기 2기→전체(최대 8기), 붙여 쓴 검색어의 AniList 3단계 | 신규: 미구현. 구현 후 `search-content` 재배포 필요 |
+| [63 회차 선택 API 화수 우선](63_episode_progress_count_choices_fixes_spec.md) | 화수가 있으면 1~화수 버튼, 없을 때만 공개 목록·직접 입력 | 신규: 미구현(앱만, 배포 불필요) |
+| [64 추천 호출 비용 검증·정정](64_recommendation_invocation_cost_fixes_spec.md) | 호출 수 집계, 노출 기록 합치기, 이어 찾기 예산 확대, 자동 호출 상한 | 구현(`npm test` 1349/1349, 새 테스트 13개), `personalized-recommendations` v23 배포(2026-10-24 20:03, 무인증 401 확인). 로그인 측정 M-1~M-3 남음 |
+| [65 검색 디바운스·요청 제한 시간](65_search_debounce_and_request_timeout_fixes_spec.md) | 검색 탭 300ms 디바운스·자모 제외·즉시 검색, 추천·검색 호출 제한 시간 여유 | 신규: 미구현(앱만, 배포 불필요) |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

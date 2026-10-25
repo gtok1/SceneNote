@@ -3,6 +3,7 @@ import { requireUser } from "../_shared/supabase.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
 import { hasHangul, resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
 import { anilistKoreanNameInput, tmdbKoreanNameInput, type TmdbPersonNameDetail } from "../_shared/personNames.ts";
+import { classifyTmdbPersonCategory } from "../_shared/personCredits.ts";
 
 type PersonSource = "tmdb" | "anilist";
 type PersonCategory = "actor" | "voice_actor";
@@ -157,7 +158,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
   return {
     source: "tmdb",
     external_id: String(detail.id),
-    category: inferPersonCategory(category, credits),
+    category: classifyTmdbPersonCategory(detail.combined_credits?.cast ?? [], category),
     name: displayName,
     original_name: pickTmdbAlias(displayName, detail.also_known_as),
     name_ko: koreanName?.nameKo ?? null,
@@ -480,7 +481,8 @@ async function enrichAniListCreditWithKoreanTitle(
           .find((item) => isCloseYear(yearFromDate(item.first_air_date ?? item.release_date), credit.air_year)) ??
         payload.results?.find((item) => item.media_type === "tv" || item.media_type === "movie");
 
-      const title = match?.name?.trim() || match?.title?.trim() || null;
+      if (!match) continue;
+      const title = match.name?.trim() || match.title?.trim() || null;
       if (!title || !hasKorean(title)) continue;
 
       return {
@@ -658,19 +660,6 @@ function pickTmdbAlias(displayName: string, aliases?: string[] | null): string |
     candidates.find((value) => hasLatin(value)) ??
     null
   );
-}
-
-function inferPersonCategory(category: PersonCategory, credits: PersonCredit[]): PersonCategory {
-  if (category === "voice_actor") return category;
-
-  const roleCount = credits.filter((credit) => credit.role).length;
-  const voiceRoleCount = credits.filter((credit) => /\bvoice\b/i.test(credit.role ?? "")).length;
-
-  if (voiceRoleCount >= 3 || (roleCount > 0 && voiceRoleCount / roleCount >= 0.5)) {
-    return "voice_actor";
-  }
-
-  return category;
 }
 
 function hasLatin(value: string): boolean {

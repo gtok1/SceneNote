@@ -347,3 +347,37 @@ export function planKoreanWordSplitFallback(input: {
   const variants = createKoreanWordSplitVariants(input.query, input.primaryVariants);
   return { variants, reason: variants.length ? "run" : "not_eligible" };
 }
+
+export const ANIME_FOLLOW_UP_MAX = 2;
+export const ANIME_FOLLOW_UP_MIN_REMAINING_MS = 2_500;
+export type AnimeFollowUpReason = "run" | "no_fallback" | "no_anilist" | "no_anime" | "time";
+
+export function planAniListAnimeFollowUp(input: {
+  query: string;
+  fallbackRan: boolean;
+  sources: readonly string[];
+  remainingMs: number;
+  fallbackResults: readonly SearchResult[];
+  primaryVariants: readonly SearchQueryVariant[];
+}): { variants: SearchQueryVariant[]; reason: AnimeFollowUpReason } {
+  if (!input.fallbackRan) return { variants: [], reason: "no_fallback" };
+  if (!input.sources.includes("anilist")) return { variants: [], reason: "no_anilist" };
+  const titles: string[] = [];
+  const seen = new Set<string>();
+  for (const item of input.fallbackResults) {
+    if (item.external_source !== "tmdb" || item.content_type !== "anime" || !/[가-힣]/.test(item.title_primary)) continue;
+    const identity = compactSearchText(item.title_primary);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    if (input.primaryVariants.some(variant => variant.query === item.title_primary)) continue;
+    titles.push(item.title_primary);
+    if (titles.length >= ANIME_FOLLOW_UP_MAX) break;
+  }
+  if (!titles.length) return { variants: [], reason: "no_anime" };
+  if (input.remainingMs < ANIME_FOLLOW_UP_MIN_REMAINING_MS) return { variants: [], reason: "time" };
+  const compactQuery = compactSearchText(collapseWhitespace(input.query));
+  return {
+    reason: "run",
+    variants: titles.map(title => ({ query: collapseWhitespace(title), matchMode: "compact-title", compactQuery }))
+  };
+}

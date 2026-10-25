@@ -19,6 +19,7 @@ export interface EpisodeMeta {
 }
 
 export interface CastMemberMeta {
+  source: "tmdb" | "anilist";
   id: number;
   name: string;
   original_name: string | null;

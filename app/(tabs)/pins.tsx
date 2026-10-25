@@ -3,7 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useAtom } from "jotai";
 
 import { revealedSpoilerPinIdsAtom } from "@/atoms/spoilerAtom";
@@ -13,26 +13,34 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { SegmentedControl } from "@/components/common/SegmentedControl";
 import { PinDetailPanel } from "@/components/pins/PinDetailPanel";
 import { PinFilterChip, PinFilterPanel } from "@/components/pins/PinFilterPanel";
+import { PinGalleryCard } from "@/components/pins/PinGalleryCard";
 import { PinListCard } from "@/components/pins/PinListCard";
+import { PinGroupHeader } from "@/components/pins/PinGroupHeader";
 import { PinShareCard } from "@/components/pins/PinShareCard";
+import { PinViewToggle } from "@/components/pins/PinViewToggle";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useTags } from "@/hooks/useTags";
 import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
+import { usePinsUiStore } from "@/stores/pinsUiStore";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import {
-  createEmotionFilterOptions, createPinGenreOptions, filterPins, getPinCardPressAction,
-  getPinFilterSummary, getPinsLayout, PIN_SORT_OPTIONS, PINS_SCREEN_COPY, pinResultSummary
+  buildPinListRows, createEmotionFilterOptions, createPinGenreOptions, createPinPanelTimeline, filterPins, findPinRowIndex,
+  getPinFilterSummary, getPinGalleryRowSpan, getPinsLayout, getPinViewPresentation, PIN_SORT_OPTIONS, PIN_VIEW_COPY,
+  PINS_SCREEN_COPY, pinResultSummary, type PinListRow
 } from "@/utils/pinListUi";
 import { sharePinCardImage } from "@/utils/pinShare";
 import { sortPins } from "@/utils/pinSort";
 
 export default function PinsScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const layout = getPinsLayout(width);
+  const viewMode = usePinsUiStore((state) => state.viewMode);
+  const setViewMode = usePinsUiStore((state) => state.setViewMode);
+  const view = useMemo(() => getPinViewPresentation({ viewMode, width, fontScale }), [viewMode, width, fontScale]);
   const [sortMode, setSortMode] = useState<PinSortMode>("latest");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -44,6 +52,7 @@ export default function PinsScreen() {
   useFocusEffect(useCallback(() => () => setRevealedSpoilers(new Set()), [setRevealedSpoilers]));
   const plainShareRef = useRef<View | null>(null);
   const maskedShareRef = useRef<View | null>(null);
+  const listRef = useRef<FlashListRef<PinListRow>>(null);
   const allPins = useAllPins();
   const taggedPins = usePinsByTag(selectedTagId ?? undefined);
   const tags = useTags();
@@ -59,18 +68,23 @@ export default function PinsScreen() {
     [activePins, searchQuery, selectedEmotion, genreFilter]
   );
   const sortedPins = useMemo(() => sortPins(filteredPins, sortMode), [filteredPins, sortMode]);
+  const rows = useMemo(() => buildPinListRows(sortedPins, sortMode), [sortedPins, sortMode]);
   const emotionOptions = useMemo(() => createEmotionFilterOptions(facetPins, selectedEmotion), [facetPins, selectedEmotion]);
   const genreOptions = useMemo(() => createPinGenreOptions(activePins ?? [], genreFilter), [activePins, genreFilter]);
   const filterSummary = useMemo(
     () => getPinFilterSummary({ query: searchQuery, emotion: selectedEmotion, genre: genreFilter, tagId: selectedTagId }),
     [searchQuery, selectedEmotion, genreFilter, selectedTagId]
   );
-  const pressAction = getPinCardPressAction(layout.showDetailPanel);
+  const pressAction = view.pressAction;
 
   const selectedPin = useMemo(
     () => sortedPins.find((pin) => pin.id === selectedPinId) ?? sortedPins[0] ?? null,
     [selectedPinId, sortedPins]
   );
+  const panelTimeline = useMemo(() => view.showDetailPanel && selectedPin ? createPinPanelTimeline({
+    pins: filteredPins, selectedId: selectedPin.id, mode: sortMode,
+    filtered: filterSummary.hasActive, revealedIds: revealedSpoilers
+  }) : null, [view.showDetailPanel, selectedPin, filteredPins, sortMode, filterSummary.hasActive, revealedSpoilers]);
 
   useEffect(() => {
     if (!sortedPins.length) {
@@ -88,6 +102,14 @@ export default function PinsScreen() {
     if (pressAction === "open") router.push({ pathname: "/pins/[id]", params: { id } });
     else setSelectedPinId(id);
   }, [pressAction, router]);
+  const openContent = useCallback((id: string) => {
+    router.push({ pathname: "/content/[id]", params: { id } });
+  }, [router]);
+  const selectFromPanel = useCallback((id: string) => {
+    setSelectedPinId(id);
+    const index = findPinRowIndex(rows, id);
+    if (index >= 0) void listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 }).catch(() => undefined);
+  }, [rows]);
   const resetPanelFilters = useCallback(() => {
     setGenreFilter(ALL_GENRE_FILTER);
     setSelectedTagId(null);
@@ -151,8 +173,9 @@ export default function PinsScreen() {
       stretch={layout.stackTools}
     />
   );
+  const viewToggle = <PinViewToggle value={viewMode} onChange={setViewMode} />;
   const listHeader = (
-    <View style={styles.listHeader}>
+    <View style={[styles.listHeader, view.gallery && styles.galleryInset]}>
       <View style={styles.headerCopy}>
         <Text accessibilityRole="header" style={styles.title}>{PINS_SCREEN_COPY.title}</Text>
         <Text style={styles.subtitle}>{PINS_SCREEN_COPY.subtitle}</Text>
@@ -182,9 +205,10 @@ export default function PinsScreen() {
         {layout.stackTools ? (
           <View style={styles.secondaryTools}>
             <View style={styles.sortFlex}>{sortControl}</View>
+            {viewToggle}
             {filterButton}
           </View>
-        ) : <>{sortControl}{filterButton}</>}
+        ) : <>{sortControl}{viewToggle}{filterButton}</>}
       </View>
       {filtersOpen ? (
         <PinFilterPanel
@@ -228,14 +252,19 @@ export default function PinsScreen() {
         <View style={[styles.contentGrid, { gap: layout.gap }]}>
           <View style={styles.mainColumn}>
             <FlashList
+              key={viewMode}
+              ref={listRef}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               ListEmptyComponent={
-                <View style={styles.listEmpty}>
+                <View style={[styles.listEmpty, view.gallery && styles.galleryInset]}>
                   {isLoading ? (
                     <View style={styles.sharedInset}>
-                      <LoadingSkeleton variant="pin-item" count={5} />
+                      {view.gallery ? (
+                        <LoadingSkeleton variant="recommendation-card" count={view.numColumns * 2} columns={view.numColumns}
+                          accessibilityLabel={PIN_VIEW_COPY.loading} />
+                      ) : <LoadingSkeleton variant="pin-item" count={5} />}
                     </View>
                   ) : isError ? (
                     <ErrorState onRetry={retry} />
@@ -249,24 +278,38 @@ export default function PinsScreen() {
                 </View>
               }
               ListHeaderComponent={listHeader}
-              ItemSeparatorComponent={() => <View style={styles.pinSeparator} />}
+              ItemSeparatorComponent={view.gallery ? undefined : () => <View style={styles.pinSeparator} />}
               contentContainerStyle={styles.pinFlashContent}
-              data={sortedPins}
+              data={rows}
               drawDistance={520}
-              extraData={{
-                selectedId: selectedPin?.id ?? null, revealedSpoilers, pressAction, posterWidth: layout.posterWidth
+              numColumns={view.numColumns}
+              overrideItemLayout={(itemLayout, row, _index, maxColumns) => {
+                itemLayout.span = getPinGalleryRowSpan(row, maxColumns);
               }}
-              keyExtractor={(pin) => pin.id}
-              renderItem={({ item: pin }) => (
+              extraData={{
+                selectedId: selectedPin?.id ?? null, revealedSpoilers, pressAction, posterWidth: layout.posterWidth, sortMode,
+                viewMode, numColumns: view.numColumns
+              }}
+              keyExtractor={(row) => row.key}
+              getItemType={(row) => row.type}
+              renderItem={({ item: row }) => view.gallery ? (row.type === "group" ? (
+                <View style={styles.galleryInset}><PinGroupHeader row={row} onPress={openContent} /></View>
+              ) : (
+                <PinGalleryCard pin={row.pin} spoilerRevealed={revealedSpoilers.has(row.pin.id)}
+                  variant={row.grouped ? "scene" : "poster"} onPressPin={onPressPin} />
+              )) : row.type === "group" ? (
+                <PinGroupHeader row={row} onPress={openContent} />
+              ) : (
                 <PinListCard
-                  pin={pin} selected={selectedPin?.id === pin.id} spoilerRevealed={revealedSpoilers.has(pin.id)}
+                  pin={row.pin} selected={selectedPin?.id === row.pin.id} spoilerRevealed={revealedSpoilers.has(row.pin.id)}
                   pressAction={pressAction} posterWidth={layout.posterWidth} padding={layout.cardPadding} onPressPin={onPressPin}
+                  variant={row.grouped ? "grouped" : "full"}
                 />
               )}
-              style={styles.pinFlashList}
+              style={view.gallery ? styles.galleryFlashList : styles.pinFlashList}
             />
           </View>
-          {layout.showDetailPanel ? (
+          {view.showDetailPanel ? (
             <PinDetailPanel
               width={layout.detailPanelWidth}
               spoilerRevealed={selectedPin ? revealedSpoilers.has(selectedPin.id) : false}
@@ -274,6 +317,11 @@ export default function PinsScreen() {
               onOpenDetail={() => selectedPin && router.push({ pathname: "/pins/[id]", params: { id: selectedPin.id } })}
               onRevealSpoiler={() => selectedPin && revealSpoiler(selectedPin)}
               onShare={() => selectedPin && sharePin(selectedPin)}
+              timeline={panelTimeline}
+              onSelectTimelinePin={selectFromPanel}
+              onOpenContent={() => selectedPin && openContent(selectedPin.content_id)}
+              onAddPin={() => selectedPin && router.push({ pathname: "/pins/new", params: { contentId: selectedPin.content_id, episodeId: selectedPin.episode_id ?? "" } })}
+              onOpenAllPins={() => selectedPin && router.push({ pathname: "/content/[id]/pins", params: { id: selectedPin.content_id } })}
               pin={selectedPin}
             />
           ) : null}
@@ -328,6 +376,8 @@ const styles = StyleSheet.create({
   noticeRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.sm },
   notice: { ...typography.caption, color: colors.textMuted, flexShrink: 1 },
   pinFlashList: { flex: 1 },
+  galleryFlashList: { flex: 1, marginHorizontal: -spacing.sm },
+  galleryInset: { paddingHorizontal: spacing.sm },
   pinFlashContent: { paddingBottom: spacing.xxl },
   listEmpty: { paddingTop: spacing.md },
   sharedInset: { marginHorizontal: -spacing.lg },

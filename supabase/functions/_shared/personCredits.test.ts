@@ -48,3 +48,93 @@ describe("person cast credit selection", () => {
     assert.equal(isSelfAppearance(""), false);
   });
 });
+
+function categoryCredits(liveCount: number, voiceCount: number): TmdbPersonCredit[] {
+  const credits: TmdbPersonCredit[] = [];
+  for (let index = 0; index < liveCount; index++) {
+    credits.push({ id: index + 1, media_type: "movie", character: "Role", genre_ids: [18] });
+  }
+  for (let index = 0; index < voiceCount; index++) {
+    credits.push({ id: liveCount + index + 1, media_type: "movie", character: "Kray (voice)", genre_ids: [16] });
+  }
+  return credits;
+}
+
+describe("TMDB person category classification", () => {
+  it("PC-1 keeps a prolific live-action actor with three voice credits an actor", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    assert.equal(classifyTmdbPersonCategory(categoryCredits(93, 3), "voice_actor"), "actor");
+  });
+
+  it("PC-2 classifies predominantly voice and animation credits as voice actor", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    assert.equal(classifyTmdbPersonCategory(categoryCredits(1, 10), "actor"), "voice_actor");
+  });
+
+  it("PC-3 includes the one-half boundary and excludes four-tenths", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    assert.equal(classifyTmdbPersonCategory(categoryCredits(5, 5), "actor"), "voice_actor");
+    assert.equal(classifyTmdbPersonCategory(categoryCredits(6, 4), "voice_actor"), "actor");
+  });
+
+  it("PC-4 excludes narration and self appearances from classification", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    const cast = ["Narrator (voice)", "Self - Narrator (voice)", "Herself", "Role"]
+      .map((character, index) => ({ id: index + 1, media_type: "movie", character, genre_ids: [18] }));
+    assert.equal(classifyTmdbPersonCategory(cast, "voice_actor"), "actor");
+  });
+
+  it("PC-5 counts animation genre without an explicit voice marker", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    const cast = categoryCredits(1, 3).map(credit =>
+      credit.genre_ids?.includes(16) ? { ...credit, character: "Tanjiro" } : credit
+    );
+    assert.equal(classifyTmdbPersonCategory(cast, "actor"), "voice_actor");
+  });
+
+  it("PC-6 preserves either fallback when no eligible credits remain", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    for (const fallback of ["actor", "voice_actor"] as const) {
+      assert.equal(classifyTmdbPersonCategory([], fallback), fallback);
+      assert.equal(classifyTmdbPersonCategory([
+        { id: 1, media_type: "movie", character: "Self", genre_ids: [16] }
+      ], fallback), fallback);
+    }
+  });
+
+  it("PC-7 corrects a voice-actor request to actor for live-action credits", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    assert.equal(classifyTmdbPersonCategory(categoryCredits(10, 0), "voice_actor"), "actor");
+  });
+
+  it("PC-8 counts duplicate media IDs only once", async () => {
+    const { classifyTmdbPersonCategory } = await import("./personCredits.ts");
+    const cast: TmdbPersonCredit[] = [];
+    for (let index = 0; index < 5; index++) {
+      cast.push({ id: 1, media_type: "movie", character: "Kray (voice)", genre_ids: [16] });
+    }
+    cast.push(
+      { id: 2, media_type: "movie", character: "Role", genre_ids: [18] },
+      { id: 3, media_type: "movie", character: "Role", genre_ids: [18] }
+    );
+    assert.equal(classifyTmdbPersonCategory(cast, "voice_actor"), "actor");
+  });
+
+  it("PC-9 recognizes English and Korean narration without masking a voice role", async () => {
+    const { isNarration } = await import("./personCredits.ts");
+    assert.deepEqual(
+      ["Narrator (voice)", "내레이션", "Narration", "Tanjiro (voice)"].map(isNarration),
+      [true, true, true, false]
+    );
+  });
+});
+
+it("PC-10 returns null for no eligible credits and classifies known actor and voice-actor fixtures", async () => {
+  const { classifyTmdbPersonCategoryOrNull } = await import("./personCredits.ts");
+  assert.equal(classifyTmdbPersonCategoryOrNull([]), null);
+  assert.equal(classifyTmdbPersonCategoryOrNull([
+    { id: 1, media_type: "movie", character: "Self", genre_ids: [16] }
+  ]), null);
+  assert.equal(classifyTmdbPersonCategoryOrNull(categoryCredits(93, 3)), "actor");
+  assert.equal(classifyTmdbPersonCategoryOrNull(categoryCredits(1, 10)), "voice_actor");
+});

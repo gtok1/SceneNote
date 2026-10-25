@@ -2,6 +2,11 @@ import type { SearchResult } from "./content";
 
 export type PersonSource = "tmdb" | "anilist";
 export type PersonCategory = "actor" | "voice_actor";
+
+export interface PersonCategoryResult {
+  external_id: string;
+  category: PersonCategory | null;
+}
 export type KoreanNameSource = "user" | "tmdb" | "alias" | "kana" | "romaji";
 
 export interface PersonSearchResult {

@@ -1,4 +1,6 @@
-import type { WatchProviderCategory, WatchProvidersByCategory, WatchProviderScope } from "@/types/watchProviders";
+import type { WatchProviderCategory, WatchProvidersByCategory, WatchProviderScope, WatchProvidersResponse } from "@/types/watchProviders";
+import { stripAnimeSeasonMarkers } from "../../supabase/functions/_shared/watchProviders";
+import { isWatchProviderResponseCompatible } from "./watchProviderLookup";
 
 export { DISNEY_PLUS_HOME_URL, normalizeWatchProviderLink } from "../../supabase/functions/_shared/watchProviderLinks";
 
@@ -34,7 +36,25 @@ export function describeWatchProviderScope(scope: WatchProviderScope | null | un
   return scope === "series" ? "시리즈 전체 기준이에요. 이 시즌 제공 여부는 플랫폼에서 확인해 주세요." : null;
 }
 
-export function createLaftelSearchLink(title: string | null | undefined): string | null {
+export function canDisplayWatchProviderAvailability(input: {
+  response: WatchProvidersResponse;
+  seasonNumber: number | null;
+  requireSeasonMatch: boolean;
+}): boolean {
+  if (!input.requireSeasonMatch) return true;
+  return isWatchProviderResponseCompatible(input) && input.response.provider_scope === "season";
+}
+
+export const WATCH_PROVIDER_REFRESH_MESSAGE = "시청 정보를 새로 확인하지 못했어요. 잠시 후 다시 확인해 주세요.";
+
+export function describeNoSeasonProviders(seasonNumber: number | null): string {
+  const label = seasonNumber === null ? "선택한 시즌" : seasonNumber === 0 ? "스페셜" : `시즌 ${seasonNumber}`;
+  return `${label}의 국내 OTT 제공 정보를 아직 확인하지 못했어요.`;
+}
+
+export function createLaftelSearchLink(title: string | null | undefined, seasonNumber?: number | null): string | null {
   const trimmed = title?.trim();
-  return trimmed ? `https://laftel.net/search?keyword=${encodeURIComponent(trimmed)}` : null;
+  if (!trimmed) return null;
+  const query = seasonNumber && seasonNumber > 0 ? `${stripAnimeSeasonMarkers(trimmed).base} ${seasonNumber}기` : trimmed;
+  return `https://laftel.net/search?keyword=${encodeURIComponent(query)}`;
 }

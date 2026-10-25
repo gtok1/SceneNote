@@ -6,9 +6,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePinContext } from "@/hooks/usePinContext";
 import { getPinContext } from "@/services/pinContext";
 import { confirmDiscard } from "@/utils/confirmDiscard";
+import { confirmDestructive } from "@/utils/confirmDestructive";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import { useNetworkState } from "expo-network";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { useAtom } from "jotai";
 
@@ -185,35 +187,29 @@ export function PinComposer({
       addToast("핀을 저장했어요.", "success");
       leave(() => onSuccess(pin));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "핀 저장에 실패했습니다");
+      setError(userFacingErrorMessage(caught, "핀을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."));
     } finally { saveLock.current = false; setChecking(false); }
   };
 
   const remove = () => {
     if (!defaultValues?.id || isSaving) return;
-    if (Platform.OS === "web") {
-      if (window.confirm("이 핀을 삭제하시겠습니까?")) {
-        deleteMutation.mutate(defaultValues.id, { onSuccess: () => leave(onCancel), onError: caught => setError(caught.message) });
-      }
-      return;
-    }
-    Alert.alert("핀 삭제", "이 핀을 삭제하시겠습니까?", [
-      { text: "취소", style: "cancel" },
-      {
-        text: "삭제",
-        style: "destructive",
-        onPress: async () => {
-          try { await deleteMutation.mutateAsync(defaultValues.id); leave(onCancel); } catch (caught) { setError(caught instanceof Error ? caught.message : "삭제에 실패했습니다"); }
-        }
-      }
-    ]);
+    const pinId = defaultValues.id;
+    confirmDestructive({
+      title: "핀 삭제",
+      message: "이 핀을 삭제할까요? 삭제한 핀은 되돌릴 수 없어요.",
+      confirmLabel: "삭제",
+      onConfirm: () => deleteMutation.mutate(pinId, {
+        onSuccess: () => { addToast("핀을 삭제했어요.", "success"); leave(onCancel); },
+        onError: (caught) => setError(userFacingErrorMessage(caught, "핀을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요."))
+      })
+    });
   };
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
     <ScrollView showsVerticalScrollIndicator={false} ref={scrollRef} contentContainerStyle={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right) }]} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
-        <Text style={[styles.label, { flex: 1 }]}>{context.data ? `${context.data.title} · ${context.data.label}` : context.isError ? context.error.message : "작품·회차 확인 중"}</Text>
+        <Text style={[styles.label, { flex: 1 }]}>{context.data ? `${context.data.title} · ${context.data.label}` : context.isError ? userFacingErrorMessage(context.error, "작품·회차 정보를 불러오지 못했어요. 다시 시도해 주세요.") : "작품·회차 확인 중"}</Text>
         <Pressable accessibilityRole="button" disabled={isSaving} onPress={cancel} style={{ minWidth: 48, minHeight: 48, justifyContent: "center", alignItems: "center" }}>
           <Text style={styles.cancel}>취소</Text>
         </Pressable>
@@ -266,7 +262,7 @@ export function PinComposer({
             style={[styles.input, styles.tagInput]}
             value={tagInput}
           />
-          <Pressable accessibilityRole="button" onPress={addTag} style={styles.smallButton}>
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: isSaving }} disabled={isSaving} onPress={addTag} style={[styles.smallButton, isSaving && styles.disabled]}>
             <Text style={styles.smallButtonText}>추가</Text>
           </Pressable>
         </View>
@@ -274,6 +270,7 @@ export function PinComposer({
           {tagObjects.map((tag) => (
             <TagChip
               key={tag.name}
+              disabled={isSaving}
               onRemove={() =>
                 setDraft((current) => ({
                   ...current,

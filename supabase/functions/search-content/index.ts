@@ -7,7 +7,8 @@ import {
   createSearchQueryVariants,
   filterResponseForVariant,
   annotateFilterMatches,
-  planKoreanWordSplitFallback
+  planKoreanWordSplitFallback,
+  planAniListAnimeFollowUp
 } from "./adapters/normalize.ts";
 import { discoverTmdb, filterSearchResultsByDiscovery, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
@@ -21,6 +22,7 @@ import type { SearchQueryVariant as QueryVariant } from "./adapters/normalize.ts
 import { normalizeSearchCachePayload } from "../_shared/searchCacheMetadata.ts";
 import { discoveryFilterKey, normalizeDiscoveryFilters, type DiscoveryFilterInput, type DiscoveryFilters } from "../_shared/discoveryFilters.ts";
 import { createPersistentRecommendationCache } from "../_shared/recommendationCache.ts";
+import { parseJson } from "../_shared/http.ts";
 
 interface SearchRequest extends DiscoveryFilterInput {
   query?: string;
@@ -47,6 +49,7 @@ interface SearchResponse {
   genre_filter_limited?: boolean;
   filtered_out_count?: number;
   word_split_fallback?: boolean;
+  anime_follow_up?: boolean;
 }
 
 interface SearchJob {
@@ -60,7 +63,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 const ADAPTER_TIMEOUT_MS = 5000;
-const SEARCH_CACHE_VERSION = "ko-v14-unfiltered-query";
+const SEARCH_CACHE_VERSION = "ko-v15-all-seasons";
 
 Deno.serve(async (req: Request) => {
   const requestDeadline = Date.now() + 8_500;
@@ -102,6 +105,12 @@ Deno.serve(async (req: Request) => {
 
   const body = await parseJson<SearchRequest>(req);
   if (!body.ok) return jsonError(400, "INVALID_REQUEST", body.message);
+  if (body.value.query !== undefined && typeof body.value.query !== "string") {
+    return jsonError(400, "INVALID_REQUEST", "query must be a string");
+  }
+  if (body.value.page !== undefined && (typeof body.value.page !== "number" || !Number.isFinite(body.value.page))) {
+    return jsonError(400, "INVALID_REQUEST", "page must be a finite number");
+  }
 
   const query = body.value.query?.trim() ?? "";
   let mediaType = body.value.media_type ?? body.value.category ?? "all";
@@ -159,7 +168,15 @@ Deno.serve(async (req: Request) => {
     ? await searchQueryVariants(adminClient, ["tmdb"], plan.variants, fetchMediaType, page,
       Math.min(ADAPTER_TIMEOUT_MS, requestDeadline - Date.now() - 1000))
     : { results: [], totals: [], hasNextPage: false, successfulSources: [], failedSources: [], misses: 0 };
-  const unfilteredResults = compactResults([...primary.results, ...fallback.results]);
+  const followUp = planAniListAnimeFollowUp({
+    query: normalizedQuery, fallbackRan: plan.reason === "run", sources: targetSources,
+    remainingMs: requestDeadline - Date.now(), fallbackResults: fallback.results, primaryVariants: queryVariants
+  });
+  const animeFollowUp: VariantSearchOutcome = followUp.reason === "run"
+    ? await searchQueryVariants(adminClient, ["anilist"], followUp.variants, fetchMediaType, page,
+      Math.min(ADAPTER_TIMEOUT_MS, requestDeadline - Date.now() - 1000))
+    : { results: [], totals: [], hasNextPage: false, successfulSources: [], failedSources: [], misses: 0 };
+  const unfilteredResults = compactResults([...primary.results, ...fallback.results, ...animeFollowUp.results]);
   // Keep the provider page cache independent of the viewer's selected filters.
   // Only the small, reusable production-country evidence is cached separately.
   const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
@@ -169,8 +186,8 @@ Deno.serve(async (req: Request) => {
   const hasFilters = searchFilters.genres.length + searchFilters.countries.length + searchFilters.mediaTypes.length > 0;
   const annotated = annotateFilterMatches(unfilteredResults, filtered.results, hasFilters);
   const results = annotated.results;
-  const successfulSources = [...primary.successfulSources, ...fallback.successfulSources];
-  const failedSources = [...primary.failedSources, ...fallback.failedSources]
+  const successfulSources = [...primary.successfulSources, ...fallback.successfulSources, ...animeFollowUp.successfulSources];
+  const failedSources = [...primary.failedSources, ...fallback.failedSources, ...animeFollowUp.failedSources]
     .filter(source => !successfulSources.includes(source));
 
   if (results.length === 0 && successfulSources.length === 0 && failedSources.length > 0) {
@@ -181,17 +198,18 @@ Deno.serve(async (req: Request) => {
     results,
     sources: [...new Set(successfulSources)],
     failedSources: [...new Set(failedSources)],
-    cached: primary.misses + fallback.misses === 0,
+    cached: primary.misses + fallback.misses + animeFollowUp.misses === 0,
     query,
     normalizedQuery,
-    total: Math.max(results.length, ...primary.totals, ...fallback.totals),
+    total: Math.max(results.length, ...primary.totals, ...fallback.totals, ...animeFollowUp.totals),
     page,
     hasNextPage: primary.hasNextPage,
     partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
     country_filter_limited: filtered.countryFilterLimited,
     genre_filter_limited: filtered.genreFilterLimited,
     filtered_out_count: annotated.filteredOutCount,
-    word_split_fallback: plan.reason === "run"
+    word_split_fallback: plan.reason === "run",
+    anime_follow_up: followUp.reason === "run"
   };
 
   return json(response);
@@ -495,14 +513,6 @@ function parseSourceFromError(reason: unknown): ExternalSource | null {
   const message = reason instanceof Error ? reason.message : String(reason);
   const [source] = message.split(":");
   return ["tmdb", "anilist", "kitsu", "tvmaze"].includes(source) ? (source as ExternalSource) : null;
-}
-
-async function parseJson<T>(req: Request): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
-  try {
-    return { ok: true, value: (await req.json()) as T };
-  } catch {
-    return { ok: false, message: "Invalid JSON body" };
-  }
 }
 
 function json(payload: unknown, status = 200): Response {

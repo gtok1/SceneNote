@@ -1,29 +1,30 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { Tag } from "@/types/pins";
 
 interface TagChipProps {
   tag: Pick<Tag, "id" | "name">;
   selected?: boolean;
+  disabled?: boolean;
   onPress?: () => void;
   onRemove?: () => void;
 }
 
-export const TagChip = memo(function TagChip({ tag, selected, onPress, onRemove }: TagChipProps) {
+export const TagChip = memo(function TagChip({ tag, selected, disabled = false, onPress, onRemove }: TagChipProps) {
   const Container = onPress ? Pressable : View;
 
   return (
     <Container
       accessibilityRole={onPress ? "button" : undefined}
-      accessibilityState={{ selected: Boolean(selected) }}
-      onPress={onPress}
+      accessibilityState={{ selected: Boolean(selected), disabled }}
+      onPress={disabled ? undefined : onPress}
       style={[styles.chip, selected && styles.selected]}
     >
       <Text style={[styles.text, selected && styles.selectedText]}>#{tag.name}</Text>
       {onRemove ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${tag.name} 삭제`} onPress={onRemove} style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${tag.name} 삭제`} accessibilityState={{ disabled }} disabled={disabled} onPress={onRemove} style={[styles.removeButton, disabled && styles.disabled]}>
           <Text style={styles.remove}>×</Text>
         </Pressable>
       ) : null}
@@ -48,17 +49,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary
   },
   text: {
+    ...typography.caption,
     color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700"
   },
   selectedText: {
     color: colors.surface
   },
   remove: {
+    ...typography.headline,
     color: colors.textMuted,
-    fontSize: 16,
-    fontWeight: "800",
-    lineHeight: 16
+  },
+  removeButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  disabled: {
+    opacity: 0.5
   }
 });

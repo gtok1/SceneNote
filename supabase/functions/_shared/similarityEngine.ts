@@ -30,11 +30,11 @@ export interface SimilaritySignal {
   source: string;
 }
 
-export interface RankedSimilarityWork<T extends SimilarityWork = SimilarityWork> extends T {
+export type RankedSimilarityWork<T extends SimilarityWork = SimilarityWork> = T & {
   similarity_score: number;
   shared_signals: SimilaritySignal[];
   similarity_reason: string;
-}
+};
 
 const WEIGHTS: Record<SimilarityFocus, Record<SimilaritySignalType, number>> = {
   balanced: { provider_recommendation: 0.28, tag: 0.2, genre: 0.18, story: 0.18, staff: 0.08, studio: 0.08 },

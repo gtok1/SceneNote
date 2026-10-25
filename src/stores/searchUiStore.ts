@@ -37,7 +37,7 @@ export const useSearchUiStore = create<SearchUiState>()(
       accountUserId: useAuthStore.getState().user?.id ?? null,
       accountRevision: 0,
       filterUserId: null,
-      viewMode: "detail",
+      viewMode: "gallery",
       setQuery: (query) => set({ query }),
       beginAccount: (userId) => {
         const transition = getSearchAccountTransition(get(), userId);
@@ -55,6 +55,9 @@ export const useSearchUiStore = create<SearchUiState>()(
     }),
     {
       name: "scenenote-search-ui",
+      version: 1,
+      // Old installs stored the former default (detail) without an explicit choice.
+      migrate: () => ({ viewMode: "gallery" as const }),
       storage: createJSONStorage(() => (canUsePersistentStorage ? AsyncStorage : noopStorage)),
       partialize: (state) => ({ viewMode: state.viewMode })
     }

@@ -1,3 +1,4 @@
+import * as choiceContract from "./contentDetailView";
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, manualProgressSavedToast, isEpisodeProgressCompletedMode, getContentDetailLayout, createContentDetailMetaItems, pinListLabel, createWatchStatusControlModel, contentDetailSections, CONTENT_DETAIL_SIDE_WIDTH, PRIMARY_WATCH_STATUSES, SECONDARY_WATCH_STATUSES } from "./contentDetailView";
@@ -57,4 +58,53 @@ it("C-3 enables completed mode only with a positive known total", () => {
   assert.equal(isEpisodeProgressCompletedMode({statuses:["completed"],totalEpisodes:0}),false);
   assert.equal(isEpisodeProgressCompletedMode({statuses:["watching"],totalEpisodes:10}),false);
   assert.equal(isEpisodeProgressCompletedMode({statuses:["completed","recommended"],totalEpisodes:1}),true);
+});
+
+it("episode choices use only explicit published rows, including gaps", async () => {
+  const { episodeChoiceNumbers } = await import("./contentDetailView");
+  assert.deepEqual(episodeChoiceNumbers([{ episode_number: 3 }, { episode_number: 1 }, { episode_number: 3 }]), [1, 3]);
+  assert.deepEqual(episodeChoiceNumbers([]), []);
+  assert.deepEqual(episodeChoiceNumbers([{ episode_number: 0 }, { episode_number: -1 }, { episode_number: Number.NaN }]), []);
+});
+it("episode choices use the actual single season of a standalone AniList sequel", async () => {
+  const { episodeChoiceSeasonNumber } = await import("./contentDetailView");
+  assert.equal(episodeChoiceSeasonNumber(null, 3, [{ season_number: 1 }]), 1);
+  assert.equal(episodeChoiceSeasonNumber(2, 3, [{ season_number: 1 }, { season_number: 2 }]), 2);
+  assert.equal(episodeChoiceSeasonNumber(null, 3, [{ season_number: 1 }, { season_number: 3 }]), 3);
+});
+
+it("EC-1 shows every numbered choice when API total is 26 or one", () => {
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: 26, releasedEpisodes: [] }), { kind: "count", numbers: Array.from({ length: 26 }, (_, i) => i + 1) });
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: 1, releasedEpisodes: [] }), { kind: "count", numbers: [1] });
+});
+it("EC-2 prefers selected season count over total and released rows", () => {
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: 12, totalEpisodes: 24, releasedEpisodes: [{ episode_number: 1 }] }), { kind: "count", numbers: Array.from({ length: 12 }, (_, i) => i + 1) });
+});
+it("EC-3 uses sorted distinct released numbers without filling gaps", () => {
+  for (const releasedEpisodes of [[3, 1, 3], [1, 3]]) assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: null, releasedEpisodes: releasedEpisodes.map(episode_number => ({ episode_number })) }), { kind: "released", numbers: [1, 3] });
+});
+it("EC-4 uses manual input when neither count nor list exists", () => {
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: null, releasedEpisodes: [] }), { kind: "manual" });
+});
+it("EC-5 falls back to released rows or manual above the 200 choice limit", () => {
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: 1100, releasedEpisodes: [{ episode_number: 1 }, { episode_number: 2 }] }), { kind: "released", numbers: [1, 2] });
+  assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes: 1100, releasedEpisodes: [] }), { kind: "manual" });
+});
+it("EC-6 rejects zero, negative and fractional episode counts", () => {
+  for (const totalEpisodes of [0, -3, 2.5]) assert.deepEqual(choiceContract.resolveEpisodeChoiceMode({ seasonEpisodeCount: null, totalEpisodes, releasedEpisodes: [] }), { kind: "manual" });
+});
+it("EI-1 hides list status in count mode even while fetching or failed", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "count", numbers: [1] }, totalEpisodes: 26, isFetching: true, isError: true }), null);
+});
+it("EI-2 describes released rows and unknown total separately", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2, 3] }, totalEpisodes: null, isFetching: false, isError: false }), "API 공개 회차 3개 · 최근 3화 · 총 화수 미정");
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2] }, totalEpisodes: 1100, isFetching: false, isError: false }), "API 공개 회차 2개 · 최근 2화");
+});
+it("EI-3 explains manual input when no API count is available", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: false, isError: false }), choiceContract.EPISODE_CHOICE_MANUAL_COPY);
+  assert.equal(choiceContract.EPISODE_CHOICE_MANUAL_COPY, "API에서 이 작품의 화수를 알려 주지 않아요. 본 회차를 직접 입력해 주세요.");
+});
+it("EI-4 shows error before loading in manual mode", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: false, isError: true }), "공개 회차를 불러오지 못했어요.");
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: true, isError: false }), "공개된 회차를 확인하고 있어요.");
 });

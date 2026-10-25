@@ -1,4 +1,4 @@
-import type { CrewMember } from "./content";
+import type { ContentType, CrewMember } from "./content";
 
 export type EmotionType =
   | "excited"
@@ -30,6 +30,7 @@ export interface TimelinePin {
   user_id: string;
   content_id: string;
   episode_id: string | null;
+  content_type?: ContentType;
   content_crew?: CrewMember[];
   content_title?: string | null | undefined;
   content_poster_url?: string | null | undefined;
@@ -60,3 +61,5 @@ export interface PinInput {
 }
 
 export type PinSortMode = "latest" | "timeline";
+
+export type PinViewMode = "gallery" | "list";

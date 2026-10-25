@@ -2,23 +2,13 @@ import { fetchEpisodeAvailability, fetchEpisodesForSeason } from "../_shared/ext
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ExternalSource } from "../_shared/types.ts";
+import { resolveSeasonContent } from "./seasonContent.ts";
 
 interface FetchEpisodesRequest {
   content_id?: string;
   season_id?: string;
   force_refresh?: boolean;
   availability_only?: boolean;
-}
-
-interface SeasonRow {
-  id: string;
-  content_id: string;
-  season_number: number;
-  episode_count: number | null;
-  contents: {
-    source_api: ExternalSource;
-    source_id: string;
-  } | null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -55,7 +45,7 @@ Deno.serve(async (req: Request) => {
   if (seasonError) return jsonError(500, "DB_ERROR", seasonError.message);
   if (!season) return jsonError(404, "SEASON_NOT_FOUND", "Season was not found");
 
-  const seasonRow = season as SeasonRow;
+  const seasonRow = { ...season, contents: resolveSeasonContent(season.contents) };
 
   if (availabilityOnly) {
     if (!seasonRow.contents) return jsonError(404, "CONTENT_NOT_FOUND", "Related content metadata was not found");
@@ -68,6 +58,8 @@ Deno.serve(async (req: Request) => {
       });
       return json({
         released_episode_number: availability.releasedEpisodeNumber,
+        released_episodes: availability.releasedEpisodes,
+        released_episodes_source: availability.releasedEpisodesSource,
         upcoming_episode_number: availability.upcomingEpisodeNumber,
         next_air_date: availability.nextAirDate,
         season_id: seasonId

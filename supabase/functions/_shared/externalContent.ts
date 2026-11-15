@@ -4,6 +4,8 @@ import { normalizeGenreNames } from "./genres.ts";
 import { hasTmdbAnimationGenre } from "./tmdbClassification.ts";
 import {
   koreaDateOnly,
+  mergePublishedEpisodes,
+  publishedAiringScheduleEpisodes,
   publishedStreamingEpisodes,
   publishedDatedEpisodes,
   type PublishedEpisode,
@@ -745,6 +747,44 @@ export async function fetchContentDetail(
   }
 }
 
+interface AniListAiringSchedulePage {
+  pageInfo?: { hasNextPage?: boolean | null } | null;
+  nodes?: { episode?: number | null; airingAt?: number | null }[] | null;
+}
+
+const ANILIST_SCHEDULE_PAGE_SIZE = 50;
+const ANILIST_SCHEDULE_MAX_PAGES = 4;
+
+/**
+ * 방영이 끝난 일정이 25행을 넘는 작품용. 회차 버튼 상한(200)까지만 이어 받는다.
+ * 그보다 길거나 조회가 실패하면 hasNextPage: true로 돌려 일정을 쓰지 않게 한다(앞부분만 있는 목록은 쓰지 않는다).
+ */
+async function fetchAniListAiredSchedule(endpoint: string, mediaId: number): Promise<AniListAiringSchedulePage> {
+  const nodes: NonNullable<AniListAiringSchedulePage["nodes"]> = [];
+  try {
+    for (let page = 1; page <= ANILIST_SCHEDULE_MAX_PAGES; page += 1) {
+      const payload = await postJson<{
+        data?: { Page?: { pageInfo?: { hasNextPage?: boolean | null } | null; airingSchedules?: AniListAiringSchedulePage["nodes"] } | null };
+        errors?: { message?: string }[];
+      }>(endpoint, {
+        query: `query GetAiredSchedule($id: Int!, $page: Int!, $perPage: Int!) {
+          Page(page: $page, perPage: $perPage) {
+            pageInfo { hasNextPage }
+            airingSchedules(mediaId: $id, notYetAired: false, sort: EPISODE) { episode airingAt }
+          }
+        }`,
+        variables: { id: mediaId, page, perPage: ANILIST_SCHEDULE_PAGE_SIZE }
+      });
+      if (payload.errors?.length || !payload.data?.Page) return { pageInfo: { hasNextPage: true }, nodes: [] };
+      nodes.push(...(payload.data.Page.airingSchedules ?? []));
+      if (!payload.data.Page.pageInfo?.hasNextPage) return { pageInfo: { hasNextPage: false }, nodes };
+    }
+  } catch {
+    return { pageInfo: { hasNextPage: true }, nodes: [] };
+  }
+  return { pageInfo: { hasNextPage: true }, nodes: [] };
+}
+
 export async function fetchEpisodeAvailability(params: {
   source: ExternalSource;
   externalId: string;
@@ -766,6 +806,7 @@ export async function fetchEpisodeAvailability(params: {
           episodes?: number | null;
           streamingEpisodes?: { title?: string | null; url?: string | null }[];
           nextAiringEpisode?: { episode: number; airingAt: number } | null;
+          airingSchedule?: AniListAiringSchedulePage | null;
         } | null;
       };
       errors?: { message?: string }[];
@@ -776,19 +817,29 @@ export async function fetchEpisodeAvailability(params: {
           episodes
           nextAiringEpisode { episode airingAt }
           streamingEpisodes { title url }
+          airingSchedule(notYetAired: false, perPage: 25) { pageInfo { hasNextPage } nodes { episode airingAt } }
         }
       }`,
       variables: { id: Number.parseInt(params.externalId, 10) }
     });
     if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList airing query failed");
     if (!payload.data?.Media) return { releasedEpisodeNumber: null, upcomingEpisodeNumber: null, nextAirDate: null, releasedEpisodes: [], releasedEpisodesSource: "anilist_streaming" };
-    const releasedEpisodes = publishedStreamingEpisodes(payload.data.Media.streamingEpisodes ?? []);
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const streamingEpisodes = publishedStreamingEpisodes(payload.data.Media.streamingEpisodes ?? []);
+    // AniList는 방영 중인 작품의 episodes·streamingEpisodes를 비워 두는 경우가 많다(실측 185756).
+    // 회차별 방영 일정은 따로 공개하므로, 방영이 끝난 행을 공개 회차로 함께 쓴다.
+    const firstSchedulePage = payload.data.Media.airingSchedule ?? null;
+    const schedule = firstSchedulePage?.pageInfo?.hasNextPage
+      ? await fetchAniListAiredSchedule(endpoint, Number.parseInt(params.externalId, 10))
+      : firstSchedulePage;
+    const scheduleEpisodes = publishedAiringScheduleEpisodes(schedule, nowSeconds);
+    const releasedEpisodes = mergePublishedEpisodes(streamingEpisodes, scheduleEpisodes);
     const releasedEpisodeNumber = releasedEpisodes.at(-1)?.episode_number ?? null;
-    const upcoming = upcomingEpisodeFromAniList(payload.data.Media.nextAiringEpisode, Math.floor(now.getTime() / 1000));
+    const upcoming = upcomingEpisodeFromAniList(payload.data.Media.nextAiringEpisode, nowSeconds);
     return {
       releasedEpisodeNumber,
       releasedEpisodes,
-      releasedEpisodesSource: "anilist_streaming",
+      releasedEpisodesSource: scheduleEpisodes.length > 0 ? "anilist_airing_schedule" : "anilist_streaming",
       upcomingEpisodeNumber: upcoming?.episodeNumber ?? null,
       nextAirDate: upcoming?.airDate ?? null
     };

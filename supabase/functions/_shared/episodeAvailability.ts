@@ -81,3 +81,43 @@ export function publishedDatedEpisodes(rows: readonly PublishedEpisode[], today:
     row.air_date && /^\d{4}-\d{2}-\d{2}$/.test(row.air_date) && row.air_date <= today)
     .sort((a, b) => a.episode_number - b.episode_number);
 }
+
+interface AiringScheduleNode {
+  episode?: number | null;
+  airingAt?: number | null;
+}
+
+/**
+ * AniList airingSchedule의 방영이 끝난 행을 공개 회차로 쓴다. 회차 번호와 방영 시각이 API에 그대로 있는 행만 쓰고
+ * 빈 번호를 채우지 않는다. 다음 쪽이 남은 목록(장편)은 앞부분이 잘린 것이라 쓰지 않는다.
+ */
+export function publishedAiringScheduleEpisodes(
+  schedule: { nodes?: readonly AiringScheduleNode[] | null; pageInfo?: { hasNextPage?: boolean | null } | null } | null | undefined,
+  nowSeconds: number
+): PublishedEpisode[] {
+  if (!schedule?.nodes || schedule.pageInfo?.hasNextPage || !Number.isFinite(nowSeconds)) return [];
+  const episodes = new Map<number, PublishedEpisode>();
+  const rows = [...schedule.nodes].sort((a, b) => (a.airingAt ?? 0) - (b.airingAt ?? 0));
+  for (const row of rows) {
+    const number = row.episode;
+    const airingAt = row.airingAt;
+    if (typeof number !== "number" || !Number.isInteger(number) || number < 1 || episodes.has(number)) continue;
+    if (typeof airingAt !== "number" || !Number.isFinite(airingAt) || airingAt > nowSeconds) continue;
+    episodes.set(number, { episode_number: number, title: null, air_date: koreaDateOnly(new Date(airingAt * 1000)) });
+  }
+  return [...episodes.values()].sort((a, b) => a.episode_number - b.episode_number);
+}
+
+/** 스트리밍 목록(제목·링크)과 방영 일정(날짜)을 회차 번호로 합친다. */
+export function mergePublishedEpisodes(
+  streaming: readonly PublishedEpisode[],
+  schedule: readonly PublishedEpisode[]
+): PublishedEpisode[] {
+  const episodes = new Map<number, PublishedEpisode>();
+  for (const row of schedule) episodes.set(row.episode_number, { ...row });
+  for (const row of streaming) {
+    const dated = episodes.get(row.episode_number);
+    episodes.set(row.episode_number, { ...row, air_date: row.air_date ?? dated?.air_date ?? null });
+  }
+  return [...episodes.values()].sort((a, b) => a.episode_number - b.episode_number);
+}

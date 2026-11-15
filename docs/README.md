@@ -68,6 +68,11 @@
 | [63 회차 선택 API 화수 우선](63_episode_progress_count_choices_fixes_spec.md) | 화수가 있으면 1~화수 버튼, 없을 때만 공개 목록·직접 입력 | 신규: 미구현(앱만, 배포 불필요) |
 | [64 추천 호출 비용 검증·정정](64_recommendation_invocation_cost_fixes_spec.md) | 호출 수 집계, 노출 기록 합치기, 이어 찾기 예산 확대, 자동 호출 상한 | 구현(`npm test` 1349/1349, 새 테스트 13개), `personalized-recommendations` v23 배포(2026-10-24 20:03, 무인증 401 확인). 로그인 측정 M-1~M-3 남음 |
 | [65 검색 디바운스·요청 제한 시간](65_search_debounce_and_request_timeout_fixes_spec.md) | 검색 탭 300ms 디바운스·자모 제외·즉시 검색, 추천·검색 호출 제한 시간 여유 | 신규: 미구현(앱만, 배포 불필요) |
+| [66 공식 제목·TMDB 번역 제목 차이 검색 보정](66_korean_search_relaxed_words_fixes_spec.md) | "추방당한 치트" 0건 원인 실측(TMDB 단어 AND, 판정 허점), 앞 단계에 맞는 제목이 없을 때만 TMDB 4단계 단어 완화 질의·단어 덮기 거르기, 골든 6개 | 신규: 미구현. 구현 후 `search-content` 재배포 필요 |
+| [67 무관한 AniList 시즌 카드 누수](67_anilist_season_card_leak_fixes_spec.md) | 1기가 걸러진 무관한 작품의 "…2기" 카드가 남는 문제, 펼친 시즌은 기본 작품 판정을 따름(시즌 검색은 유지), 2단계 판정 막힘 해소, 캐시 버전 상향 | 신규: 미구현. 구현 후 `search-content` 재배포 필요(docs/66과 함께 가능) |
+| [68 로그인 전 화면 사용성·오류 원문 노출 QA](68_auth_usability_and_error_copy_qa_2026-11-15.md) | 온보딩 로그인 링크·이전, 인증 오류 한국어화, 비밀번호 보기, 화면 24곳 서버 영문 오류 문구 교체 | 구현: T-1~T-17·24곳 연결, 로그인 전 웹 확인. 실제 인증 실패·로그인 후 오프라인·iOS 수동 확인 남음. 앱만 변경, 서버 배포 불필요. 증거는 development_next_steps 참조 |
+| [69 공개 메타데이터 영속 재사용](69_persistent_public_metadata_cache_fixes_spec.md) | 보러가기·작품/인물 상세 DB 저장·수동 갱신, 공유 인물 프로필·핀/등록 캐시 공유, 전체 API 흐름 점검 | 구현·검증/운영 적용 여부는 development_next_steps 참조. DB 스키마·RLS 변경 없음 |
+| [70 최신 추천 수집·CPU 오류 정정](70_latest_recommendation_catalog_and_cpu_fixes_spec.md) | 최신모드와 all-year 인기fill 분리, 날짜순 stream cursor·CPU 반복 계산 정정, 새 앱 정책/재시작 | 구현·검증·운영 적용 여부는 development_next_steps 참조 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

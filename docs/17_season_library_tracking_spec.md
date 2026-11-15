@@ -169,3 +169,17 @@ RLS는 기존 `auth.uid() = user_id` 정책이 새 컬럼에도 그대로 적용
 - **기존 `NULL` 행과 시즌 행의 공존 UX**: 라이브러리 목록에서 같은 작품이 두 줄로 보일 수 있다. 목록 화면의 그룹핑 규칙은 이 명세 범위 밖이며, 구현 후 실제 데이터로 확인이 필요하다.
 - **추천 엔진 영향**: `recommendationEngine`의 라이브러리 동일성 판정이 `content_id` 기준이라 시즌 행이 늘면 가중치가 중복 계산될 수 있다. 구현 시 `user_library_items` 조회 지점을 점검할 것.
 - **AniList 시즌과의 표기 통일**: 애니는 별도 작품이라 "시즌 N" 접미사가 붙지 않는다. 표기 일관성은 후속 과제.
+
+
+## 11. 2026-10-26 후속 확정 — 진행률도 등록 범위를 따른다
+
+사용자 승인에 따라 시즌 항목은 해당 시즌의 진행을, `season_number = NULL` 항목은 작품 전체의 진행을 표시한다. 이 절은 docs/12의 유효 진행 절대 회차 설명과 docs/48의 시즌 범위 유보를 등록 범위에 한해 구체화한다. 콘텐츠/시즌 식별성, 기존 NULL 행, DB 저장 형식은 바꾸지 않는다.
+
+- 각 10화인 두 시즌에서 시즌1 10화·시즌2 3화를 체크했다면 시즌1은 `10/10`, 시즌2는 `3/10`, 작품 전체는 `13/20`이다. 다른 시즌의 체크 수나 최댓값을 시즌 항목에 더하지 않는다.
+- `episode_count`, `watched_episode_count`, `derived_watched_through`, `effective_watched_through`, `next_episode_number`는 같은 등록 범위를 쓴다. `manual_watched_absolute_number`는 회차 동기화용 작품 전체 절대값으로 유지하며 DB에 쓰지 않는다.
+- 조회는 `getLibraryProgressFields`, 상태/직접 진행 캐시는 `resolveLibraryItemProgress`·`withLibraryManualProgress`를 거친다. 완료는 등록 범위 전체를 본 것으로 계산하되 저장된 수동 위치를 보존한다. 해제·실패 롤백·재조회도 같은 값으로 돌아온다.
+- 시즌 항목의 입력과 에피소드 선택은 등록한 실제 시즌으로 제한한다. 회차 체크 후 수동 위치 동기화도 상대 회차를 사용해 시즌2 첫 화 해제가 시즌1 마지막 화 포인터로 바뀌지 않는다. 기존 null 시즌 수동 포인터는 자동 이관하지 않는다.
+- 선택 시즌 메타데이터가 없으면 다른 시즌의 화수·체크 진행을 빌리지 않는다. 시즌 총 화수 미상은 `NULL`, 작품 전체는 포함 시즌 중 화수 미상이 있으면 전체 분모도 `NULL`이다. 다른 시즌에 저장된 수동 위치를 변환할 정보가 없으면 추정하지 않는다.
+- AniList 기수별 독립 콘텐츠는 표시 기수와 실제 단일 시즌 번호가 다를 수 있다. `source_api = anilist`이고 실제 시즌이 하나일 때만 그 시즌을 사용하며 등록 기수/외부 ID는 보존한다.
+
+회귀는 `src/utils/libraryProgress.test.ts`, `episodeProgress.test.ts`, `contentDetailView.test.ts`, `airingAvailability.test.ts`에 있다. 실제 서비스·mutation 캐시 연결의 합성 회귀는 `scripts/libraryProgressIntegration.test.ts`로 다시 실행할 수 있다. 실제 실행 결과와 웹/앱 미검증 범위는 `development_next_steps.md`의 2026-10-26 기록을 따른다.

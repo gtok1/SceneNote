@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { YearSelect } from "@/components/common/YearSelect";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { MediaTypeFilter } from "@/types/content";
 import type { LibraryStatusFilter } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
@@ -37,6 +37,7 @@ interface ContentSearchBarProps {
   isSavingFilters: boolean;
   genreOptions?: string[];
   autoFocus?: boolean;
+  compact?: boolean;
   examples?: readonly string[];
   onExamplePress?: (value: string) => void;
 }
@@ -101,6 +102,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
       isSavingFilters,
       genreOptions,
       autoFocus = false,
+      compact = false,
       examples = [],
       onExamplePress
     },
@@ -167,7 +169,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
     );
 
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, compact && styles.compactContainer]}>
         <View style={styles.inputRow}>
           <View style={styles.inputField}>
             <TextInput
@@ -181,7 +183,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
               placeholder="작품명, 배우·성우 이름으로 검색"
               placeholderTextColor={colors.textSubtle}
               returnKeyType="search"
-              style={[styles.input, value.length > 0 && styles.inputWithClear]}
+              style={[styles.input, compact && styles.compactInput, value.length > 0 && styles.inputWithClear]}
               value={value}
             />
             {value.length > 0 ? (
@@ -435,6 +437,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     zIndex: 1000
   },
+  compactContainer: { paddingTop: spacing.xs, paddingBottom: spacing.xs },
+  compactInput: { ...typography.body, minHeight: 48, paddingVertical: spacing.sm },
   inputRow: {
     flexDirection: "row",
     gap: spacing.sm

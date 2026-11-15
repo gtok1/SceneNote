@@ -1,4 +1,6 @@
 import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
+import { readContentMetadata } from "../_shared/contentMetadataStore.ts";
+import { createPersistentMetadataStore, PersistentMetadataCacheError } from "../_shared/persistentMetadataCache.ts";
 import { parseStoredCrew } from "../_shared/contentCrew.ts";
 import { saveContentCrew } from "../_shared/contentCrewStore.ts";
 import { extractGenreNames, upsertGenres } from "../_shared/genres.ts";
@@ -11,6 +13,7 @@ interface GetContentDetailRequest {
   external_source?: ExternalSource;
   external_id?: string;
   media_type?: string;
+  force_refresh?: boolean;
 }
 
 interface SeasonRow {
@@ -54,53 +57,57 @@ Deno.serve(async (req: Request) => {
 
   if (externalError) return jsonError(500, "DB_ERROR", externalError.message);
 
-  if (externalRow?.content_id) {
-    try {
-      const contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
-      await updateContentSnapshot(adminClient, externalRow.content_id, contentMeta);
-      const crewResult = await saveContentCrew(adminClient, externalRow.content_id, contentMeta.crew);
-      if (crewResult === "failed") console.warn("content crew save failed");
+  if (body.value.force_refresh !== undefined && typeof body.value.force_refresh !== "boolean") {
+    return jsonError(400, "INVALID_REQUEST", "force_refresh must be a boolean");
+  }
 
-      try {
-        await upsertGenres(adminClient, externalRow.content_id, contentMeta.genres);
-      } catch (error) {
-        console.error("Genre upsert skipped:", error);
+  try {
+    const result = await readContentMetadata({
+      source, externalId, mediaType: body.value.media_type,
+      store: createPersistentMetadataStore(adminClient),
+      forceRefresh: body.value.force_refresh === true,
+      fetchFresh: async () => {
+        const contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
+        // Required content writes finish before publishing the shared snapshot. A failed mirror
+        // must not make a failed refresh visible to later readers as a successful replacement.
+        if (externalRow?.content_id) {
+          await updateContentSnapshot(adminClient, externalRow.content_id, contentMeta);
+          const crewResult = await saveContentCrew(adminClient, externalRow.content_id, contentMeta.crew);
+          if (crewResult === "failed") console.warn("content crew save failed");
+          try {
+            await upsertGenres(adminClient, externalRow.content_id, contentMeta.genres);
+          } catch (error) {
+            console.error("Genre upsert skipped:", error);
+          }
+          await upsertSeasonsAndPrefetchFirstSeason(adminClient, {
+            contentId: externalRow.content_id, source, externalId, contentMeta
+          });
+        }
+        return contentMeta;
       }
-
-      await upsertSeasonsAndPrefetchFirstSeason(adminClient, {
-        contentId: externalRow.content_id,
-        source,
-        externalId,
-        contentMeta
-      });
-
-      return json({
-        content: {
-          content_id: externalRow.content_id,
-          external_source: contentMeta.external_source,
-          external_id: contentMeta.external_id,
-          content_type: contentMeta.content_type,
-          title_primary: contentMeta.title_primary,
-          title_original: contentMeta.title_original,
-          poster_url: contentMeta.poster_url,
-          overview: contentMeta.overview,
-          localized_overview: contentMeta.localized_overview,
-          air_year: contentMeta.air_year,
-          air_date: contentMeta.air_date,
-          end_date: contentMeta.end_date,
-          has_seasons: contentMeta.has_seasons,
-          episode_count: contentMeta.episode_count,
-          genres: contentMeta.genres,
-          cast: contentMeta.cast,
-          crew: contentMeta.crew
-        },
-        seasons: contentMeta.seasons,
-        from_db: false
-      });
-    } catch {
-      // Fall back to the stored DB snapshot below when an external API is unavailable.
+    });
+    const contentMeta = result.data;
+    // A read of an already-persisted snapshot does not rewrite metadata or prefetch episodes.
+    return json({
+      content: {
+        ...contentMeta,
+        ...(externalRow?.content_id ? { content_id: externalRow.content_id } : {})
+      },
+      seasons: contentMeta.seasons,
+      from_db: result.fromCache,
+      from_cache: result.fromCache,
+      cache_policy: "manual-v1"
+    });
+  } catch (error) {
+    // Explicit refresh errors leave the previous successful snapshot visible in the app.
+    // Do not replace it with the reduced DB fallback that lacks cast/localized metadata.
+    if (error instanceof PersistentMetadataCacheError || body.value.force_refresh || !externalRow?.content_id) {
+      return jsonError(503, "METADATA_UNAVAILABLE", "작품 정보를 불러오지 못했어요. 잠시 후 다시 불러와 주세요.");
     }
+    console.warn("content metadata read failed; using stored content");
+  }
 
+  if (externalRow?.content_id) {
     const [{ data: content, error: contentError }, { data: seasons, error: seasonsError }] =
       await Promise.all([
         adminClient
@@ -160,38 +167,7 @@ Deno.serve(async (req: Request) => {
       from_db: true
     });
   }
-
-  try {
-    const contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
-    return json({
-      content: {
-        external_source: contentMeta.external_source,
-        external_id: contentMeta.external_id,
-        content_type: contentMeta.content_type,
-        title_primary: contentMeta.title_primary,
-        title_original: contentMeta.title_original,
-        poster_url: contentMeta.poster_url,
-        overview: contentMeta.overview,
-        localized_overview: contentMeta.localized_overview,
-        air_year: contentMeta.air_year,
-        air_date: contentMeta.air_date,
-        end_date: contentMeta.end_date,
-        has_seasons: contentMeta.has_seasons,
-        episode_count: contentMeta.episode_count,
-        genres: contentMeta.genres,
-        cast: contentMeta.cast,
-        crew: contentMeta.crew
-      },
-      seasons: contentMeta.seasons,
-      from_db: false
-    });
-  } catch (error) {
-    return jsonError(
-      503,
-      "API_ERROR",
-      error instanceof Error ? error.message : "Failed to fetch content detail"
-    );
-  }
+  return jsonError(503, "METADATA_UNAVAILABLE", "작품 정보를 불러오지 못했어요. 잠시 후 다시 불러와 주세요.");
 });
 
 function buildContentPatch(contentMeta: ContentMeta, includeDateColumns: boolean) {

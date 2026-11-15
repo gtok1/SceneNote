@@ -1,6 +1,6 @@
 import { PEOPLE_FEATURES_ENABLED, SEARCH_RECOMMENDATIONS_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -57,11 +57,16 @@ import { getGenreDisplayName } from "@/utils/genre";
 import { createSearchFilterDraft } from "@/utils/searchFilterDraft";
 import { partitionSearchResults } from "@/utils/searchResultVisibility";
 import { discoveryFilterKey, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
-import { recommendationTopUpStatus, shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
+import { canShowRecommendationCompletion, recommendationTopUpStatus, shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { formatPersonName } from "@/utils/japaneseName";
-import { getResponsiveRecommendationColumns } from "@/utils/recommendationLayout";
+import { getSearchGalleryLayout } from "@/utils/recommendationLayout";
+import { sortRecommendationsByRelease } from "@/utils/recommendationOrder";
+import { recommendationRequiresRestart } from "@/utils/latestRecommendationPolicy";
 import { mapRecommendationToCardViewModel } from "@/utils/recommendationPresentation";
-import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus, type SimilaritySort } from "@/utils/similarSearchIntent";
+import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, type SimilarityFocus } from "@/utils/similarSearchIntent";
+import { normalizeSimilaritySecondarySort, similarResultsStatus, similaritySortLabel, shouldLoadMoreSimilarOnScroll } from "@/utils/similarContentPagination";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 const PERSONALIZED_RECOMMENDATION_LIMIT = 12;
 
@@ -79,6 +84,7 @@ export default function SearchScreen() {
   const searchFilterPreferences = useSearchFilterPreferences();
   const anchorGeneration = useRef(0);
   const anchorController = useRef<AbortController | null>(null);
+  const similarPageRequest = useRef<string | null>(null);
   const activeScreen = useRef(focused);
   const searchBarRef = useRef<ContentSearchBarHandle>(null);
   activeScreen.current = focused;
@@ -120,7 +126,7 @@ export default function SearchScreen() {
     try {
       await searchFilterPreferences.applyFilters({ ...appliedSearchFilters, mediaTypes: [], genreFilters: [], countryFilters: [], statusFilter: "all", year: "" });
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "검색 조건을 저장하지 못했어요. 다시 시도해 주세요.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.searchFilterSave), "error");
     }
   };
   const clearRecommendationYear = async () => {
@@ -128,7 +134,7 @@ export default function SearchScreen() {
     try {
       await searchFilterPreferences.applyFilters({ ...appliedSearchFilters, year: "" });
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "검색 조건을 저장하지 못했어요. 다시 시도해 주세요.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.searchFilterSave), "error");
     }
   };
   const viewMode = useSearchUiStore((state) => state.viewMode);
@@ -163,7 +169,7 @@ export default function SearchScreen() {
     library.data ?? [],
     { enabled: searchFilterPreferences.isReady && recommendationPreferences.isReady && canRunSearchRecommendations({ enabled: SEARCH_RECOMMENDATIONS_ENABLED, signedIn: Boolean(user), focused, online, libraryReady: library.isSuccess, query, similarityMode: Boolean(similarIntent) }), exclusions: recommendationExclusions, additionsInFlight: pendingAddIds.size > 0, retainedIds: retainedRecommendationIds, year: normalizeYearFilter(year), genres: genreFilters, countries: countryFilters, mediaTypes }
   );
-  const addToLibrary = useAddToLibrary({ libraryRefresh: "debounced" });
+  const addToLibrary = useAddToLibrary({ libraryRefresh: similarIntent ? "immediate" : "debounced" });
   const addFavoritePerson = useAddFavoritePerson();
   const addToast = useAppUIStore((state) => state.addToast);
   const [addedSearchKeys, setAddedSearchKeys] = useState<Set<string>>(() => new Set());
@@ -191,13 +197,19 @@ export default function SearchScreen() {
   useEffect(() => {
     if (!focused) { setSelectedRecommendation(null); setThemeReductionTarget(null); setSelectedSimilar(null); }
   }, [focused]);
+  const similarSecondarySort = normalizeSimilaritySecondarySort(similarIntent?.sort);
   const similarSearch = useSimilarContent(
     similarAnchor,
     similarIntent?.targetMediaType ?? "all",
     similarIntent?.focus ?? "balanced",
-    similarIntent?.sort ?? "similarity",
+    similarSecondarySort,
     similarIntent?.modifiers ?? [],
-    { enabled: searchFilterPreferences.isReady && focused && online && Boolean(user) && Boolean(similarIntent) }
+    {
+      enabled: searchFilterPreferences.isReady && focused && online && Boolean(user) && Boolean(similarIntent) && library.isSuccess,
+      userId: user?.id,
+      libraryItems: library.data ?? [],
+      libraryReady: library.isSuccess
+    }
   );
 
   useEffect(() => {
@@ -205,7 +217,7 @@ export default function SearchScreen() {
     const restoredQuery = typeof urlParams.q === "string" ? urlParams.q : `${urlParams.anchorTitle} 같은 작품`;
     const restoredIntent = parseSearchIntent(restoredQuery);
     const focus = typeof urlParams.focus === "string" ? urlParams.focus as SimilarityFocus : "balanced";
-    const sort = typeof urlParams.similarSort === "string" ? urlParams.similarSort as SimilaritySort : "similarity";
+    const sort = normalizeSimilaritySecondarySort(urlParams.similarSort);
     const targetMediaType = typeof urlParams.target === "string" ? urlParams.target as MediaTypeFilter : "all";
     setQuery(restoredQuery);
     setSimilarIntent(restoredIntent.mode === "similarity" ? { ...restoredIntent, focus, sort, targetMediaType } : { mode:"similarity", normalizedQuery:restoredQuery, anchorText:urlParams.anchorTitle, focus, sort, targetMediaType, modifiers:[] });
@@ -242,18 +254,26 @@ export default function SearchScreen() {
   const visibleResults = useMemo(() => sortByYear(partitionedResults.visible, sortOrder), [partitionedResults.visible, sortOrder]);
   const hiddenResults = useMemo(() => sortByYear(partitionedResults.hidden, sortOrder), [partitionedResults.hidden, sortOrder]);
   const isSimilarityMode = similarIntent !== null;
-  const isLoading = isSimilarityMode ? isResolvingAnchor || similarSearch.isLoading : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
-  const isError = isSimilarityMode ? similarSearch.isError : search.isError && (!PEOPLE_FEATURES_ENABLED || personSearch.isError);
-  const error = isSimilarityMode ? similarSearch.error : search.error ?? personSearch.error;
+  const isLoading = isSimilarityMode
+    ? isResolvingAnchor || (Boolean(similarAnchor) && !library.isError && (library.isPending || similarSearch.isLoading))
+    : search.isLoading || personSearch.isLoading || (statusFilter !== "all" && library.isLoading);
+  const isError = isSimilarityMode
+    ? Boolean(similarAnchor) && (library.isError || (similarSearch.isError && !similarSearch.data))
+    : search.isError && (!PEOPLE_FEATURES_ENABLED || personSearch.isError);
+  const error = isSimilarityMode ? library.error ?? similarSearch.error : search.error ?? personSearch.error;
   const searchFilterLimited = Boolean(search.data?.country_filter_limited || search.data?.genre_filter_limited);
   const isGallery = viewMode === "gallery";
-  const galleryColumns = getResponsiveRecommendationColumns(Math.min(width, 1280), fontScale);
+  const galleryLayout = getSearchGalleryLayout(width, fontScale, Platform.OS === "web");
+  const galleryColumns = galleryLayout.columns;
+  const expandedGallery = isGallery && galleryLayout.expanded;
   const topUp = recommendationTopUpStatus({
     visibleCount: personalizedRecommendations.visibleCount,
     targetCount: personalizedRecommendations.visibleTarget,
     decision: personalizedRecommendations.continuationDecision
   });
   const showRecommendationFeed = SEARCH_RECOMMENDATIONS_ENABLED && !isSimilarityMode && shouldShowRecommendationFeed(query);
+  const recommendationRestartRequired = [personalizedRecommendations.error, personalizedRecommendations.loadMoreError,
+    personalizedRecommendations.refreshError, personalizedRecommendations.refillError].some(recommendationRequiresRestart);
   useEffect(() => {
     recommendationScrollState.current = { previousOffsetY: null, lastRequestedCursor: null };
   }, [user?.id, mediaType, recommendationFilters, recommendationExclusions, showRecommendationFeed]);
@@ -261,14 +281,14 @@ export default function SearchScreen() {
   const hasSearchQuery = query.trim().length >= 2;
   const activeRecommendations = useMemo(
     () =>
-      recommendationPreferences.isReady ? retainRecommendationAddSlots(filterVisibleRecommendationCandidates(
+      recommendationPreferences.isReady ? sortRecommendationsByRelease(retainRecommendationAddSlots(filterVisibleRecommendationCandidates(
         personalizedRecommendations.recommendations,
         library.data ?? [],
         recommendationExclusions,
         recommendationFilters
       ).filter((item) => !addedRecommendationKeys.has(createExternalKey(item))),
         retainedRecommendationSlots.scope === recommendationSlotScope ? retainedRecommendationSlots.slots : []
-      ) : [],
+      )) : [],
     [retainedRecommendationSlots, recommendationSlotScope, addedRecommendationKeys, recommendationFilters, library.data, personalizedRecommendations.recommendations, recommendationPreferences.isReady, recommendationExclusions]
   );
   const recommendationVisibilitySummary = useMemo(
@@ -312,13 +332,14 @@ export default function SearchScreen() {
       : recommendationIsLoading || recommendationIsContinuing
         ? "내 취향에 맞는 최신 작품을 찾는 중이에요. 잠시만 기다려 주세요."
         : null;
-  const displayedResults: SearchResult[] = isSimilarityMode ? similarSearch.data?.items ?? [] : hasSearchInput
+  const displayedResults: SearchResult[] = isSimilarityMode ? (library.isSuccess ? similarSearch.data?.items ?? [] : []) : hasSearchInput
     ? (hasSearchQuery ? showHiddenResults ? [...visibleResults, ...hiddenResults] : visibleResults : []) : activeRecommendations;
   const recommendationPresentations = useMemo(
     () => new Map(activeRecommendations.map((item) => [item.canonical_id, mapRecommendationToCardViewModel(item)])),
     [activeRecommendations]
   );
   const displayedAsGallery = isGallery;
+  const [searchShortcutsExpanded, setSearchShortcutsExpanded] = useState(false);
   const searchHistory = useSearchHistoryStore((state) => state.queries);
   const addSearchHistoryQuery = useSearchHistoryStore((state) => state.addQuery);
   const removeSearchHistoryQuery = useSearchHistoryStore((state) => state.removeQuery);
@@ -333,7 +354,22 @@ export default function SearchScreen() {
       void search.refetch(); if (PEOPLE_FEATURES_ENABLED) void personSearch.refetch();
     }
   };
-  const refetch = () => { if (!searchFilterPreferences.isReady || !online || !focused) return; if (similarAnchor && similarIntent) { void similarSearch.refetch(); } else runSearch(query); };
+  const refetch = () => { if (!searchFilterPreferences.isReady || !online || !focused) return; if (similarAnchor && similarIntent) { if (library.isError) void library.refetch(); else if (library.isSuccess) void similarSearch.refetch(); } else runSearch(query); };
+  const loadMoreSimilar = (retry = false) => {
+    const cursor = similarSearch.data?.next_cursor;
+    if (
+      !searchFilterPreferences.isReady || !focused || !online || !user ||
+      !library.isSuccess ||
+      !similarAnchor || !similarIntent || !cursor || !similarSearch.hasNextPage ||
+      similarSearch.isLoading || similarSearch.isFetching || similarSearch.restartRequired ||
+      similarSearch.paginationUnavailable || (!retry && similarSearch.isFetchNextPageError) ||
+      similarPageRequest.current === cursor
+    ) return;
+    similarPageRequest.current = cursor;
+    void similarSearch.fetchNextPage().finally(() => {
+      if (similarPageRequest.current === cursor) similarPageRequest.current = null;
+    });
+  };
   const searchFromHistory = (historyQuery: string) => {
     if (!searchFilterPreferences.isReady) return;
     setQuery(historyQuery);
@@ -363,7 +399,7 @@ export default function SearchScreen() {
       if (candidates.length === 0) { setAnchorResolutionError("기준 작품을 찾지 못했어요. 작품명을 확인하거나 일반 검색으로 전환해 주세요."); return; }
       if (shouldAutoSelectAnchor(intent.anchorText, candidates)) { startSimilarity(candidates[0] as SearchResult, intent); return; }
       setAnchorCandidates(candidates);
-    } catch (resolveError) { if (generation !== anchorGeneration.current || !activeScreen.current) return; setAnchorResolutionError(resolveError instanceof Error ? resolveError.message : "기준 작품을 찾지 못했습니다"); }
+    } catch (resolveError) { if (generation !== anchorGeneration.current || !activeScreen.current) return; setAnchorResolutionError(userFacingErrorMessage(resolveError, ERROR_COPY.anchorResolve)); }
     finally { if (generation === anchorGeneration.current && activeScreen.current) setIsResolvingAnchor(false); }
   };
 
@@ -413,7 +449,7 @@ export default function SearchScreen() {
   const addPerson = (person: PersonSearchResult) => {
     addFavoritePerson.mutate(person, {
       onSuccess: () => addToast(`${formatPersonName(person).name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openPersonDetail(person) }),
-      onError: (error) => addToast(error.message || "등록하지 못했어요.", "error")
+      onError: (error) => addToast(userFacingErrorMessage(error, ERROR_COPY.personAdd), "error")
     });
   };
 
@@ -529,12 +565,14 @@ export default function SearchScreen() {
     });
   };
 
-  const refreshRecommendations = async () => {
-    const refreshed = await personalizedRecommendations.refresh();
+  const refreshRecommendations = async (restartFromBeginning = false) => {
+    if (recommendationActionsDisabled) return;
+    const refreshed = await (restartFromBeginning ? personalizedRecommendations.restart() : personalizedRecommendations.refresh());
     if (!refreshed) {
       addToast("새 추천을 불러오지 못했습니다. 다시 시도해 주세요.", "error");
     } else {
       setRetainedRecommendationSlots({ scope: recommendationSlotScope, slots: [] });
+      if (restartFromBeginning) recommendationScrollState.current = { previousOffsetY: null, lastRequestedCursor: null };
     }
   };
 
@@ -543,7 +581,7 @@ export default function SearchScreen() {
       if (kind === "theme") await recommendationPreferences.toggleTheme(key);
       else await recommendationPreferences.toggleGenre(key);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "추천 제외 설정을 저장하지 못했습니다.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.recommendationExclusionSave), "error");
     }
   };
 
@@ -558,7 +596,7 @@ export default function SearchScreen() {
       if (selectedRecommendation?.canonical_id === item.canonical_id) setSelectedRecommendation(null);
       addToast(result === "refilled" ? "관심 없음으로 반영하고 새 추천을 채웠어요." : "관심 없음으로 반영했어요.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.recommendationFeedbackSave), "error");
     }
   };
 
@@ -573,7 +611,7 @@ export default function SearchScreen() {
       setSelectedRecommendation(null);
       findSimilarFromCard(item);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.recommendationFeedbackSave), "error");
     }
   };
 
@@ -603,7 +641,7 @@ export default function SearchScreen() {
       setThemeReductionTarget(null);
       addToast(`${theme.label} 요소를 줄이도록 반영했어요.`, "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : "피드백을 저장하지 못했습니다.", "error");
+      addToast(userFacingErrorMessage(error, ERROR_COPY.recommendationFeedbackSave), "error");
     } finally {
       setSubmittingThemeKey(null);
     }
@@ -628,28 +666,80 @@ export default function SearchScreen() {
     !recommendationPreferences.isReady ||
     library.isError || !online || !focused;
 
+  const renderRecommendationRestart = (message: string) => (
+    <View style={styles.inlineError}>
+      <Text style={styles.inlineErrorText}>{message}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="최신 추천 처음부터 다시 찾기"
+        accessibilityState={{ disabled: recommendationActionsDisabled }} disabled={recommendationActionsDisabled}
+        onPress={() => void refreshRecommendations(true)} style={styles.inlineRetryButton}>
+        <Text style={styles.inlineRetryText}>처음부터 다시 찾기</Text>
+      </Pressable>
+    </View>
+  );
+
   const resultListRef = useRef<FlashListRef<SearchResult>>(null);
   const scrollScope = JSON.stringify(["search", user?.id, isTabScreen, query.trim(), appliedDiscoveryFilterKey, statusFilter, year, sortOrder, viewMode, galleryColumns, showHiddenResults, similarAnchor?.external_id, similarIntent]);
   const scrollRestoration = useListScrollRestoration(scrollScope, resultListRef, displayedResults.length);
 
+  const viewControls = (
+      <View style={styles.viewToolbar}>
+        {[
+          { label: "자세히", value: "detail" as const, icon: "list-outline" as const },
+          { label: "갤러리", value: "gallery" as const, icon: "grid-outline" as const }
+        ].map((item) => {
+          const selected = item.value === viewMode;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              key={item.value}
+              onPress={() => setViewMode(item.value)}
+              style={[styles.viewButton, selected ? styles.viewButtonSelected : null]}
+            >
+              <Ionicons
+                color={selected ? colors.surface : colors.textMuted}
+                name={item.icon}
+                size={16}
+              />
+              <Text style={[styles.viewButtonText, selected ? styles.viewButtonTextSelected : null]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+        {displayedAsGallery && !hasSearchQuery && !isSimilarityMode ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="최근 검색어와 예시 검색"
+            accessibilityState={{ expanded: searchShortcutsExpanded }}
+            onPress={() => setSearchShortcutsExpanded(value => !value)}
+            style={({ pressed }) => [styles.shortcutToggle, pressed && styles.similarPressed]}>
+            <Ionicons name={searchShortcutsExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={16} color={colors.textMuted} />
+            <Text style={styles.shortcutToggleText}>최근·예시</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+  );
+
   return (
     <View style={styles.container}>
       <View style={[styles.page, { paddingHorizontal: layout.gutter, paddingTop: isTabScreen ? 0 : spacing.sm }]}>
+      <View style={displayedAsGallery && layout.posterColumns >= 5 ? styles.compactSearchHeading : undefined}>
       {isTabScreen ? (
       <View style={[styles.pageHeader, { paddingTop: insets.top + spacing.md }]}>
         <Text accessibilityRole="header" style={styles.pageTitle}>검색</Text>
       </View>
       ) : null}
-      <View style={styles.searchTools}>
+      <View style={[styles.searchTools, displayedAsGallery && layout.posterColumns >= 5 && styles.compactSearchTools]}>
       <ContentSearchBar
         key={user?.id ?? "anonymous"}
         ref={searchBarRef}
+        compact={displayedAsGallery}
         autoFocus={urlParams.focus === "input" && !query}
         filters={appliedSearchFilters}
         filtersReady={searchFilterPreferences.isReady}
         isSavingFilters={searchFilterPreferences.isSaving}
         onApplyFilters={searchFilterPreferences.applyFilters}
-        examples={showRecommendationFeed ? SIMILAR_SEARCH_EXAMPLES : []}
+        examples={showRecommendationFeed && (!displayedAsGallery || searchShortcutsExpanded) ? SIMILAR_SEARCH_EXAMPLES : []}
         onChangeText={handleQueryChange}
         onExamplePress={(example) => { setQuery(example); const parsed=parseSearchIntent(example); if(parsed.mode==="similarity") void resolveAndStartSimilarity(parsed); }}
         onSubmit={refetch}
@@ -657,6 +747,9 @@ export default function SearchScreen() {
         value={query}
       />
       </View>
+      </View>
+      <View style={displayedAsGallery ? styles.compactControls : undefined}>
+      {displayedAsGallery ? viewControls : null}
       {searchFilterPreferences.isReady && !isSimilarityMode && (hasDiscoveryFilters || statusFilter !== "all" || Boolean(year)) ? (
         <View style={styles.discoverySummary}>
           <Text accessibilityLiveRegion="polite" style={styles.discoverySummaryText}>
@@ -676,10 +769,11 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
+      </View>
       <View style={styles.listContainer}>
         {!searchFilterPreferences.isReady ? (
           searchFilterPreferences.loadError ? (
-            <ErrorState message={searchFilterPreferences.loadError.message} onRetry={() => void searchFilterPreferences.refetch()} />
+            <ErrorState message={userFacingErrorMessage(searchFilterPreferences.loadError, ERROR_COPY.searchFilterLoad)} onRetry={() => void searchFilterPreferences.refetch()} />
           ) : (
             <View>
               <Text accessibilityLiveRegion="polite" style={styles.resultsHint}>이 계정의 검색 조건을 불러오는 중이에요.</Text>
@@ -698,7 +792,7 @@ export default function SearchScreen() {
           onScrollBeginDrag={scrollRestoration.onScrollBeginDrag}
           ListHeaderComponent={<View style={{ paddingHorizontal: displayedAsGallery ? spacing.sm : spacing.lg }}>
 
-      {!isSimilarityMode && !hasSearchQuery && searchHistory.length > 0 ? (
+      {!isSimilarityMode && !hasSearchQuery && searchHistory.length > 0 && (!displayedAsGallery || searchShortcutsExpanded) ? (
         <View style={styles.historySection}>
           <View style={styles.historyHeaderRow}>
             <Text style={styles.sectionTitle}>최근 검색어</Text>
@@ -708,7 +802,7 @@ export default function SearchScreen() {
           </View>
           <View style={styles.historyChipList}>
             {searchHistory.map((historyQuery) => (
-              <View key={historyQuery} style={styles.historyChip}>
+              <View key={historyQuery} style={[styles.historyChip, displayedAsGallery && styles.compactHistoryChip]}>
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => searchFromHistory(historyQuery)}
@@ -777,57 +871,94 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      <View style={styles.viewToolbar}>
-        {[
-          { label: "자세히", value: "detail" as const, icon: "list-outline" as const },
-          { label: "갤러리", value: "gallery" as const, icon: "grid-outline" as const }
-        ].map((item) => {
-          const selected = item.value === viewMode;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={item.value}
-              onPress={() => setViewMode(item.value)}
-              style={[styles.viewButton, selected ? styles.viewButtonSelected : null]}
-            >
-              <Ionicons
-                color={selected ? colors.surface : colors.textMuted}
-                name={item.icon}
-                size={16}
-              />
-              <Text style={[styles.viewButtonText, selected ? styles.viewButtonTextSelected : null]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+
+      {!displayedAsGallery ? viewControls : null}
 
       {isSimilarityMode ? (
         <View style={styles.similarHeader}>
-          <Text style={styles.recommendationTitle}>비슷한 작품 찾기</Text>
-          {similarAnchor ? <Text style={styles.resultsHint}>기준 작품: {similarAnchor.title_primary} · {focusLabel(similarIntent.focus)} 중심</Text> : null}
-          <View style={styles.similarFilters}>
-            {(["similarity","latest","popular"] as const).map((value)=><Pressable accessibilityRole="button" accessibilityState={{selected:similarIntent.sort===value}} key={value} onPress={()=>{setSimilarIntent((current)=>current?{...current,sort:value}:current);router.setParams({similarSort:value});}} style={[styles.similarChip,similarIntent.sort===value&&styles.similarChipSelected]}><Text style={[styles.similarChipText,similarIntent.sort===value&&styles.similarChipTextSelected]}>{value==="similarity"?"유사도순":value==="latest"?"최신순":"인기순"}</Text></Pressable>)}
-            {(["balanced","mood","story","genre"] as const).map((value)=><Pressable accessibilityRole="button" accessibilityState={{selected:similarIntent.focus===value}} key={value} onPress={()=>{setSimilarIntent((current)=>current?{...current,focus:value}:current);router.setParams({focus:value});}} style={[styles.similarChip,similarIntent.focus===value&&styles.similarChipSelected]}><Text style={[styles.similarChipText,similarIntent.focus===value&&styles.similarChipTextSelected]}>{focusLabel(value)}</Text></Pressable>)}
-            {similarIntent.modifiers.map((modifier)=><Pressable accessibilityLabel={`${modifier.label} 필터 제거`} accessibilityRole="button" key={`${modifier.direction}:${modifier.key}`} onPress={()=>setSimilarIntent((current)=>current?{...current,modifiers:current.modifiers.filter((item)=>item!==modifier)}:current)} style={styles.appliedChip}><Text style={styles.appliedChipText}>{modifier.label} ×</Text></Pressable>)}
+          <Text style={styles.similarTitle}>비슷한 작품 찾기</Text>
+          {similarAnchor ? <Text style={styles.similarHint}>기준 작품: {similarAnchor.title_primary} · {focusLabel(similarIntent.focus)} 중심</Text> : null}
+          <View style={styles.similarPriorityBadge}>
+            <Text style={styles.similarPriorityText}>유사도 우선 · 항상 적용</Text>
           </View>
-          <Text accessibilityLiveRegion="polite" style={styles.liveStatus}>{isResolvingAnchor?"기준 작품을 찾고 있습니다.":similarSearch.isLoading?"비슷한 작품을 찾고 있습니다.":similarAnchor?`비슷한 작품 ${similarSearch.data?.items.length??0}개가 표시되었습니다.`:"기준 작품을 선택해 주세요."}</Text>
-          {similarSearch.data?.warnings[0] ? <Text style={styles.recommendationNotice}>{similarSearch.data.warnings[0].includes("벡터 인프라") ? "작품의 장르·줄거리와 제공처 추천을 바탕으로 찾았어요." : similarSearch.data.warnings[0]}</Text> : null}
+          <View style={styles.similarControlGroup}>
+            <Text style={styles.similarControlLabel}>같은 유사도 안에서</Text>
+            <View accessibilityLabel="같은 유사도 안에서 정렬" style={styles.similarFilters}>
+              {(["latest", "popular"] as const).map((value) => {
+                const selected = similarSecondarySort === value;
+                return (
+                  <Pressable
+                    accessibilityLabel={`같은 유사도 안에서 ${similaritySortLabel(value)}`}
+                    accessibilityRole="button"
+                    aria-pressed={selected}
+                    accessibilityState={{ selected }}
+                    key={value}
+                    onPress={() => {
+                      setSimilarIntent((current) => current ? { ...current, sort: value } : current);
+                      router.setParams({ similarSort: value });
+                    }}
+                    style={({ pressed }) => [styles.similarChip, selected && styles.similarChipSelected, pressed && styles.similarPressed]}
+                  >
+                    <Text style={[styles.similarChipText, selected && styles.similarChipTextSelected]}>{similaritySortLabel(value)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <View style={styles.similarFocusGroup}>
+            <Text style={styles.similarControlLabel}>비슷한 기준</Text>
+            <View accessibilityLabel="비슷한 작품을 찾는 기준" style={styles.similarFilters}>
+              {(["balanced", "mood", "story", "genre"] as const).map((value) => (
+                <Pressable
+                  accessibilityRole="button"
+                  aria-pressed={similarIntent.focus === value}
+                  accessibilityState={{ selected: similarIntent.focus === value }}
+                  key={value}
+                  onPress={() => {
+                    setSimilarIntent((current) => current ? { ...current, focus: value } : current);
+                    router.setParams({ focus: value });
+                  }}
+                  style={({ pressed }) => [styles.similarChip, similarIntent.focus === value && styles.similarChipSelected, pressed && styles.similarPressed]}
+                >
+                  <Text style={[styles.similarChipText, similarIntent.focus === value && styles.similarChipTextSelected]}>{focusLabel(value)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          {similarIntent.modifiers.length > 0 ? (
+            <View style={styles.similarFilters}>
+              {similarIntent.modifiers.map((modifier) => (
+                <Pressable accessibilityLabel={`${modifier.label} 필터 제거`} accessibilityRole="button" key={`${modifier.direction}:${modifier.key}`} onPress={() => setSimilarIntent((current) => current ? { ...current, modifiers: current.modifiers.filter((item) => item !== modifier) } : current)} style={styles.appliedChip}>
+                  <Text style={styles.appliedChipText}>{modifier.label} ×</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          <Text style={styles.similarHint}>등록한 작품은 제외해요.</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.similarStatus}>
+            {isResolvingAnchor ? "기준 작품을 찾고 있어요."
+              : similarAnchor && library.isPending ? "등록한 작품을 확인하고 있어요."
+                : similarAnchor && library.isError ? "등록한 작품을 확인한 뒤 결과를 보여드려요."
+                  : similarSearch.isLoading ? "비슷한 작품을 찾고 있어요."
+                    : isError ? "검색 결과를 불러오지 못했어요."
+                      : similarAnchor && similarSearch.data ? similarResultsStatus(similarSecondarySort, displayedResults.length, similarSearch.data.total_count)
+                        : similarAnchor ? "비슷한 작품을 불러오면 결과를 보여드려요."
+                          : "기준 작품을 선택해 주세요."}
+          </Text>
+          {library.isSuccess && similarSearch.data?.warnings[0] ? <Text style={styles.similarHint}>{similarSearch.data.warnings[0].includes("벡터 인프라") ? "작품의 장르·줄거리와 제공처 추천을 바탕으로 찾았어요." : "일부 정보를 불러오지 못해 확인된 작품을 보여드려요."}</Text> : null}
         </View>
       ) : null}
       {anchorCandidates.length>0 ? <View accessibilityLabel="기준 작품 선택" accessibilityRole="summary" style={styles.anchorDialog}><Text style={styles.sectionTitle}>어떤 작품을 기준으로 찾을까요?</Text><View style={styles.anchorOptions}>{anchorCandidates.map((candidate)=><Pressable accessibilityRole="button" key={searchSeasonIdentity(candidate)} onPress={()=>startSimilarity(candidate,similarIntent as Extract<ParsedSearchIntent,{mode:"similarity"}>)} style={styles.anchorOption}><Text style={styles.anchorTitle}>{candidate.title_primary}</Text><Text style={styles.resultsHint}>{[candidate.air_year,candidate.content_type,candidate.external_source.toUpperCase()].filter(Boolean).join(" · ")}</Text></Pressable>)}</View></View>:null}
       {anchorResolutionError ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{anchorResolutionError}</Text><Pressable accessibilityRole="button" onPress={()=>{setSimilarIntent(null);setAnchorResolutionError(null);void search.refetch();}} style={styles.inlineRetryButton}><Text style={styles.inlineRetryText}>일반 검색으로 보기</Text></Pressable></View>:null}
 
       {showRecommendationFeed ? (
-        <View style={styles.resultsHeader}>
-          <View style={styles.recommendationHeaderRow}>
-            <View style={styles.recommendationHeaderText}>
+        <View style={[styles.resultsHeader, displayedAsGallery && styles.compactRecommendationHeader]}>
+          <View style={[styles.recommendationHeaderRow, displayedAsGallery && styles.compactRecommendationHeading]}>
+            <View style={[styles.recommendationHeaderText, displayedAsGallery && styles.compactRecommendationText]}>
               <Text style={styles.recommendationTitle}>내 취향 최신 추천</Text>
-              <Text style={styles.resultsHint}>
-                감상 기록을 바탕으로 아직 등록하지 않은 작품을 최대 12개씩 추천해요.
-              </Text>
+              {!displayedAsGallery ? <Text style={styles.resultsHint}>
+                최근 공개작을 최신순으로 찾아요. 미등록 작품을 최대 12개씩 보여줘요.
+              </Text> : null}
             </View>
             <Pressable
               accessibilityLabel="새 추천 12개 불러오기"
@@ -853,7 +984,7 @@ export default function SearchScreen() {
             </Pressable>
           </View>
           <View style={styles.recommendationFilterRow}>
-            <Pressable
+            {!displayedAsGallery ? <Pressable
               accessibilityLabel="추천할 장르와 제작 국가 선택"
               accessibilityHint="제목 검색과 내 취향 추천에 적용할 필터를 엽니다"
               accessibilityRole="button"
@@ -862,7 +993,7 @@ export default function SearchScreen() {
             >
               <Ionicons color={colors.primary} name="funnel-outline" size={17} />
               <Text style={styles.recommendationFilterButtonText}>장르·국가 필터</Text>
-            </Pressable>
+            </Pressable> : null}
             <Pressable
               accessibilityLabel="이 계정의 추천 제외 테마와 장르 설정"
               accessibilityRole="button"
@@ -871,11 +1002,11 @@ export default function SearchScreen() {
               style={[styles.recommendationFilterButton, !recommendationPreferences.isReady && styles.refreshButtonDisabled]}
             >
               <Ionicons color={colors.primary} name="options-outline" size={17} />
-              <Text style={styles.recommendationFilterButtonText}>추천 제외 설정</Text>
+              <Text style={styles.recommendationFilterButtonText}>추천 제외 설정{displayedAsGallery ? ` · ${recommendationPreferences.excludedThemeKeys.length + recommendationPreferences.excludedGenres.length}` : ""}</Text>
             </Pressable>
-            <Text style={styles.resultsHint}>
+            {!displayedAsGallery ? <Text style={styles.resultsHint}>
               이 계정에서 제외 중: {recommendationPreferences.excludedThemeKeys.length + recommendationPreferences.excludedGenres.length}개
-            </Text>
+            </Text> : null}
           </View>
           {personalizedRecommendations.data?.profile_mode === "cold_start" ? (
             <Text style={styles.recommendationNotice}>
@@ -889,7 +1020,7 @@ export default function SearchScreen() {
           ) : null}
           <Text accessibilityLiveRegion="polite" style={styles.liveStatus}>
             {recommendationIsLoading || recommendationIsContinuing
-              ? "최신 작품부터 이전 공개작까지 새로운 추천을 찾고 있어요."
+              ? "최근 공개작 중에서 새로운 추천을 찾고 있어요."
               : personalizedRecommendations.isRefreshing
               ? "새 추천 12개를 불러오는 중입니다."
               : personalizedRecommendations.isRefilling
@@ -900,9 +1031,16 @@ export default function SearchScreen() {
       ) : null}
 
       {!online ? <Text accessibilityLiveRegion="polite" style={styles.partial}>오프라인이에요. 저장된 결과를 표시하며, 연결 후 다시 시도할 수 있어요.</Text> : null}
-      {showRecommendationFeed && personalizedRecommendations.data?.partial ? <Text style={styles.partial}>일부 추천 제공처의 결과를 불러오지 못했습니다. 현재 가능한 작품을 표시합니다.</Text> : null}
+      {showRecommendationFeed && personalizedRecommendations.data?.partial && personalizedRecommendations.data.failed_sources.length > 0 ? <Text style={styles.partial}>일부 추천 제공처의 결과를 불러오지 못했습니다. 현재 가능한 작품을 표시합니다.</Text> : null}
       {hasSearchQuery && isLoading ? <View style={styles.sharedInset}><LoadingSkeleton count={5} variant="search-result" /></View> : null}
-      {hasSearchQuery && isError ? <ErrorState message={error?.message ?? "검색 중 오류가 발생했습니다"} onRetry={refetch} /> : null}
+      {hasSearchQuery && isError ? (
+        <ErrorState
+          message={isSimilarityMode && library.isError
+            ? "라이브러리 정보를 불러오지 못해 등록한 작품을 제외할 수 없어요. 다시 시도해 주세요."
+            : userFacingErrorMessage(error, ERROR_COPY.searchLoad)}
+          onRetry={refetch}
+        />
+      ) : null}
       {showRecommendationFeed && recommendationLoadingMessage ? (
         <View
           accessibilityLabel={recommendationLoadingMessage}
@@ -924,6 +1062,8 @@ export default function SearchScreen() {
           <LoadingSkeleton
             columns={displayedAsGallery ? galleryColumns : 1}
             count={PERSONALIZED_RECOMMENDATION_LIMIT}
+            compact={displayedAsGallery}
+            expanded={expandedGallery}
             variant="recommendation-card"
           />
         </View>
@@ -936,13 +1076,14 @@ export default function SearchScreen() {
       ) : null}
       {showRecommendationFeed && recommendationPreferences.isError ? (
         <ErrorState
-          message={recommendationPreferences.error?.message ?? "계정별 추천 제외 설정을 불러오지 못했습니다"}
+          message={userFacingErrorMessage(recommendationPreferences.error, ERROR_COPY.recommendationExclusionLoad)}
           onRetry={() => void recommendationPreferences.refetch()}
         />
       ) : null}
       {showRecommendationFeed && personalizedRecommendations.isError ? (
+        recommendationRestartRequired ? renderRecommendationRestart(userFacingErrorMessage(personalizedRecommendations.error, ERROR_COPY.recommendationLoad)) :
         <ErrorState
-          message={personalizedRecommendations.error?.message ?? "추천 데이터를 불러오지 못했습니다. 다시 시도해 주세요."}
+          message={userFacingErrorMessage(personalizedRecommendations.error, ERROR_COPY.recommendationLoad)}
           onRetry={() => void personalizedRecommendations.refetch()}
         />
       ) : null}
@@ -951,6 +1092,7 @@ export default function SearchScreen() {
       personalizedRecommendations.emptyContinuationStopped &&
       !personalizedRecommendations.isError ? (
         personalizedRecommendations.loadMoreError ? (
+          recommendationRestartRequired ? renderRecommendationRestart(personalizedRecommendations.loadMoreError) :
           <ErrorState
             message={personalizedRecommendations.loadMoreError}
             onRetry={() => void personalizedRecommendations.retryEmptyContinuation()}
@@ -975,12 +1117,12 @@ export default function SearchScreen() {
         <View style={styles.inlineError}>
           <Text style={styles.inlineErrorText}>{personalizedRecommendations.refreshError}</Text>
           <Pressable
-            accessibilityLabel="새 추천 12개 다시 시도"
+            accessibilityLabel={recommendationRestartRequired ? "최신 추천 처음부터 다시 찾기" : "새 추천 12개 다시 시도"}
             accessibilityRole="button"
-            onPress={() => void refreshRecommendations()}
+            onPress={() => void refreshRecommendations(recommendationRestartRequired)}
             style={styles.inlineRetryButton}
           >
-            <Text style={styles.inlineRetryText}>다시 시도</Text>
+            <Text style={styles.inlineRetryText}>{recommendationRestartRequired ? "처음부터 다시 찾기" : "다시 시도"}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -988,13 +1130,13 @@ export default function SearchScreen() {
         <View style={styles.inlineError}>
           <Text style={styles.inlineErrorText}>{personalizedRecommendations.refillError}</Text>
           <Pressable
-            accessibilityLabel="빈 추천 자리 다시 채우기"
+            accessibilityLabel={recommendationRestartRequired ? "최신 추천 처음부터 다시 찾기" : "빈 추천 자리 다시 채우기"}
             accessibilityRole="button"
             disabled={personalizedRecommendations.isRefilling}
-            onPress={() => void retryRecommendationRefill()}
+            onPress={() => { if (recommendationRestartRequired) void refreshRecommendations(true); else void retryRecommendationRefill(); }}
             style={styles.inlineRetryButton}
           >
-            <Text style={styles.inlineRetryText}>1개 다시 불러오기</Text>
+            <Text style={styles.inlineRetryText}>{recommendationRestartRequired ? "처음부터 다시 찾기" : "1개 다시 불러오기"}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1019,7 +1161,10 @@ export default function SearchScreen() {
           {...(!searchFilterLimited && hasDiscoveryFilters ? { actionLabel: "장르·국가 필터 변경", onAction: () => searchBarRef.current?.openFilters() } : {})}
         />
       ) : null}
-      {isSimilarityMode && similarAnchor && !isLoading && !isError && (similarSearch.data?.items.length ?? 0) === 0 ? (
+      {isSimilarityMode && similarAnchor && library.isSuccess && similarSearch.data && !isLoading && !isError &&
+      !similarSearch.isFetching && !similarSearch.hasNextPage && !similarSearch.restartRequired &&
+      !similarSearch.paginationUnavailable && !similarSearch.isRefetchError && !similarSearch.isFetchNextPageError &&
+      displayedResults.length === 0 ? (
         <EmptyState description="분위기나 장르 기준으로 바꾸거나 콘텐츠 유형 제한을 해제해 보세요." title="이 작품과 비슷한 결과를 찾지 못했어요" />
       ) : null}
       {showRecommendationFeed &&
@@ -1071,6 +1216,10 @@ export default function SearchScreen() {
             const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
             const previousOffsetY = recommendationScrollState.current.previousOffsetY;
             recommendationScrollState.current.previousOffsetY = contentOffset.y;
+            if (isSimilarityMode) {
+              if (shouldLoadMoreSimilarOnScroll({ previousOffsetY, offsetY: contentOffset.y, viewportHeight: layoutMeasurement.height, contentHeight: contentSize.height })) loadMoreSimilar();
+              return;
+            }
             if (!showRecommendationFeed || !recommendationPreferences.isReady || !focused || !online) return;
 
             const cursor = personalizedRecommendations.recommendationCursor;
@@ -1097,8 +1246,11 @@ export default function SearchScreen() {
             }
           }}
           onEndReached={() => {
+            if (isSimilarityMode) {
+              return;
+            }
             if (
-              focused && online && !isSimilarityMode &&
+              focused && online &&
               hasSearchInput &&
               hasSearchQuery &&
               search.hasNextPage &&
@@ -1110,7 +1262,45 @@ export default function SearchScreen() {
           }}
           onEndReachedThreshold={0.35}
           scrollEventThrottle={16}
-          ListFooterComponent={!isSimilarityMode && hasSearchInput && hasSearchQuery ? (
+          ListFooterComponent={isSimilarityMode ? (
+            similarAnchor && library.isSuccess && similarSearch.data ? (
+              <View style={styles.similarFooter}>
+                {similarSearch.isFetching ? (
+                  <View accessibilityLabel="비슷한 작품을 불러오는 중이에요." accessibilityRole="progressbar" accessibilityState={{busy:true}} style={styles.similarFooterBusy}>
+                    <ActivityIndicator color={colors.primary} size="small" />
+                    <Text accessibilityLiveRegion="polite" style={styles.similarHint}>{similarSearch.isFetchingNextPage ? "비슷한 작품 12개를 더 불러오는 중이에요." : "비슷한 작품을 새로 찾고 있어요."}</Text>
+                  </View>
+                ) : similarSearch.restartRequired || similarSearch.paginationUnavailable ? (
+                  <>
+                    <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>{similarSearch.restartRequired ? "결과를 새로 불러와 주세요." : "추가 결과를 불러올 수 없어요."}</Text>
+                    <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                      <Text style={styles.similarFooterButtonText}>{similarSearch.restartRequired ? "처음부터 다시 찾기" : "다시 찾기"}</Text>
+                    </Pressable>
+                  </>
+                ) : similarSearch.isRefetchError ? (
+                  <>
+                    <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>비슷한 작품을 새로 찾지 못했어요. 기존 결과를 유지하고 있어요.</Text>
+                    <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                      <Text style={styles.similarFooterButtonText}>다시 찾기</Text>
+                    </Pressable>
+                  </>
+                ) : similarSearch.isFetchNextPageError ? (
+                  <>
+                    <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>다음 비슷한 작품을 불러오지 못했어요. 다시 시도해 주세요.</Text>
+                    <Pressable accessibilityLabel="다음 비슷한 작품 다시 시도" accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar(true)} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                      <Text style={styles.similarFooterButtonText}>다시 시도</Text>
+                    </Pressable>
+                  </>
+                ) : similarSearch.hasNextPage ? (
+                  <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar()} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                    <Text style={styles.similarFooterButtonText}>비슷한 작품 12개 더 보기</Text>
+                  </Pressable>
+                ) : displayedResults.length > 0 ? (
+                  <Text accessibilityLiveRegion="polite" style={styles.similarFooterEnd}>현재 찾은 비슷한 작품을 모두 확인했어요.</Text>
+                ) : null}
+              </View>
+            ) : null
+          ) : hasSearchInput && hasSearchQuery ? (
             search.isFetchingNextPage ? (
               <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
                 <ActivityIndicator color={colors.primary} size="small" />
@@ -1133,7 +1323,7 @@ export default function SearchScreen() {
               <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.topUpFooter}>
                 <View style={{ paddingHorizontal: displayedAsGallery ? spacing.sm : spacing.lg }}>
                   <View style={styles.sharedInset}>
-                    <LoadingSkeleton variant="recommendation-card" count={topUp.placeholderCount} columns={displayedAsGallery ? galleryColumns : 1} />
+                    <LoadingSkeleton expanded={expandedGallery} compact={displayedAsGallery} variant="recommendation-card" count={topUp.placeholderCount} columns={displayedAsGallery ? galleryColumns : 1} />
                   </View>
                 </View>
                 <View style={styles.loadMoreFooter}>
@@ -1150,15 +1340,21 @@ export default function SearchScreen() {
             ) : personalizedRecommendations.loadMoreError && !recommendationNeedsContinuation ? (
               <View style={styles.loadMoreFooter}>
                 <Text style={styles.loadMoreErrorText}>{personalizedRecommendations.loadMoreError}</Text>
-                <Pressable accessibilityRole="button" onPress={() => void personalizedRecommendations.retryEmptyContinuation()} style={styles.inlineRetryButton}>
-                  <Text style={styles.inlineRetryText}>다시 시도</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={recommendationRestartRequired ? "최신 추천 처음부터 다시 찾기" : "다음 추천 다시 시도"}
+                  accessibilityState={{ disabled: recommendationActionsDisabled }} disabled={recommendationActionsDisabled}
+                  onPress={() => { if (recommendationRestartRequired) void refreshRecommendations(true); else void personalizedRecommendations.retryEmptyContinuation(); }} style={styles.inlineRetryButton}>
+                  <Text style={styles.inlineRetryText}>{recommendationRestartRequired ? "처음부터 다시 찾기" : "다시 시도"}</Text>
                 </Pressable>
               </View>
             ) : !personalizedRecommendations.unsupportedFilter && personalizedRecommendations.emptyContinuationStopped && activeRecommendations.length > 0 && personalizedRecommendations.data?.has_more && personalizedRecommendations.recommendationCursor ? (
               <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>
                 아래로 스크롤하면 다음 추천을 자동으로 찾습니다.
               </Text>
-            ) : (personalizedRecommendations.isExhausted || personalizedRecommendations.data?.has_more === false || !personalizedRecommendations.recommendationCursor) && activeRecommendations.length > 0 ? (
+            ) : canShowRecommendationCompletion({ hasData: Boolean(personalizedRecommendations.data), visibleCount: activeRecommendations.length,
+              hasError: personalizedRecommendations.isError || Boolean(personalizedRecommendations.loadMoreError || personalizedRecommendations.refreshError || personalizedRecommendations.refillError || personalizedRecommendations.unsupportedFilter),
+              isLoading: recommendationIsLoading || personalizedRecommendations.isLoadingMore || personalizedRecommendations.isRefreshing || personalizedRecommendations.isRefilling,
+              stopped: personalizedRecommendations.emptyContinuationStopped, hasMore: personalizedRecommendations.data?.has_more,
+              nextCursor: personalizedRecommendations.recommendationCursor, isExhausted: personalizedRecommendations.isExhausted }) ? (
               <Text accessibilityLiveRegion="polite" style={styles.exhaustedFooterText}>
                 현재 제공되는 추천 작품을 모두 확인했어요.
               </Text>
@@ -1170,7 +1366,8 @@ export default function SearchScreen() {
             if (similarResult) {
               const actionState = getSearchAddState(item);
               return displayedAsGallery ? (
-                <SearchResultGalleryCard areActionsDisabled={actionState.wishlistDisabled} isActionPending={actionState.isPending} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToWishlist={()=>addResult(item,"wishlist")} onMarkCompleted={()=>addResult(item,"completed")} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
+                <SearchResultGalleryCard
+                expanded={expandedGallery} areActionsDisabled={actionState.wishlistDisabled} isActionPending={actionState.isPending} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToWishlist={()=>addResult(item,"wishlist")} onMarkCompleted={()=>addResult(item,"completed")} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               ) : (
                 <SearchResultItem areActionsDisabled={actionState.wishlistDisabled} isActionPending={actionState.isPending} libraryItems={libraryItemsByExternalKey.get(createExternalKey(item))??[]} onAddToWishlist={()=>addResult(item,"wishlist")} onMarkCompleted={()=>addResult(item,"completed")} {...(SEARCH_RECOMMENDATIONS_ENABLED ? { onFindSimilar: ()=>findSimilarFromCard(item) } : {})} onPress={()=>setSelectedSimilar(similarResult)} recommendationReason={similarResult.similarity_reason} result={item}/>
               );
@@ -1183,6 +1380,7 @@ export default function SearchScreen() {
               const canReduceTheme = (recommendation.themes ?? []).some(isUserActionableTheme);
               return displayedAsGallery ? (
                 <PersonalizedRecommendationGalleryCard
+                  expanded={expandedGallery}
                   addLabel={addState.addLabel}
                   completeLabel={addState.completeLabel}
                   isAddDisabled={addState.disabled}
@@ -1215,6 +1413,7 @@ export default function SearchScreen() {
             const actionState = getSearchAddState(item);
             return displayedAsGallery ? (
               <SearchResultGalleryCard
+                expanded={expandedGallery}
                 areActionsDisabled={actionState.wishlistDisabled}
                 isActionPending={actionState.isPending}
                 libraryItems={libraryItemsByExternalKey.get(createExternalKey(item)) ?? []}
@@ -1279,7 +1478,7 @@ export default function SearchScreen() {
         onToggleTheme={(key) => void toggleRecommendationExclusion("theme", key)}
         visible={searchFilterPreferences.isReady && recommendationExclusionsVisible}
       />
-      <SimilarContentQuickViewModal areActionsDisabled={selectedSimilar?getSearchAddState(selectedSimilar).wishlistDisabled:true} isActionPending={selectedSimilar?getSearchAddState(selectedSimilar).isPending:false} item={searchFilterPreferences.isReady ? selectedSimilar : null} onAddToWishlist={(item)=>{setSelectedSimilar(null);addResult(item,"wishlist");}} onMarkCompleted={(item)=>{setSelectedSimilar(null);addResult(item,"completed");}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
+      <SimilarContentQuickViewModal areActionsDisabled={selectedSimilar?getSearchAddState(selectedSimilar).wishlistDisabled:true} isActionPending={selectedSimilar?getSearchAddState(selectedSimilar).isPending:false} item={searchFilterPreferences.isReady && library.isSuccess ? selectedSimilar : null} onAddToWishlist={(item)=>{setSelectedSimilar(null);addResult(item,"wishlist");}} onMarkCompleted={(item)=>{setSelectedSimilar(null);addResult(item,"completed");}} onClose={()=>setSelectedSimilar(null)} onFindSimilar={(item)=>{setSelectedSimilar(null);findSimilarFromCard(item);}} onOpenDetails={(item)=>{setSelectedSimilar(null);openResult(item);}} />
     </View>
   );
 }
@@ -1457,6 +1656,14 @@ const styles = StyleSheet.create({
     ...typography.display,
     color: colors.text
   },
+  compactSearchHeading: { alignItems: "center", flexDirection: "row", gap: spacing.xl },
+  compactSearchTools: { flex: 1, minWidth: 0 },
+  compactControls: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: spacing.lg },
+  shortcutToggle: { alignItems: "center", flexDirection: "row", gap: spacing.xs, minHeight: 44, paddingHorizontal: spacing.sm },
+  shortcutToggleText: { ...typography.caption, color: colors.textMuted },
+  compactRecommendationHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: spacing.md },
+  compactRecommendationHeading: { alignItems: "center", flex: 1, minWidth: 280 },
+  compactRecommendationText: { minWidth: 0 },
   searchTools: {
     marginHorizontal: -spacing.lg,
     zIndex: 1000
@@ -1505,14 +1712,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
+  compactHistoryChip: { paddingVertical: 0 },
   historyChipLabel: {
     minHeight:44, minWidth:44, justifyContent:"center",
     flexShrink: 1
   },
   historyChipText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "700"
+    ...typography.caption,
+    color: colors.text
   },
   viewToolbar: {
     flexDirection: "row",
@@ -1589,11 +1796,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md
   },
   similarHeader: { gap: spacing.sm, paddingBottom: spacing.sm },
+  similarTitle: { ...typography.headline, color: colors.text },
+  similarHint: { ...typography.caption, color: colors.textMuted, flexShrink: 1 },
+  similarStatus: { ...typography.caption, color: colors.textMuted, fontVariant: ["tabular-nums"] },
+  similarPriorityBadge: { alignSelf: "flex-start", backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  similarPriorityText: { ...typography.label, color: colors.primary },
+  similarControlGroup: { gap: spacing.xs },
+  similarFocusGroup: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, gap: spacing.xs, paddingTop: spacing.sm },
+  similarControlLabel: { ...typography.label, color: colors.text },
   similarFilters: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  similarChip: { minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  similarChip: { minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center", borderColor: colors.border, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   similarChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  similarChipText: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+  similarChipText: { ...typography.label, color: colors.textMuted },
   similarChipTextSelected: { color: colors.surface },
+  similarPressed: { opacity: 0.72 },
+  similarDisabled: { opacity: 0.5 },
+  similarFooter: { alignItems: "center", gap: spacing.sm, minHeight: 64, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  similarFooterBusy: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, justifyContent: "center" },
+  similarFooterButton: { alignItems: "center", borderColor: colors.primary, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, justifyContent: "center", minHeight: 44, minWidth: 44, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  similarFooterButtonText: { ...typography.label, color: colors.primary, textAlign: "center" },
+  similarFooterError: { ...typography.caption, color: colors.danger, textAlign: "center" },
+  similarFooterEnd: { ...typography.caption, color: colors.textMuted, textAlign: "center" },
   appliedChip: { minHeight: 44, justifyContent: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   appliedChipText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
   anchorDialog: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, marginBottom: spacing.sm, padding: spacing.md },

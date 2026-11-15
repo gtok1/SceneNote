@@ -1,6 +1,6 @@
 import { Redirect , useLocalSearchParams, useRouter } from "expo-router";
 import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -22,14 +22,14 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { ScreenStateFrame } from "@/components/common/ScreenStateFrame";
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { KoreanNameEditor } from "@/components/people/KoreanNameEditor";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import {
   useAddToLibrary,
   useDeleteLibraryItem,
   useLibrary,
   useUpdateLibraryStatus
 } from "@/hooks/useLibrary";
-import { useFavoritePeople, usePersonDetail, useSetFavoriteKoreanName } from "@/hooks/usePeople";
+import { useAddFavoritePerson, useFavoritePeople, usePersonDetail, useSetFavoriteKoreanName } from "@/hooks/usePeople";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useAuthStore } from "@/stores/authStore";
 import type { LibraryListItem } from "@/types/library";
@@ -37,8 +37,10 @@ import type { PersonCategory, PersonCredit, PersonSource } from "@/types/people"
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import { formatPersonName } from "@/utils/japaneseName";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
-import { personKey } from "@/utils/peopleScreen";
+import { personKey, toPersonSearchResult } from "@/utils/peopleScreen";
 import { pickKoreanName } from "@/utils/personKoreanName";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import {
   createPersonCreditKey,
   dedupeValidPersonCredits,
@@ -95,6 +97,8 @@ function PersonDetailScreen() {
   const activeFilter = parsePersonCreditFilter(params.filter);
   const detail = usePersonDetail(parsed.source, parsed.externalId, parsed.category);
   const favorites = useFavoritePeople();
+  const addFavorite = useAddFavoritePerson();
+  const favoriteAddLock = useRef(false);
   const setKoreanName = useSetFavoriteKoreanName();
   const library = useLibrary("all");
   const addToLibrary = useAddToLibrary();
@@ -307,12 +311,18 @@ function PersonDetailScreen() {
     });
   };
 
+  const refreshPersonInformation = () => {
+    void detail.refresh().catch(() => addToast(detail.data
+      ? "새 인물 정보를 확인하지 못했어요. 기존 정보를 유지해요."
+      : "인물 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.", "error"));
+  };
+
   if (!parsed.source || !parsed.externalId || !parsed.category) {
     return <ScreenStateFrame><EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" /></ScreenStateFrame>;
   }
   if (detail.isLoading) return <ScreenStateFrame><LoadingSkeleton count={4} /></ScreenStateFrame>;
-  if (detail.isError)
-    return <ScreenStateFrame><ErrorState message={detail.error.message} onRetry={() => detail.refetch()} /></ScreenStateFrame>;
+  if (detail.isError && !detail.data)
+    return <ScreenStateFrame><ErrorState message={userFacingErrorMessage(detail.error, ERROR_COPY.personLoad)} onRetry={refreshPersonInformation} /></ScreenStateFrame>;
   if (!detail.data) return <ScreenStateFrame><EmptyState actionLabel="뒤로 가기" onAction={() => router.back()} title="인물 정보를 찾을 수 없습니다" /></ScreenStateFrame>;
 
   const person = detail.data;
@@ -323,6 +333,25 @@ function PersonDetailScreen() {
     original_name: person.native_name ?? person.original_name,
     ...pickKoreanName(person, favorite)
   });
+  const favoriteBusy = addFavorite.isPending || Boolean(user && favorites.isPending);
+  const favoriteDisabled = Boolean(favorite) || favoriteBusy || Boolean(user && favorites.isError);
+  const registerFavorite = () => {
+    if (!user) {
+      addToast("로그인하면 좋아하는 인물로 등록할 수 있어요.", "info");
+      router.push("/sign-in");
+      return;
+    }
+    if (favoriteDisabled || favoriteAddLock.current) return;
+    favoriteAddLock.current = true;
+    addFavorite.mutate(toPersonSearchResult({
+      ...person,
+      known_for: Array.from(new Set(credits.map((credit) => credit.title))).slice(0, 3)
+    }), {
+      onSuccess: () => addToast(`${displayName.name}을(를) 좋아하는 인물에 등록했어요.`, "success"),
+      onError: (error) => addToast(userFacingErrorMessage(error, ERROR_COPY.personAdd), "error"),
+      onSettled: () => { favoriteAddLock.current = false; }
+    });
+  };
   const saveKoreanName = async (nameKo: string | null) => {
     if (!favorite) return;
     try {
@@ -339,6 +368,17 @@ function PersonDetailScreen() {
     <>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.page, { paddingBottom: spacing.xl + insets.bottom }]}>
         <View style={[styles.container, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right) }]}>
+          <View style={styles.metadataRefresh}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="인물 정보 다시 불러오기"
+              accessibilityState={{ disabled: detail.isFetching, busy: detail.isFetching }}
+              disabled={detail.isFetching}
+              onPress={refreshPersonInformation}
+              style={({ pressed }) => [styles.metadataRefreshButton, pressed ? styles.pressed : null]}
+            ><Text style={styles.metadataRefreshLabel}>{detail.isFetching ? "다시 확인하는 중…" : "인물 정보 다시 불러오기"}</Text></Pressable>
+            {detail.isError ? <Text accessibilityLiveRegion="polite" style={styles.metadataRefreshHint}>새 정보를 확인하지 못했어요. 기존 정보를 표시해요.</Text> : null}
+          </View>
           <View style={[styles.hero, isWide ? styles.heroWide : null]}>
             <View style={[styles.identity, isWide ? styles.identityWide : null]}>
               <Image
@@ -359,6 +399,21 @@ function PersonDetailScreen() {
                   </View>
                   {displayName.secondaryName ? (
                     <Text style={styles.original}>{displayName.secondaryName}</Text>
+                  ) : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={favorite ? "좋아하는 인물에 등록됨" : "좋아하는 인물에 등록"}
+                    accessibilityState={{ disabled: favoriteDisabled, busy: favoriteBusy }}
+                    disabled={favoriteDisabled}
+                    onPress={registerFavorite}
+                    style={({ pressed }) => [styles.favoriteButton, favoriteDisabled ? styles.buttonDisabled : null, pressed ? styles.pressed : null]}
+                  >
+                    <Text style={styles.favoriteButtonText}>{favorite ? "등록됨" : favoriteBusy ? "확인하는 중…" : "좋아하는 인물에 등록"}</Text>
+                  </Pressable>
+                  {user && favorites.isError ? (
+                    <Pressable accessibilityRole="button" onPress={() => void favorites.refetch()} style={styles.metadataRefreshButton}>
+                      <Text style={styles.metadataRefreshLabel}>등록 여부 다시 확인</Text>
+                    </Pressable>
                   ) : null}
                   <KoreanNameEditor
                     currentKoreanName={displayName.koreanName}
@@ -878,6 +933,12 @@ function parseYearMonthSortValue(airDate?: string | null, airYear?: number | nul
 }
 
 const styles = StyleSheet.create({
+  favoriteButton: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.primary },
+  favoriteButtonText: { ...typography.label, color: colors.surface },
+  metadataRefresh: { alignItems: "flex-start", gap: spacing.sm },
+  metadataRefreshButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surface },
+  metadataRefreshLabel: { ...typography.label, color: colors.primary },
+  metadataRefreshHint: { ...typography.caption, color: colors.textMuted },
   page: {
     backgroundColor: colors.background,
     minHeight: "100%",

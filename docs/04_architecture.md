@@ -14,12 +14,16 @@
 
 ### 실제 구성과 책임
 
+공개 메타데이터의 2026-11-15 보완: [69](69_persistent_public_metadata_cache_fixes_spec.md)에 따라 보러가기·작품/인물 상세와 공유 인물 프로필은 service-role 전용 `external_search_cache`의 별도 namespace에 저장한다. 앱 Query 캐시는 같은 공개 정보를 재사용하며, 콜드 앱은 인증된 Edge를 통해 DB를 읽는다. 첫 miss/명시 갱신만 외부 조회하며 이름/분류의 프로필은 30일 재확인한다. `get-content-detail`의 DB 저장값 우선·등록/핀 서비스 공유와 `get-person-detail`·분류/이름/검색 보정의 프로필 공유는 사용자별 기록 캐시와 별개다. 공개 회차·검색·추천은 기존 동적 갱신을 유지한다. 스키마·RLS 변경은 없다. 운영 배포와 실행 증거는 development_next_steps에 구분한다.
+
+유사 작품 검색의 2026-11-15 보완: `similar-content`가 공개 후보 전체를 유사도 1차·최신/인기 2차로 정렬하고 기존 `external_search_cache`에 15분 공개 스냅샷을 저장한다. 사용자 JWT/RLS로 읽은 등록 목록을 색인해 응답 메모리에서 제외한 뒤 cursor 페이지/개수를 만든다. 공개 캐시에 개인별 목록을 저장하지 않으며 cursor와 앱 캐시는 계정·등록 identity로 분리한다. 앱은 `useSimilarContent`의 무한 Query로 이어 받는다. DB 스키마·사용자 기록 구조는 바꾸지 않는다. 상세 계약은 [22 §10](22_search_recommendations_restore_spec.md#10-2026-11-15-사용자-정정--유사도-1차-고정등록-작품-제외), 앱 흐름은 [08](08_frontend_architecture.md)을 따른다.
+
 | 영역 | 코드에서 확인한 위치·심볼 | 수정 시 함께 확인할 영역 |
 |---|---|---|
 | 앱 진입·인증 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`; `src/providers/AppProviders.tsx`: `AppProviders` | 인증 링크 처리 `src/utils/authLinks.ts`, 세션 초기화, 비밀번호 재설정·공유 경로의 리다이렉트 예외 |
 | 화면·공통 UI | `app/`, `src/components/`; 실제 검색 본체는 `app/search.tsx`: `SearchScreen`; 공통 Stack 헤더는 `src/components/common/ScreenHeader.tsx` | `(tabs)` 화면, 상세/핀 라우트, 공통 디자인 값 `src/constants/theme.ts`, 본문 폭 `src/utils/homeLayout.ts`·`src/constants/layout.ts` |
 | 서버 상태·요청 | `src/hooks/` → `src/services/` → `src/lib/supabase.ts`; `src/lib/query.ts`: `queryClient`, `queryKeys` | 캐시 키와 mutation 후 갱신, 사용자 전환 시 캐시 정리, 서버 응답 타입 `src/types/` |
-| UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. `watchProvidersAtom`의 서버 응답 저장은 서버 상태 분리 원칙과 다른 현황이며 일반 규칙으로 확대하지 않는다. |
+| UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. `watchProvidersAtom`은 이전 미사용 파일이며 현재 보러가기는 TanStack Query와 DB 저장 경로다(docs/69). |
 | 외부 콘텐츠 호출 | `supabase/functions/*/index.ts`; `_shared/externalContent.ts`; `search-content/adapters/` | `search-content/adapters/types.ts`, `_shared/types.ts`, 클라이언트 `src/types/content.ts` 및 응답 변환 서비스 |
 | DB·권한 | `supabase/migrations/`의 순서별 SQL, `src/types/database.ts` | 후속 migration까지 읽어 최종 제약 확인. 로컬 파일 존재만으로 원격 적용을 단정하지 않는다. |
 
@@ -36,7 +40,9 @@
 | 추천·제외·유사 작품 | `app/search.tsx` → `usePersonalizedRecommendations`, `useRecommendationPreferences`, `useSimilarContent` (`src/hooks/`) → 동명 기능의 `src/services/` → `personalized-recommendations`, `similar-content` Edge Function | [26](26_recommendation_and_season_lookup_fixes_spec.md)·[27](27_excluded_relationship_themes_spec.md)·[28](28_recommendation_scroll_pagination_fixes_spec.md)·[30](30_recommendation_fill_and_action_consistency_fixes_spec.md); 서버 `_shared/recommendation*.ts`와 클라이언트 `src/utils/recommendation*.ts` 양쪽 확인 |
 | 시청처·계정 | `src/hooks/useWatchProviders.ts` → `src/services/watchProviders.ts` → `get-watch-providers`; `src/hooks/useAuth.ts` → `src/services/account.ts` → `delete-account` | 시청처는 선택 시즌·방영일을 전달하고 시즌 매칭 응답을 검증한다([54 §15](54_anime_sequel_watch_providers_fixes_spec.md#15-2026-10-20-후속-정정--선택한-시즌의-제공처만-표시)). 외부 API 키와 관리자 키는 Edge 환경에만 둔다. `delete-account`의 로컬 구현과 실제 배포 성공은 별도 확인 대상이다. |
 
-개인화 추천의 공개 공급자 페이지·키워드·한국어 제목 보강은 `_shared/recommendationCache.ts`를 통해 기존 `external_search_cache`에 재사용된다. 계정 필터는 조회 요청과 최종 판정에 적용하며, 개인별 라이브러리·피드백·순위는 공유 캐시에 넣지 않는다. 미확인 후보가 남은 공급자 페이지는 카탈로그의 `verificationPass` 커서로 이어 확인한다([30 후속 요청](30_recommendation_fill_and_action_consistency_fixes_spec.md#6-2026-09-26-후속-요청-조회-전-필터와-재사용)).
+개인화 추천의 공개 공급자 페이지·키워드·한국어 제목 보강은 `_shared/recommendationCache.ts`를 통해 기존 `external_search_cache`에 재사용된다. 계정 필터는 조회 요청과 최종 판정에 적용하며, 개인별 라이브러리·피드백·순위는 공유 캐시에 넣지 않는다. 레거시 mixed 모드의 미확인 후보는 `verificationPass` 커서로 이어 확인한다([30 후속 요청](30_recommendation_fill_and_action_consistency_fixes_spec.md#6-2026-09-26-후속-요청-조회-전-필터와-재사용)).
+
+2026-11-15 최신 추천은 [70](70_latest_recommendation_catalog_and_cpu_fixes_spec.md)에 따라 `discovery_mode:latest`를 요청/확인한다. `recommendationLatestCatalog`가 공급자·OR 질의별 공개일 내림차순 스트림을 합치고, `lc1` 커서에 계정·조건·기준일·각 page/raw offset/fingerprint를 보존한다. 최신 페이지가 남으면 전 기간 인기 취향 보충을 실행하지 않는다. 공개 페이지 캐시는 latest 정렬 버전을 분리하되 같은 base page의 OR lane은 함께 저장한다. 요청당 한 번 준비한 라이브러리 context를 프로필·순위·이유 계산에 공유한다. DB 구조와 사용자 기록 접근 권한은 그대로다.
 
 적용한 검색 조건은 `useSearchFilterPreferences` → `searchFilterPreferences` 서비스 → 본인 RLS가 적용된 `profiles.search_filters`에 저장한다. 검색과 개인화 추천의 원하는 유형·장르·제작 국가는 `mediaTypes`/`genres`/`countries` 배열로 Edge에 전달되며 `_shared/discoveryFilters.ts`로 정규화·검증한다. 추천 공급자 조회와 공개 페이지 캐시에 포함 조건을 넣고 cursor도 같은 조건에 묶는다. 제목 검색은 공용 원시 검색 캐시를 재사용한 다음 조건을 적용하며, 국가/TV 장르 확인에 필요한 공개 메타데이터만 제한된 예산으로 보강한다. 추천 제외는 추천 경로에만 별도로 우선 적용한다([22 후속 요청](22_search_recommendations_restore_spec.md#8-2026-09-27-후속-요청--다중-선택과-계정별-저장)).
 

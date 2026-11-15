@@ -1049,3 +1049,87 @@ it("Y-6 taste provider requests and persisted caches are isolated by year", asyn
   assert.deepEqual(dates, ['2025-01-01', '2026-01-01', 'all']);
   assert.equal(new Set(keys).size, 3);
 });
+
+describe("latest provider lanes", () => {
+  it("uses independent latest native/keyword frontiers while sharing one base-page fetch", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", { configurable: true, value: { env: { get: () => "fixture-only-key" } } });
+    const sorts: string[] = [];
+    globalThis.fetch = async input => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/search/keyword")) return Response.json({ results: [{ id: 987654, name: "romance" }] });
+      sorts.push(url.searchParams.get("sort_by") ?? "");
+      const keyword = url.searchParams.has("with_keywords");
+      return Response.json({ results: [{ id: keyword ? 987652 : 987651, name: keyword ? "로맨스 작품" : "범죄 작품", original_name: "원제", genre_ids: [18, 80], origin_country: ["KR"], first_air_date: keyword ? "2026-11-15" : "2026-11-14" }], total_pages: 2 });
+    };
+    try {
+      const request = { provider: "tmdb_kr" as const, month: "2026-11", page: 1, asOfDate: "2026-11-15" };
+      const options = { discoveryFilters: { countries: ["JP", "KR"], genres: ["crime", "romance"] }, ordering: "latest" as const };
+      const [native, keyword] = await Promise.all([
+        fetchRecommendationProviderPage(request, { ...options, latestLane: "native" }),
+        fetchRecommendationProviderPage(request, { ...options, latestLane: "keywords" })
+      ]);
+      assert.deepEqual(native.items.map(item => item.external_id), ["987651"]);
+      assert.deepEqual(keyword.items.map(item => item.external_id), ["987652"]);
+      assert.deepEqual(sorts, ["first_air_date.desc", "first_air_date.desc"]);
+      await fetchRecommendationProviderPage(request, { ...options, latestLane: "native" });
+      assert.equal(sorts.length, 2);
+      await fetchRecommendationProviderPage(request, { discoveryFilters: options.discoveryFilters });
+      assert.deepEqual(sorts.slice(2), ["popularity.desc", "popularity.desc"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno); else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
+});
+
+it("latest movie discovery sorts by primary release date and retains KR OTT constraints", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  Object.defineProperty(globalThis, "Deno", { configurable: true, value: { env: { get: () => "fixture-only" } } });
+  const urls: URL[] = [];
+  globalThis.fetch = async input => { urls.push(new URL(String(input))); return Response.json({ results: [], total_pages: 0 }); };
+  try {
+    await fetchRecommendationProviderPage({ provider: "tmdb_movie", month: "2031-01", page: 1, asOfDate: "2031-01-31" }, { ordering: "latest", latestLane: "base" });
+    assert.equal(urls.length, 1); assert.equal(urls[0]!.searchParams.get("sort_by"), "primary_release_date.desc");
+    assert.equal(urls[0]!.searchParams.get("watch_region"), "KR");
+    assert.equal(urls[0]!.searchParams.get("with_watch_monetization_types"), "flatrate|free|ads");
+  } finally { globalThis.fetch = originalFetch; if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno); else Reflect.deleteProperty(globalThis, "Deno"); }
+});
+
+it("latest AniList OR streams share a single GraphQL page and put START_DATE_DESC first", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDeno = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  Object.defineProperty(globalThis, "Deno", { configurable: true, value: { env: { get: (key: string) => key === "TMDB_API_KEY" ? "fixture-only" : undefined } } });
+  let graphqlCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("graphql.anilist")) {
+      graphqlCalls++;
+      assert.match(JSON.parse(String(init?.body)).query, /sort: \[START_DATE_DESC, POPULARITY_DESC, SCORE_DESC\]/);
+      return Response.json({ data: {
+        genre0: { pageInfo: { hasNextPage: true }, media: [{ id: 15101, title: { native: "アニメ甲" }, startDate: { year: 2031, month: 2, day: 15 }, genres: ["Comedy"], countryOfOrigin: "JP" }] },
+        genre1: { pageInfo: { hasNextPage: false }, media: [{ id: 15102, title: { native: "アニメ乙" }, startDate: { year: 2031, month: 2, day: 14 }, genres: ["Romance"], countryOfOrigin: "JP" }] }
+      } });
+    }
+    return Response.json({ results: [
+      { id: 15101, name: "애니 갑", original_name: "アニメ甲", first_air_date: "2031-02-15" },
+      { id: 15102, name: "애니 을", original_name: "アニメ乙", first_air_date: "2031-02-14" }
+    ], total_pages: 1 });
+  };
+  try {
+    const request = { provider: "anilist" as const, month: "2031-02", page: 1, asOfDate: "2031-02-28" };
+    const options = { ordering: "latest" as const, discoveryFilters: { countries: ["JP"], genres: ["comedy", "romance"] } };
+    const [a, b] = await Promise.all([fetchRecommendationProviderPage(request, { ...options, latestLane: "genre0" }), fetchRecommendationProviderPage(request, { ...options, latestLane: "genre1" })]);
+    assert.equal(graphqlCalls, 1); assert.deepEqual(a.items.map(item => item.external_id), ["15101"]); assert.equal(a.hasMore, true);
+    assert.deepEqual(b.items.map(item => item.external_id), ["15102"]); assert.equal(b.hasMore, false);
+  } finally { globalThis.fetch = originalFetch; if (originalDeno) Object.defineProperty(globalThis, "Deno", originalDeno); else Reflect.deleteProperty(globalThis, "Deno"); }
+});
+
+it("latest refuses a persisted page with an absent requested lane instead of claiming exhaustion", async () => {
+  const cache: RecommendationCache = {
+    async get<T>() { return { page: { items: [], hasMore: false }, expiresAt: Date.now() + 60_000 } as T; },
+    async set() {}
+  };
+  await assert.rejects(fetchRecommendationProviderPage({ provider: "tmdb_movie", month: "2031-03", page: 1, asOfDate: "2031-03-31" }, { ordering: "latest", latestLane: "base", cache }), /LATEST_PROVIDER_LANE_UNAVAILABLE/);
+});

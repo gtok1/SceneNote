@@ -4,8 +4,10 @@ const MAX_QUERY_VARIANTS = 5;
 
 export interface SearchQueryVariant {
   query: string;
-  matchMode: "direct" | "compact-title";
+  matchMode: "direct" | "compact-title" | "relaxed-words";
   compactQuery: string;
+  /** Only relaxed variants carry words for result filtering and cache scoping. */
+  words?: readonly string[];
 }
 
 export interface SeasonQuery {
@@ -35,6 +37,10 @@ export function annotateFilterMatches(
 export function filterResponseForVariant(
   response: AdapterSearchResponse, variant: SearchQueryVariant
 ): AdapterSearchResponse {
+  if (variant.matchMode === "relaxed-words") {
+    const results = filterResultsByRelaxedWords(response.results, variant.words ?? []);
+    return { ...response, results, total: results.length };
+  }
   if (variant.matchMode !== "compact-title") return response;
   const results = filterResultsByCompactQuery(response.results, variant.compactQuery);
   return { ...response, results, total: results.length };
@@ -139,14 +145,29 @@ export function compactSearchText(value: string): string {
 export function filterResultsByCompactQuery(results: SearchResult[], compactQuery: string): SearchResult[] {
   if (!compactQuery) return results;
 
-  return results.filter((result) => {
-    if (result.matched_via === "season_relation") return true;
-
-    return [result.title_primary, result.title_original, ...(result.match_titles ?? [])].some((title) => {
+  const titleMatches = (result: SearchResult) =>
+    [result.title_primary, result.title_original, ...(result.match_titles ?? [])].some((title) => {
       if (!title) return false;
       const compactTitle = compactSearchText(title);
       return compactTitle.includes(compactQuery) || compactQuery.includes(compactTitle);
     });
+
+  // Expanded seasons follow their base in the same list (docs/67).
+  // A season search can replace the base, so keep seasons without it (docs/15 RC-4).
+  const baseVerdicts = new Map<string, boolean>();
+  for (const result of results) {
+    if (result.matched_via === "season_relation") continue;
+    const key = `${result.external_source}:${result.external_id}`;
+    baseVerdicts.set(key, baseVerdicts.get(key) === true || titleMatches(result));
+  }
+
+  return results.filter((result) => {
+    if (result.matched_via !== "season_relation") return titleMatches(result);
+    if (titleMatches(result)) return true;
+    const baseVerdict = result.resolved_from_id
+      ? baseVerdicts.get(`${result.external_source}:${result.resolved_from_id}`)
+      : undefined;
+    return baseVerdict !== false;
   });
 }
 
@@ -380,4 +401,122 @@ export function planAniListAnimeFollowUp(input: {
     reason: "run",
     variants: titles.map(title => ({ query: collapseWhitespace(title), matchMode: "compact-title", compactQuery }))
   };
+}
+
+export const MAX_RELAXED_WORDS = 6;
+export const MAX_RELAXED_CORE_WORDS = 3;
+export const MAX_RELAXED_STEM_QUERIES = 2;
+export const MAX_RELAXED_WORD_VARIANTS = 4;
+export const RELAXED_WORD_MIN_REMAINING_MS = 2_500;
+
+const KOREAN_WORD_ENDINGS = [
+  "당했던", "당하는", "당하던", "당한다", "되었던", "시키는", "스러운",
+  "당한", "당할", "되는", "되던", "된다", "됐던", "시킨", "받는", "받은", "하는", "하던",
+  "했던", "한다", "로운", "다운", "적인", "에서", "에게", "으로", "까지", "부터", "처럼",
+  "된", "될", "한", "할", "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "로", "만"
+];
+
+export function extractRelaxedSearchWords(query: string): string[] {
+  const words = new Set<string>();
+  for (const token of query.normalize("NFKC").toLocaleLowerCase().split(/[\s\p{P}\p{S}]+/u)) {
+    if (Array.from(token).length < 2) continue;
+    words.add(token);
+    if (words.size === MAX_RELAXED_WORDS) break;
+  }
+  return [...words];
+}
+
+export function koreanWordStem(word: string): string {
+  if (!/[가-힣]$/.test(word)) return word;
+  for (const ending of KOREAN_WORD_ENDINGS) {
+    if (!word.endsWith(ending)) continue;
+    const stem = word.slice(0, -ending.length);
+    if (Array.from(stem).length >= 2) return stem;
+  }
+  return word;
+}
+
+// TMDB requires whole-word matches except for a prefix in the last position,
+// so place core words first and an optional stem last (docs/66 D-3).
+export function createKoreanRelaxedWordVariants(
+  query: string, existing: readonly SearchQueryVariant[] = []
+): SearchQueryVariant[] {
+  const words = extractRelaxedSearchWords(query);
+  if (words.length < 2) return [];
+
+  const compactQuery = compactSearchText(collapseWhitespace(query));
+  const stems = words.map(koreanWordStem);
+  const core = words.filter((word, index) => stems[index] === word).slice(0, MAX_RELAXED_CORE_WORDS);
+  const inflected = stems.filter((stem, index) => stem !== words[index]);
+  const candidates: string[] = [];
+  if (core.length) {
+    const coreQuery = core.join(" ");
+    const stemQueries = inflected.filter(stem => !core.includes(stem)).slice(0, MAX_RELAXED_STEM_QUERIES);
+    candidates.push(...stemQueries.map(stem => `${coreQuery} ${stem}`), coreQuery);
+    if (core.length >= 2) {
+      candidates.push(...core.map((_, index) => core.filter((_, other) => other !== index).join(" ")));
+    }
+  } else {
+    candidates.push(...inflected);
+  }
+
+  const seen = new Set(existing.map(variant => variant.query));
+  const variants: SearchQueryVariant[] = [];
+  for (const text of candidates) {
+    if (seen.has(text)) continue;
+    seen.add(text);
+    variants.push({ query: text, matchMode: "relaxed-words", compactQuery, words });
+    if (variants.length === MAX_RELAXED_WORD_VARIANTS) break;
+  }
+  return variants;
+}
+
+function relaxedSearchTitles(result: SearchResult): string[] {
+  return [result.title_primary, result.title_original, result.series_title, ...(result.match_titles ?? [])]
+    .filter((title): title is string => Boolean(title))
+    .map(compactSearchText);
+}
+
+export function filterResultsByRelaxedWords(results: SearchResult[], words: readonly string[]): SearchResult[] {
+  if (words.length < 2) return [];
+  const forms = words.map(word => new Set([compactSearchText(word), compactSearchText(koreanWordStem(word))]));
+  const minimumMatches = Math.max(2, Math.ceil(words.length * 2 / 3));
+  return results.filter(result => {
+    const titles = relaxedSearchTitles(result);
+    const matches = forms.filter(wordForms => [...wordForms].some(form => titles.some(title => title.includes(form))));
+    return matches.length >= minimumMatches;
+  });
+}
+
+export function searchCacheScope(variant: SearchQueryVariant): string {
+  if (variant.matchMode === "compact-title") return `compact-title:${variant.compactQuery}`;
+  if (variant.matchMode === "relaxed-words") return `relaxed-words:${(variant.words ?? []).join(" ")}`;
+  return variant.matchMode;
+}
+
+export type RelaxedWordFallbackReason =
+  "run" | "page" | "no_tmdb" | "not_eligible" | "season" | "single_word" | "has_match" | "time";
+
+export function planKoreanRelaxedWordFallback(input: {
+  query: string;
+  page: number;
+  sources: readonly string[];
+  remainingMs: number;
+  existingVariants: readonly SearchQueryVariant[];
+  priorResults: readonly SearchResult[];
+}): { variants: SearchQueryVariant[]; reason: RelaxedWordFallbackReason } {
+  if (input.page !== 1) return { variants: [], reason: "page" };
+  if (!input.sources.includes("tmdb")) return { variants: [], reason: "no_tmdb" };
+  const query = collapseWhitespace(input.query);
+  const compactQuery = compactSearchText(query);
+  if (!/[가-힣]/.test(compactQuery) || /[ᄀ-ᇿ㄰-㆏]/.test(compactQuery)) return { variants: [], reason: "not_eligible" };
+  if (parseSeasonQuery(query) !== null) return { variants: [], reason: "season" };
+  if (extractRelaxedSearchWords(input.query).length < 2) return { variants: [], reason: "single_word" };
+  // Reverse inclusion and season_relation bypasses can block fallback with unrelated results (docs/66 §2.4).
+  if (input.priorResults.some(result => relaxedSearchTitles(result).some(title => title.includes(compactQuery)))) {
+    return { variants: [], reason: "has_match" };
+  }
+  if (input.remainingMs < RELAXED_WORD_MIN_REMAINING_MS) return { variants: [], reason: "time" };
+  const variants = createKoreanRelaxedWordVariants(input.query, input.existingVariants);
+  return { variants, reason: variants.length ? "run" : "not_eligible" };
 }

@@ -6,6 +6,7 @@ import { Link } from "expo-router";
 
 import { ONBOARDING_CONTENT_MAX_WIDTH } from "@/constants/layout";
 import { colors, radius, spacing } from "@/constants/theme";
+import { getOnboardingActions } from "@/utils/onboarding";
 
 const slides: readonly [
   { title: string; body: string },
@@ -31,11 +32,11 @@ const firstSlide = slides[0];
 export default function OnboardingScreen() {
   const [index, setIndex] = useState(0);
   const slide = slides[index] ?? firstSlide;
-  const isLast = index === slides.length - 1;
+  const actions = getOnboardingActions(index, slides.length);
 
   return (
     <KeyboardScreen contentContainerStyle={styles.container} maxWidth={ONBOARDING_CONTENT_MAX_WIDTH}>
-      <View style={styles.dots}>
+      <View accessible accessibilityLabel={`${index + 1} / ${slides.length}`} style={styles.dots}>
         {slides.map((item, itemIndex) => (
           <View
             key={item.title}
@@ -50,26 +51,36 @@ export default function OnboardingScreen() {
         <Text style={styles.body}>{slide.body}</Text>
       </View>
 
-      {isLast ? (
-        <View style={styles.actions}>
+      <View style={styles.actions}>
+        {actions.showSignUp ? (
           <Link asChild href="/sign-up">
             <Pressable accessibilityRole="button" style={styles.primaryButton}>
-              <Text style={styles.primaryText}>계정 만들기</Text>
+              {({ pressed }) => <Text style={[styles.primaryText, pressed && styles.pressed]}>계정 만들기</Text>}
             </Pressable>
           </Link>
-          <Link href="/sign-in" style={styles.link}>
-            이미 계정이 있어요
-          </Link>
-        </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setIndex((current) => Math.min(current + 1, slides.length - 1))}
-          style={styles.primaryButton}
-        >
-          <Text style={styles.primaryText}>다음</Text>
-        </Pressable>
-      )}
+        ) : null}
+        {actions.showNext ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setIndex((current) => Math.min(current + 1, slides.length - 1))}
+            style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.primaryText}>다음</Text>
+          </Pressable>
+        ) : null}
+        {actions.showBack ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setIndex(current => Math.max(0, current - 1))}
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.backText}>이전</Text>
+          </Pressable>
+        ) : null}
+        {actions.showSignInLink ? <Link href="/sign-in" style={styles.link}>
+          이미 계정이 있어요
+        </Link> : null}
+      </View>
     </KeyboardScreen>
   );
 }
@@ -128,6 +139,17 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontSize: 16,
     fontWeight: "800"
+  },
+  pressed: {
+    opacity: 0.72
+  },
+  backButton: {
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  backText: {
+    color: colors.textMuted
   },
   link: {
     minHeight: 48,

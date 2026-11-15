@@ -86,15 +86,85 @@ export function resolveEpisodeProgress(input: EpisodeProgressInput): ResolvedEpi
 }
 
 export function resolveLibraryItemProgress(
-  item: Pick<LibraryListItem, "content_type" | "episode_count" | "watched_episode_count" | "derived_watched_through" | "manual_watched_absolute_number">,
+  item: Pick<LibraryListItem, "content_type" | "episode_count" | "watched_episode_count" | "derived_watched_through" | "manual_watched_absolute_number"> & Partial<Pick<LibraryListItem,
+    "season_number" | "source_api" | "season_episode_counts" | "manual_watched_season_number" | "manual_watched_episode_number">>,
   statuses: readonly WatchStatus[]
 ): Pick<LibraryListItem, "progress_source" | "effective_watched_through" | "next_episode_number"> {
   const resolved = resolveEpisodeProgress({
     contentType: item.content_type, episodeCount: item.episode_count,
     watchedEpisodeCount: item.watched_episode_count, derivedWatchedThrough: item.derived_watched_through,
-    manualWatchedThrough: item.manual_watched_absolute_number, completed: statuses.includes("completed")
+    manualWatchedThrough: manualProgressInLibraryScope(item), completed: statuses.includes("completed")
   });
   return { progress_source: resolved.source, effective_watched_through: resolved.watchedThrough, next_episode_number: resolved.nextEpisodeNumber };
+}
+
+/** Registration identity stays unchanged; AniList sequel IDs can own a single actual season 1. */
+export function selectLibraryProgressSeasons<T extends SeasonEpisodeCount>(
+  item: { season_number?: number | null; source_api?: string },
+  seasons: readonly T[]
+): T[] {
+  if (item.season_number == null) return [...seasons];
+  const exact = seasons.find((season) => season.season_number === item.season_number);
+  if (exact) return [exact];
+  return item.source_api === "anilist" && seasons.length === 1 ? [...seasons] : [];
+}
+
+function manualProgressInLibraryScope(item: Pick<LibraryListItem, "manual_watched_absolute_number"> & Partial<Pick<LibraryListItem,
+  "season_number" | "source_api" | "season_episode_counts" | "manual_watched_season_number" | "manual_watched_episode_number">>): number | null {
+  const absolute = item.manual_watched_absolute_number;
+  if (absolute === null || item.season_number == null) return absolute;
+  const seasons = item.season_episode_counts ?? [];
+  const selectedSeason = selectLibraryProgressSeasons(item, seasons)[0];
+  const actualSeason = selectedSeason?.season_number ?? item.season_number;
+  // A same-season input is already relative, including a legacy null season pointer.
+  if (item.manual_watched_episode_number != null &&
+      (item.manual_watched_season_number == null || item.manual_watched_season_number === actualSeason)) {
+    return item.manual_watched_episode_number;
+  }
+  if (!selectedSeason || seasons.some((season) => season.season_number < actualSeason && season.episode_count === null)) return null;
+  const offset = createSeasonOffsetsByNumber(seasons).get(actualSeason) ?? 0;
+  return Math.max(0, absolute - offset);
+}
+
+/** Keep a season registration's saved pointer inside its actual season, including episode zero. */
+export function libraryManualProgressAfterToggle(
+  item: LibraryListItem,
+  seasonNumber: number | null,
+  episodeNumber: number,
+  watched: boolean
+): { seasonNumber: number | null; episodeNumber: number } | null {
+  if (item.manual_watched_episode_number === null) return null;
+  if (item.season_number !== null) {
+    const actualSeason = selectLibraryProgressSeasons(item, item.season_episode_counts)[0]?.season_number;
+    if (actualSeason === undefined || actualSeason !== seasonNumber) return null;
+    const manual = manualProgressInLibraryScope(item);
+    const next = syncManualProgressAfterToggle({ manualWatchedThrough: manual, toggledAbsoluteNumber: episodeNumber, watched });
+    return next === null || next === manual ? null : { seasonNumber: actualSeason, episodeNumber: next };
+  }
+  const absolute = toAbsoluteEpisodeNumber(seasonNumber, episodeNumber, createSeasonOffsetsByNumber(item.season_episode_counts));
+  if (absolute === null) return null;
+  const next = syncManualProgressAfterToggle({
+    manualWatchedThrough: item.manual_watched_absolute_number, toggledAbsoluteNumber: absolute, watched
+  });
+  return next === null || next === item.manual_watched_absolute_number
+    ? null : toSeasonRelativeEpisodeNumber(next, item.season_episode_counts);
+}
+
+/** Used by the optimistic cache and the same resolver as the initial service mapping. */
+export function withLibraryManualProgress<T extends LibraryListItem>(
+  item: T,
+  progress: { seasonNumber: number | null; episodeNumber: number } | null
+): T {
+  const updated = {
+    ...item,
+    manual_watched_season_number: progress?.seasonNumber ?? null,
+    manual_watched_episode_number: progress?.episodeNumber ?? null,
+    manual_watched_absolute_number: progress === null ? null : toAbsoluteEpisodeNumber(
+      progress.seasonNumber, progress.episodeNumber, createSeasonOffsetsByNumber(item.season_episode_counts)
+    ),
+    manual_progress_available: true
+  };
+  return { ...updated, ...resolveLibraryItemProgress(updated, updated.statuses) };
 }
 
 export function createSeasonOffsetsByNumber(

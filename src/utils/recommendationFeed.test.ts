@@ -31,6 +31,37 @@ interface FeedItem {
   title: string;
 }
 
+describe("recommendation replacement cursor", () => {
+  it("LC-1 keeps the next cursor for the existing new-twelve refresh action", () => {
+    assert.equal(batchFlow.recommendationReplacementCursor("next-page", false), "next-page");
+  });
+
+  it("LC-2 restarts explicitly from the beginning without replaying an invalid cursor", () => {
+    assert.equal(batchFlow.recommendationReplacementCursor("invalid-old-page", true), null);
+    assert.equal(batchFlow.recommendationReplacementCursor(null, true), null);
+  });
+});
+
+describe("recommendation completion state", () => {
+  const complete = { hasData: true, visibleCount: 2, hasError: false, isLoading: false, stopped: false,
+    hasMore: false, nextCursor: null, isExhausted: true };
+  it("LE-1 shows completion only after a successful exhausted response", () => {
+    assert.equal(batchFlow.canShowRecommendationCompletion(complete), true);
+  });
+  it("LE-2 retained additions do not turn a failed or missing first response into completion", () => {
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, hasData: false, hasError: true }), false);
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, hasData: false }), false);
+  });
+  it("LE-3 a failed refresh keeps cards without claiming that every recommendation was found", () => {
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, hasError: true }), false);
+  });
+  it("LE-4 pending or paused scans are not completed scans", () => {
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, isLoading: true }), false);
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, stopped: true }), false);
+    assert.equal(batchFlow.canShowRecommendationCompletion({ ...complete, hasMore: true, nextCursor: "next", isExhausted: false }), false);
+  });
+});
+
 const itemId = (item: FeedItem) => item.id;
 
 describe("recommendation feed state", () => {

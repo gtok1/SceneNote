@@ -8,7 +8,9 @@ import {
   filterResponseForVariant,
   annotateFilterMatches,
   planKoreanWordSplitFallback,
-  planAniListAnimeFollowUp
+  planAniListAnimeFollowUp,
+  planKoreanRelaxedWordFallback,
+  searchCacheScope
 } from "./adapters/normalize.ts";
 import { discoverTmdb, filterSearchResultsByDiscovery, searchTmdb } from "./adapters/tmdb.ts";
 import { searchTvmaze } from "./adapters/tvmaze.ts";
@@ -50,6 +52,7 @@ interface SearchResponse {
   filtered_out_count?: number;
   word_split_fallback?: boolean;
   anime_follow_up?: boolean;
+  relaxed_word_fallback?: boolean;
 }
 
 interface SearchJob {
@@ -63,10 +66,12 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 const ADAPTER_TIMEOUT_MS = 5000;
-const SEARCH_CACHE_VERSION = "ko-v15-all-seasons";
+const SEARCH_CACHE_VERSION = "ko-v16-season-base";
 
 Deno.serve(async (req: Request) => {
-  const requestDeadline = Date.now() + 8_500;
+  // The app waits 14s (docs/65). 11s leaves room for the fallback stages after a
+  // slow first stage in production, plus margin for cold start and network (docs/66 §15).
+  const requestDeadline = Date.now() + 11_000;
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -176,7 +181,17 @@ Deno.serve(async (req: Request) => {
     ? await searchQueryVariants(adminClient, ["anilist"], followUp.variants, fetchMediaType, page,
       Math.min(ADAPTER_TIMEOUT_MS, requestDeadline - Date.now() - 1000))
     : { results: [], totals: [], hasNextPage: false, successfulSources: [], failedSources: [], misses: 0 };
-  const unfilteredResults = compactResults([...primary.results, ...fallback.results, ...animeFollowUp.results]);
+  const relaxedPlan = planKoreanRelaxedWordFallback({
+    query: normalizedQuery, page, sources: targetSources,
+    remainingMs: requestDeadline - Date.now(),
+    existingVariants: [...queryVariants, ...plan.variants, ...followUp.variants],
+    priorResults: compactResults([...primary.results, ...fallback.results, ...animeFollowUp.results])
+  });
+  const relaxed: VariantSearchOutcome = relaxedPlan.reason === "run"
+    ? await searchQueryVariants(adminClient, ["tmdb"], relaxedPlan.variants, fetchMediaType, page,
+      Math.min(ADAPTER_TIMEOUT_MS, requestDeadline - Date.now() - 1000))
+    : { results: [], totals: [], hasNextPage: false, successfulSources: [], failedSources: [], misses: 0 };
+  const unfilteredResults = compactResults([...primary.results, ...fallback.results, ...animeFollowUp.results, ...relaxed.results]);
   // Keep the provider page cache independent of the viewer's selected filters.
   // Only the small, reusable production-country evidence is cached separately.
   const countryCache = createSearchMetadataCache(adminClient, requestDeadline);
@@ -186,8 +201,8 @@ Deno.serve(async (req: Request) => {
   const hasFilters = searchFilters.genres.length + searchFilters.countries.length + searchFilters.mediaTypes.length > 0;
   const annotated = annotateFilterMatches(unfilteredResults, filtered.results, hasFilters);
   const results = annotated.results;
-  const successfulSources = [...primary.successfulSources, ...fallback.successfulSources, ...animeFollowUp.successfulSources];
-  const failedSources = [...primary.failedSources, ...fallback.failedSources, ...animeFollowUp.failedSources]
+  const successfulSources = [...primary.successfulSources, ...fallback.successfulSources, ...animeFollowUp.successfulSources, ...relaxed.successfulSources];
+  const failedSources = [...primary.failedSources, ...fallback.failedSources, ...animeFollowUp.failedSources, ...relaxed.failedSources]
     .filter(source => !successfulSources.includes(source));
 
   if (results.length === 0 && successfulSources.length === 0 && failedSources.length > 0) {
@@ -198,10 +213,10 @@ Deno.serve(async (req: Request) => {
     results,
     sources: [...new Set(successfulSources)],
     failedSources: [...new Set(failedSources)],
-    cached: primary.misses + fallback.misses + animeFollowUp.misses === 0,
+    cached: primary.misses + fallback.misses + animeFollowUp.misses + relaxed.misses === 0,
     query,
     normalizedQuery,
-    total: Math.max(results.length, ...primary.totals, ...fallback.totals, ...animeFollowUp.totals),
+    total: Math.max(results.length, ...primary.totals, ...fallback.totals, ...animeFollowUp.totals, ...relaxed.totals),
     page,
     hasNextPage: primary.hasNextPage,
     partial: failedSources.length > 0 || filtered.countryFilterLimited || filtered.genreFilterLimited,
@@ -209,7 +224,8 @@ Deno.serve(async (req: Request) => {
     genre_filter_limited: filtered.genreFilterLimited,
     filtered_out_count: annotated.filteredOutCount,
     word_split_fallback: plan.reason === "run",
-    anime_follow_up: followUp.reason === "run"
+    anime_follow_up: followUp.reason === "run",
+    relaxed_word_fallback: relaxedPlan.reason === "run"
   };
 
   return json(response);
@@ -234,30 +250,36 @@ async function searchQueryVariants(
   const sourcesFromCache: ExternalSource[] = [];
   const missedSearches: SearchJob[] = [];
 
-  for (const source of sources) {
-    for (const queryVariant of variants) {
-      const queryHash = await createQueryHash(queryVariant, mediaType, page, source);
-      const { data: cacheRow } = await adminClient
-        .from("external_search_cache")
-        .select("response_json")
-        .eq("query_hash", queryHash)
-        .eq("source", source)
-        .gt("expires_at", new Date().toISOString())
-        .maybeSingle();
+  // Each cache round trip took ~160ms in production; sequential reads and writes
+  // used most of the request budget before the fallback stages (docs/66 §15).
+  const jobs = sources.flatMap((source) => variants.map((variant) => ({ source, variant })));
+  const notExpiredAfter = new Date().toISOString();
+  const cacheRows = await Promise.all(jobs.map(async ({ source, variant }) => {
+    const queryHash = await createQueryHash(variant, mediaType, page, source);
+    const { data } = await adminClient
+      .from("external_search_cache")
+      .select("response_json")
+      .eq("query_hash", queryHash)
+      .eq("source", source)
+      .gt("expires_at", notExpiredAfter)
+      .maybeSingle();
+    return data;
+  }));
 
-      if (cacheRow?.response_json) {
-        const cached = normalizeSearchCachePayload(cacheRow.response_json as {
-          results?: SearchResult[];
-          total?: number;
-          hasNextPage?: boolean;
-        });
-        cachedResults.push(...cached.results);
-        cachedTotals.push(cached.total);
-        cachedHasNextPages.push(cached.hasNextPage);
-        sourcesFromCache.push(source);
-      } else {
-        missedSearches.push({ source, variant: queryVariant });
-      }
+  for (const [index, { source, variant }] of jobs.entries()) {
+    const cacheRow = cacheRows[index];
+    if (cacheRow?.response_json) {
+      const cached = normalizeSearchCachePayload(cacheRow.response_json as {
+        results?: SearchResult[];
+        total?: number;
+        hasNextPage?: boolean;
+      });
+      cachedResults.push(...cached.results);
+      cachedTotals.push(cached.total);
+      cachedHasNextPages.push(cached.hasNextPage);
+      sourcesFromCache.push(source);
+    } else {
+      missedSearches.push({ source, variant });
     }
   }
 
@@ -267,6 +289,7 @@ async function searchQueryVariants(
   if (missedSearches.length > 0) {
     const calls = missedSearches.map((job) => callAdapter(job.source, job.variant.query, mediaType, page, timeoutMs));
     const settled = await Promise.allSettled(calls);
+    const cacheWrites: Promise<unknown>[] = [];
 
     for (const [index, result] of settled.entries()) {
       const searchJob = missedSearches[index];
@@ -280,24 +303,28 @@ async function searchQueryVariants(
 
       const response = filterResponseForVariant(result.value, searchJob.variant);
       freshResponses.push(response);
-      const queryHash = await createQueryHash(searchJob.variant, mediaType, page, response.source);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      cacheWrites.push((async () => {
+        const queryHash = await createQueryHash(searchJob.variant, mediaType, page, response.source);
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-      await adminClient.from("external_search_cache").upsert(
-        {
-          query_hash: queryHash,
-          query_text: searchJob.variant.query,
-          source: response.source,
-          response_json: {
-            results: response.results,
-            total: response.total,
-            hasNextPage: response.hasNextPage
+        await adminClient.from("external_search_cache").upsert(
+          {
+            query_hash: queryHash,
+            query_text: searchJob.variant.query,
+            source: response.source,
+            response_json: {
+              results: response.results,
+              total: response.total,
+              hasNextPage: response.hasNextPage
+            },
+            expires_at: expiresAt
           },
-          expires_at: expiresAt
-        },
-        { onConflict: "query_hash,source" }
-      );
+          { onConflict: "query_hash,source" }
+        );
+      })());
     }
+
+    await Promise.all(cacheWrites);
   }
 
   return {
@@ -496,10 +523,7 @@ async function createQueryHash(
   page: number,
   source: ExternalSource
 ): Promise<string> {
-  const cacheScope =
-    variant.matchMode === "compact-title"
-      ? `${variant.matchMode}:${variant.compactQuery}`
-      : variant.matchMode;
+  const cacheScope = searchCacheScope(variant);
   const encoded = new TextEncoder().encode(
     `${SEARCH_CACHE_VERSION}:${source}:${mediaType}:${page}:${cacheScope}:${variant.query.toLowerCase()}`
   );

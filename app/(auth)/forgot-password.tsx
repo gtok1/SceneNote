@@ -44,11 +44,12 @@ export default function ForgotPasswordScreen() {
                 autoComplete="email"
                 returnKeyType="done"
                 onSubmitEditing={submit}
-                                autoCapitalize="none"
+                autoCapitalize="none"
+                autoCorrect={false}
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
-                placeholder="이메일"
+                placeholder="name@example.com"
                 style={styles.input}
                 value={field.value}
               />
@@ -66,10 +67,13 @@ export default function ForgotPasswordScreen() {
         ) : null}
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ disabled: formState.isSubmitting || requestPasswordReset.isPending, busy: formState.isSubmitting || requestPasswordReset.isPending }}
+          aria-busy={formState.isSubmitting || requestPasswordReset.isPending}
           disabled={formState.isSubmitting || requestPasswordReset.isPending}
           onPress={submit}
-          style={[
+          style={({ pressed }) => [
             styles.primaryButton,
+            pressed && styles.pressedButton,
             formState.isSubmitting || requestPasswordReset.isPending ? styles.disabledButton : null
           ]}
         >
@@ -126,6 +130,9 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.65
+  },
+  pressedButton: {
+    opacity: 0.72
   },
   primaryText: {
     color: colors.surface,

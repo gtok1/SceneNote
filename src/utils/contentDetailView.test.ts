@@ -108,3 +108,62 @@ it("EI-4 shows error before loading in manual mode", () => {
   assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: false, isError: true }), "공개 회차를 불러오지 못했어요.");
   assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: true, isError: false }), "공개된 회차를 확인하고 있어요.");
 });
+
+
+const progressSeasons = [{ season_number: 1, episode_count: 10 }, { season_number: 2, episode_count: 10 }];
+const seasonProgressItem = {
+  source_api: "tmdb" as const, season_number: 2 as number | null,
+  season_episode_counts: progressSeasons,
+  manual_watched_season_number: null as number | null,
+  manual_watched_episode_number: null as number | null,
+  progress_source: "episode_progress" as const,
+  effective_watched_through: 3,
+  episode_count: 10
+};
+
+it("season progress draft keeps episode three in season two without an absolute offset", () => {
+  const before = structuredClone(seasonProgressItem);
+  const draft = choiceContract.createEpisodeProgressDraft(seasonProgressItem);
+  assert.deepEqual(draft, { seasonNumber: 2, episodeNumber: 3 });
+  assert.equal(choiceContract.progressDraftWatchedThrough(seasonProgressItem, draft), 3);
+  assert.deepEqual(seasonProgressItem, before);
+});
+
+it("a whole-work draft converts absolute episode thirteen back to season two episode three", () => {
+  const item = { ...seasonProgressItem, season_number: null, effective_watched_through: 13, episode_count: 20 };
+  const draft = choiceContract.createEpisodeProgressDraft(item);
+  assert.deepEqual(draft, { seasonNumber: 2, episodeNumber: 3 });
+  assert.equal(choiceContract.progressDraftWatchedThrough(item, draft), 13);
+});
+
+it("season manual drafts retain the actual season for saving with a hidden season picker", () => {
+  const item = { ...seasonProgressItem, progress_source: "manual" as const, manual_watched_season_number: 2, manual_watched_episode_number: 3 };
+  assert.deepEqual(choiceContract.createEpisodeProgressDraft(item), { seasonNumber: 2, episodeNumber: 3 });
+  const sequel = { ...item, source_api: "anilist" as const, season_number: 3, manual_watched_season_number: 1, season_episode_counts: [{ season_number: 1, episode_count: 12 }] };
+  assert.deepEqual(choiceContract.createEpisodeProgressDraft(sequel), { seasonNumber: 1, episodeNumber: 3 });
+  assert.equal(choiceContract.progressDraftWatchedThrough(sequel, { seasonNumber: 1, episodeNumber: 3 }), 3);
+});
+
+it("an unset season draft selects its own season and does not borrow previous season progress", () => {
+  assert.deepEqual(choiceContract.createEpisodeProgressDraft({ ...seasonProgressItem, progress_source: "none", effective_watched_through: 0 }), { seasonNumber: 2, episodeNumber: 0 });
+});
+
+it("progress denominator preserves the library scope including an unknown season total", () => {
+  assert.equal(choiceContract.progressEpisodeCount({ episode_count: 10 }, 20), 10);
+  assert.equal(choiceContract.progressEpisodeCount({ episode_count: 20 }, 24), 20);
+  assert.equal(choiceContract.progressEpisodeCount({ episode_count: null }, 20), null);
+  assert.equal(choiceContract.progressEpisodeCount(undefined, 20), 20);
+});
+
+it("completion suggestions use local season progress and cumulative whole-work progress", async () => {
+  const { getProgressStatusSuggestion } = await import("./progressStatusSuggestion");
+  const suggest = (item: typeof seasonProgressItem, episodeNumber: number) => getProgressStatusSuggestion({
+    statuses: ["watching"],
+    absoluteWatchedThrough: choiceContract.progressDraftWatchedThrough(item, { seasonNumber: 2, episodeNumber }),
+    totalEpisodes: choiceContract.progressEpisodeCount(item, 20)
+  });
+  assert.equal(suggest(seasonProgressItem, 3), null);
+  assert.equal(suggest(seasonProgressItem, 10), "mark_completed");
+  assert.equal(suggest({ ...seasonProgressItem, season_number: null, episode_count: 20 }, 3), null);
+  assert.equal(suggest({ ...seasonProgressItem, season_number: null, episode_count: 20 }, 10), "mark_completed");
+});

@@ -2,6 +2,17 @@ export type SimilarityFocus = "balanced" | "mood" | "story" | "setting" | "relat
 export type SimilaritySort = "similarity" | "latest" | "popular";
 export type SimilaritySignalType = "genre" | "tag" | "story" | "staff" | "studio" | "provider_recommendation";
 
+export interface SimilarityIdentityAlias {
+  external_source: string;
+  external_id: string;
+  content_type: string;
+  has_seasons?: boolean;
+  season_number?: number | null;
+  title_primary: string;
+  title_original: string | null;
+  air_year: number | null;
+}
+
 export interface SimilarityWork {
   external_source: string;
   external_id: string;
@@ -12,6 +23,7 @@ export interface SimilarityWork {
   overview: string | null;
   air_year: number | null;
   air_date?: string | null;
+  season_number?: number | null;
   has_seasons: boolean;
   episode_count: number | null;
   genres?: string[];
@@ -21,6 +33,8 @@ export interface SimilarityWork {
   popularity?: number | null;
   vote_count?: number | null;
   provider_recommended?: boolean;
+  provider_recommendation_sources?: string[];
+  identity_aliases?: SimilarityIdentityAlias[];
 }
 
 export interface SimilaritySignal {
@@ -55,15 +69,23 @@ const KO_LABELS: Record<string, string> = {
 };
 
 export function rankSimilarWorks<T extends SimilarityWork>(anchor: SimilarityWork, candidates: readonly T[], focus: SimilarityFocus, sort: SimilaritySort): RankedSimilarityWork<T>[] {
-  const anchorKey = externalKey(anchor);
-  const deduped = new Map<string, T>();
+  const anchorKey = catalogKey(anchor);
+  const groups: T[][] = [];
   for (const candidate of candidates) {
-    if (externalKey(candidate) === anchorKey || sameWork(anchor, candidate)) continue;
-    const key = workKey(candidate);
-    if (!deduped.has(key)) deduped.set(key, candidate);
+    if (catalogKey(candidate) === anchorKey || sameWork(anchor, candidate, true)) continue;
+    const group = [candidate];
+    // Keep every alias until grouping is complete so a later provider alias can
+    // connect duplicates even when their preferred display titles differ.
+    for (let index = groups.length - 1; index >= 0; index -= 1) {
+      const existing = groups[index]!;
+      if (!existing.some((item) => group.some((alias) => externalKey(item) === externalKey(alias) || sameWork(item, alias)))) continue;
+      group.push(...existing);
+      groups.splice(index, 1);
+    }
+    groups.push(group);
   }
-  const ranked = [...deduped.values()].map((candidate) => scoreWork(anchor, candidate, focus));
-  ranked.sort(sorter(sort));
+  const ranked = groups.map((group) => scoreWork(anchor, mergeWorks(group), focus)).filter((item) => item.shared_signals.length > 0);
+  ranked.sort(sorter(sort, focus));
   return diversifySimilarityResults(ranked);
 }
 
@@ -112,7 +134,7 @@ function createSignals(anchor: SimilarityWork, candidate: SimilarityWork): Simil
   addOverlap(signals, "studio", anchor.studios, candidate.studios, "제작사");
   const storyScore = lexicalSimilarity(anchor.overview, candidate.overview);
   if (storyScore > 0.06) signals.push({ type: "story", label: "줄거리 키워드", score: storyScore, source: "official_overview" });
-  if (candidate.provider_recommended) signals.push({ type: "provider_recommendation", label: "제공처 추천", score: 1, source: candidate.external_source });
+  if (candidate.provider_recommended) signals.push({ type: "provider_recommendation", label: "제공처 추천", score: 1, source: candidate.provider_recommendation_sources?.join(", ") || candidate.external_source });
   return signals;
 }
 
@@ -135,17 +157,114 @@ function tokens(value?: string | null): Set<string> {
   return new Set(normalize(value ?? "").split(/[^\p{L}\p{N}]+/u).filter((token) => token.length >= 2));
 }
 
-function sorter<T extends RankedSimilarityWork>(sort: SimilaritySort): (a: T, b: T) => number {
-  if (sort === "latest") return (a, b) => dateValue(b) - dateValue(a) || b.similarity_score - a.similarity_score;
-  if (sort === "popular") return (a, b) => popularityValue(b) - popularityValue(a) || b.similarity_score - a.similarity_score;
-  return (a, b) => b.similarity_score - a.similarity_score || popularityValue(b) - popularityValue(a) || dateValue(b) - dateValue(a);
+function sorter<T extends RankedSimilarityWork>(sort: SimilaritySort, focus: SimilarityFocus): (a: T, b: T) => number {
+  const byEvidence = (a: T, b: T): number => round(evidenceValue(b, focus)) - round(evidenceValue(a, focus));
+  const byDate = (a: T, b: T): number => compareDescending(dateValue(a), dateValue(b));
+  const byPopularity = (a: T, b: T): number => popularityValue(b) - popularityValue(a);
+  const secondary = sort === "popular" ? byPopularity : byDate;
+  return (a, b) => byEvidence(a, b) || secondary(a, b) || compareIdentity(a, b);
 }
 
-function popularityValue(item: SimilarityWork): number { return Math.log1p(Math.max(0, item.popularity ?? 0)) + Math.log1p(Math.max(0, item.vote_count ?? 0)); }
-function dateValue(item: SimilarityWork): number { const value = Date.parse(item.air_date ?? `${item.air_year ?? 0}-01-01`); return Number.isFinite(value) ? value : 0; }
-function sameWork(a: SimilarityWork, b: SimilarityWork): boolean { return normalizeTitle(a.title_primary) === normalizeTitle(b.title_primary) && (!a.air_year || !b.air_year || a.air_year === b.air_year); }
-function externalKey(item: SimilarityWork): string { return `${normalize(item.external_source)}:${String(item.external_id).trim()}`; }
-function workKey(item: SimilarityWork): string { return `${normalize(item.content_type)}:${normalizeTitle(item.title_primary)}:${item.air_year ?? ""}`; }
+function evidenceValue(item: RankedSimilarityWork, focus: SimilarityFocus): number {
+  // similarity_score remains normalized over available signals. For ordering,
+  // multiply that match by its weighted evidence coverage: a single provider
+  // recommendation must not become a perfect match that beats several real
+  // mood/story signals. The comparator rounds this evidence to four decimals
+  // before using the requested date/popularity tie breaker.
+  return item.shared_signals.reduce((sum, signal) => sum + signal.score * WEIGHTS[focus][signal.type], 0);
+}
+
+function mergeWorks<T extends SimilarityWork>(group: readonly T[]): T {
+  const ordered = [...group].sort((a, b) => metadataRichness(b) - metadataRichness(a) || compareIdentity(a, b));
+  const preferred = ordered[0]!;
+  return {
+    ...preferred,
+    title_primary: ordered.find((item) => /[가-힣]/u.test(item.title_primary))?.title_primary || preferred.title_primary,
+    title_original: preferred.title_original || ordered.find((item) => item.title_original)?.title_original || null,
+    poster_url: preferred.poster_url || ordered.find((item) => item.poster_url)?.poster_url || null,
+    overview: preferred.overview || ordered.find((item) => item.overview)?.overview || null,
+    air_year: preferred.air_year ?? ordered.find((item) => item.air_year != null)?.air_year ?? null,
+    air_date: preferred.air_date ?? ordered.find((item) => item.air_date)?.air_date ?? null,
+    episode_count: preferred.episode_count ?? ordered.find((item) => item.episode_count != null)?.episode_count ?? null,
+    genres: mergeValues(ordered.flatMap((item) => item.genres ?? [])),
+    tags: mergeValues(ordered.flatMap((item) => item.tags ?? [])),
+    people: mergeValues(ordered.flatMap((item) => item.people ?? [])),
+    studios: mergeValues(ordered.flatMap((item) => item.studios ?? [])),
+    popularity: preferred.popularity ?? ordered.find((item) => item.popularity != null)?.popularity ?? null,
+    vote_count: preferred.vote_count ?? ordered.find((item) => item.vote_count != null)?.vote_count ?? null,
+    identity_aliases: mergeIdentityAliases(ordered),
+    provider_recommended: ordered.some((item) => item.provider_recommended),
+    provider_recommendation_sources: mergeValues(ordered.filter((item) => item.provider_recommended).flatMap((item) => item.provider_recommendation_sources?.length ? item.provider_recommendation_sources : [item.external_source]))
+  };
+}
+
+function mergeIdentityAliases(items: readonly SimilarityWork[]): SimilarityIdentityAlias[] {
+  const aliases = new Map<string, SimilarityIdentityAlias>();
+  for (const item of items) {
+    for (const alias of [item, ...(item.identity_aliases ?? [])]) {
+      const identity: SimilarityIdentityAlias = {
+        external_source: alias.external_source,
+        external_id: alias.external_id,
+        content_type: alias.content_type,
+        ...(alias.has_seasons !== undefined ? { has_seasons: alias.has_seasons } : {}),
+        ...(alias.season_number !== undefined ? { season_number: alias.season_number } : {}),
+        title_primary: alias.title_primary,
+        title_original: alias.title_original,
+        air_year: alias.air_year
+      };
+      const key = JSON.stringify(identity);
+      if (!aliases.has(key)) aliases.set(key, identity);
+    }
+  }
+  return [...aliases.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, alias]) => alias);
+}
+
+function mergeValues(values: readonly string[]): string[] {
+  const byName = new Map<string, string>();
+  for (const value of values) {
+    const key = normalize(value);
+    if (key && !byName.has(key)) byName.set(key, value);
+  }
+  return [...byName.values()];
+}
+
+function metadataRichness(item: SimilarityWork): number {
+  return [item.genres, item.tags, item.people, item.studios].filter((values) => values?.length).length
+    + [item.overview, item.poster_url, item.air_date, item.episode_count].filter(Boolean).length;
+}
+
+function popularityValue(item: SimilarityWork): number { return Math.log1p(nonNegativeFinite(item.popularity)) + Math.log1p(nonNegativeFinite(item.vote_count)); }
+function nonNegativeFinite(value?: number | null): number { return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0; }
+function dateValue(item: SimilarityWork): number {
+  if (item.air_date && /^\d{4}-\d{2}-\d{2}$/u.test(item.air_date)) {
+    const value = Date.parse(item.air_date);
+    if (Number.isFinite(value) && new Date(value).toISOString().slice(0, 10) === item.air_date) return value;
+  }
+  if (typeof item.air_year === "number" && Number.isInteger(item.air_year) && item.air_year >= 1 && item.air_year <= 9999) return Date.parse(`${String(item.air_year).padStart(4, "0")}-01-01`);
+  return Number.NEGATIVE_INFINITY;
+}
+function compareDescending(a: number, b: number): number { return a === b ? 0 : a > b ? -1 : 1; }
+function sameWork(a: SimilarityWork, b: SimilarityWork, allowUnknownYear = false): boolean {
+  const yearsMatch = a.air_year === b.air_year || (allowUnknownYear && (a.air_year == null || b.air_year == null));
+  if (normalize(a.content_type) !== normalize(b.content_type) || !yearsMatch || seasonKey(a) !== seasonKey(b)) return false;
+  const titles = new Set([a.title_primary, a.title_original ?? ""].map(normalizeTitle).filter(Boolean));
+  return [b.title_primary, b.title_original ?? ""].map(normalizeTitle).some((title) => titles.has(title));
+}
+function externalKey(item: SimilarityWork): string {
+  return `${catalogKey(item)}:${seasonKey(item)}`;
+}
+function catalogKey(item: SimilarityWork): string {
+  const source = normalize(item.external_source);
+  const namespace = source === "tmdb" ? item.content_type === "movie" ? "movie:" : "tv:" : "";
+  return `${source}:${namespace}${String(item.external_id).trim()}`;
+}
+function seasonKey(item: SimilarityWork): string { return item.season_number == null ? "" : String(item.season_number); }
+function compareIdentity(a: SimilarityWork, b: SimilarityWork): number {
+  const left = externalKey(a); const right = externalKey(b);
+  if (left !== right) return left < right ? -1 : 1;
+  const leftTitle = normalizeTitle(a.title_primary); const rightTitle = normalizeTitle(b.title_primary);
+  return leftTitle < rightTitle ? -1 : leftTitle > rightTitle ? 1 : 0;
+}
 function franchiseKey(item: SimilarityWork): string { return normalizeTitle(item.title_original || item.title_primary).replace(/(?:season|part|시즌)\d+$/u, ""); }
 function normalizeTitle(value: string): string { return normalize(value).replace(/[\s\p{P}\p{S}]+/gu, ""); }
 function normalize(value: string): string { return value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/gu, " "); }

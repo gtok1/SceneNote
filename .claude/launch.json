@@ -7,6 +7,14 @@
       "runtimeArgs": ["expo", "start", "--web", "--port", "8081", "--localhost"],
       "port": 8081,
       "env": { "BROWSER": "none", "EXPO_NO_TELEMETRY": "1", "CI": "1" }
+    },
+    {
+      "name": "web-node24",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["node_modules/expo/bin/cli", "start", "--web", "--port", "8081", "--localhost"],
+      "port": 8081,
+      "autoPort": false,
+      "env": { "BROWSER": "none", "EXPO_NO_TELEMETRY": "1", "CI": "1" }
     }
   ]
 }

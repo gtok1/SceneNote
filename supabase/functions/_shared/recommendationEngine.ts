@@ -196,6 +196,70 @@ export interface RankCandidatesOptions {
   mediaType?: RecommendationMediaType;
   libraryItems?: readonly RecommendationLibraryItem[];
   feedback?: readonly RecommendationFeedback[];
+  libraryContext?: RecommendationLibraryContext;
+  ordering?: "latest";
+}
+
+export interface RecommendationLibraryContext {
+  readonly libraryItems: readonly RecommendationLibraryItem[];
+  readonly items: readonly PreparedRecommendationLibraryItem[];
+  readonly signalIndexes: Readonly<Record<DirectSignalFeature, ReadonlyMap<string, readonly PreparedRecommendationLibraryItem[]>>>;
+  readonly sourceContentIdsByTitle: ReadonlyMap<string, readonly string[]>;
+}
+
+type DirectSignalFeature = "people" | "studios" | "themes" | "keywords" | "genres";
+interface PreparedRecommendationLibraryItem {
+  readonly order: number;
+  readonly item: RecommendationLibraryItem;
+  readonly title: string | null;
+  readonly identity: string;
+  readonly weight: number;
+  readonly themes: readonly ContentTheme[];
+  readonly values: Readonly<Record<Exclude<DirectSignalFeature, "themes"> | "countries" | "languages", readonly string[]>>;
+}
+
+/** A request-local snapshot: pass the same context to every page/head ranking in that request. */
+export function createRecommendationLibraryContext(libraryItems: readonly RecommendationLibraryItem[]): RecommendationLibraryContext {
+  const signalIndexes = {
+    people: new Map<string, PreparedRecommendationLibraryItem[]>(),
+    studios: new Map<string, PreparedRecommendationLibraryItem[]>(),
+    themes: new Map<string, PreparedRecommendationLibraryItem[]>(),
+    keywords: new Map<string, PreparedRecommendationLibraryItem[]>(),
+    genres: new Map<string, PreparedRecommendationLibraryItem[]>()
+  };
+  const sourceContentIdsByTitle = new Map<string, string[]>();
+  const items = libraryItems.map((item, order): PreparedRecommendationLibraryItem => {
+    const prepared = {
+      item, order, title: item.title_primary?.trim() || null, identity: createRecommendationIdentity(item),
+      weight: getLibraryItemWeight(item), themes: resolveThemes(item),
+      values: {
+        people: normalizeValues(item.people), studios: normalizeValues(item.studios),
+        keywords: normalizeValues(item.keywords), genres: normalizeValues(item.genres),
+        countries: normalizeValues(item.countries), languages: normalizeValues(item.languages)
+      }
+    };
+    if (prepared.title) {
+      const ids = sourceContentIdsByTitle.get(prepared.title) ?? [];
+      ids.push(prepared.identity);
+      sourceContentIdsByTitle.set(prepared.title, ids);
+    }
+    if (prepared.weight > 0) {
+      for (const feature of ["people", "studios", "themes", "keywords", "genres"] as const) {
+        const values = feature === "themes" ? normalizeValues(prepared.themes.map(themeIdentity)) : prepared.values[feature];
+        for (const value of new Set(values)) {
+          const matches = signalIndexes[feature].get(value) ?? [];
+          matches.push(prepared);
+          signalIndexes[feature].set(value, matches);
+        }
+      }
+    }
+    return prepared;
+  });
+  return { libraryItems, items, signalIndexes, sourceContentIdsByTitle };
+}
+
+function resolveLibraryContext(libraryItems: readonly RecommendationLibraryItem[], context?: RecommendationLibraryContext): RecommendationLibraryContext {
+  return context?.libraryItems === libraryItems ? context : createRecommendationLibraryContext(libraryItems);
 }
 
 export interface RecommendationBatchOptions extends RankCandidatesOptions {
@@ -235,7 +299,8 @@ export const RECOMMENDATION_DIVERSITY_CONFIG = {
 
 export function buildPreferenceProfile(
   libraryItems: readonly RecommendationLibraryItem[],
-  feedback: readonly RecommendationFeedback[] = []
+  feedback: readonly RecommendationFeedback[] = [],
+  libraryContext?: RecommendationLibraryContext
 ): RecommendationPreferenceProfile {
   const contentTypeScores = new Map<string, number>();
   const genreScores = new Map<string, number>();
@@ -246,27 +311,29 @@ export function buildPreferenceProfile(
   const studioScores = new Map<string, number>();
   const themeEvidence = new Map<string, PreferenceEvidence>();
   const explicitContentFeedback = new Map<string, RecommendationFeedbackAction>();
+  const themeSourceIds = new Map<string, Set<string>>();
+  const context = resolveLibraryContext(libraryItems, libraryContext);
   let episodeWeightedTotal = 0;
   let episodeWeight = 0;
   let seasonWeightedTotal = 0;
   let seasonWeight = 0;
 
-  for (const item of libraryItems) {
-    const weight = getLibraryItemWeight(item);
+  for (const prepared of context.items) {
+    const { item, weight } = prepared;
     addScore(contentTypeScores, normalizeContentType(item.content_type), weight);
-    addScores(genreScores, item.genres, weight);
-    addScores(keywordScores, item.keywords, weight);
-    addScores(countryScores, item.countries, weight);
-    addScores(languageScores, item.languages, weight);
-    addScores(peopleScores, item.people, weight);
-    addScores(studioScores, item.studios, weight);
-    for (const theme of resolveThemes(item)) {
+    for (const [target, values] of [
+      [genreScores, prepared.values.genres], [keywordScores, prepared.values.keywords],
+      [countryScores, prepared.values.countries], [languageScores, prepared.values.languages],
+      [peopleScores, prepared.values.people], [studioScores, prepared.values.studios]
+    ] as const) for (const value of values) addScore(target, value, weight);
+    for (const theme of prepared.themes) {
       const key = themeIdentity(theme);
       const existing = themeEvidence.get(key);
       const positiveWeight = Math.max(0, weight) * theme.centrality;
       if (positiveWeight <= 0) continue;
-      const sourceId = createRecommendationIdentity(item);
-      const sourceIds = Array.from(new Set([...(existing?.source_content_ids ?? []), sourceId]));
+      const sourceIds = themeSourceIds.get(key) ?? new Set<string>();
+      sourceIds.add(prepared.identity);
+      themeSourceIds.set(key, sourceIds);
       const evidenceCount = (existing?.evidence_count ?? 0) + (theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD ? 1 : 0);
       themeEvidence.set(key, {
         key,
@@ -275,7 +342,7 @@ export function buildPreferenceProfile(
         strength: evidenceCount >= 2 && theme.centrality >= 0.8 ? "strong" : "weak",
         score: (existing?.score ?? 0) + positiveWeight,
         evidence_count: evidenceCount,
-        source_content_ids: sourceIds,
+        source_content_ids: [],
         explicit: existing?.explicit ?? false,
         last_updated_at: existing?.last_updated_at ?? null
       });
@@ -290,6 +357,11 @@ export function buildPreferenceProfile(
       seasonWeightedTotal += item.season_count * numericWeight;
       seasonWeight += numericWeight;
     }
+  }
+
+  for (const [key, ids] of themeSourceIds) {
+    const evidence = themeEvidence.get(key);
+    if (evidence) evidence.source_content_ids = [...ids];
   }
 
   for (const item of feedback) {
@@ -338,6 +410,15 @@ export function calculateSimilarity(
   candidate: RecommendationCandidate
 ): number {
   if (profile.mode === "cold_start") return 0;
+  return calculateSimilarityWithThemes(profile, candidate, resolveThemes(candidate));
+}
+
+function calculateSimilarityWithThemes(
+  profile: RecommendationPreferenceProfile,
+  candidate: RecommendationCandidate,
+  themes: readonly ContentTheme[]
+): number {
+  if (profile.mode === "cold_start") return 0;
 
   let weightedScore = 0;
   let availableWeight = 0;
@@ -351,7 +432,7 @@ export function calculateSimilarity(
   const specificGenres = (candidate.genres ?? []).filter((genre) => !isBroadGenre(genre));
   addSignal(scoreValues(profile.genre_scores, broadGenres), SIGNAL_WEIGHTS.broadGenres);
   addSignal(scoreValues(profile.genre_scores, specificGenres), SIGNAL_WEIGHTS.specificGenres);
-  addSignal(scoreThemeValues(profile, resolveThemes(candidate)), SIGNAL_WEIGHTS.themes);
+  addSignal(scoreThemeValues(profile, themes), SIGNAL_WEIGHTS.themes);
   addSignal(
     scoreValues(profile.content_type_scores, [normalizeContentType(candidate.content_type)]),
     SIGNAL_WEIGHTS.contentType
@@ -377,7 +458,7 @@ export function calculateSimilarity(
   // Normalize over metadata that is actually present. Catalog list endpoints do not
   // expose TMDB keywords, and fetching details per candidate would be too expensive.
   const normalizedScore = (weightedScore / availableWeight) * confidence;
-  const hasSpecificEvidence = specificGenres.length > 0 || resolveThemes(candidate).length > 0 ||
+  const hasSpecificEvidence = specificGenres.length > 0 || themes.length > 0 ||
     normalizeValues(candidate.keywords).length > 0 || normalizeValues(candidate.people).length > 0 ||
     normalizeValues(candidate.studios).length > 0;
   // Broad genres and format alone are intentionally weak even after missing-signal
@@ -389,7 +470,11 @@ export function calculatePreferenceEvidence(
   profile: RecommendationPreferenceProfile,
   candidate: RecommendationCandidate
 ): PreferenceEvidence[] {
-  return resolveThemes(candidate).map((theme) =>
+  return preferenceEvidenceForThemes(profile, resolveThemes(candidate));
+}
+
+function preferenceEvidenceForThemes(profile: RecommendationPreferenceProfile, themes: readonly ContentTheme[]): PreferenceEvidence[] {
+  return themes.map((theme) =>
     profile.theme_evidence.get(themeIdentity(theme)) ?? {
       key: themeIdentity(theme),
       family: theme.family,
@@ -408,7 +493,11 @@ export function classifyExplorationCandidate(
   profile: RecommendationPreferenceProfile,
   candidate: RecommendationCandidate
 ): boolean {
-  const themes = resolveThemes(candidate).filter((theme) => theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD);
+  return isExplorationWithThemes(profile, candidate, resolveThemes(candidate));
+}
+
+function isExplorationWithThemes(profile: RecommendationPreferenceProfile, candidate: RecommendationCandidate, allThemes: readonly ContentTheme[]): boolean {
+  const themes = allThemes.filter((theme) => theme.centrality >= NICHE_THEME_CENTRALITY_THRESHOLD);
   if (themes.some((theme) => profile.theme_evidence.get(themeIdentity(theme))?.state === "positive")) return false;
   const specificKeywordMatch = scoreValues(profile.keyword_scores, candidate.keywords) ?? 0;
   const peopleMatch = scoreValues(profile.people_scores, candidate.people) ?? 0;
@@ -419,9 +508,17 @@ export function calculateCandidateScore(
   profile: RecommendationPreferenceProfile,
   candidate: RecommendationCandidate
 ): RecommendationCandidateScore {
-  const personalization = calculateSimilarity(profile, candidate);
+  const themes = resolveThemes(candidate);
+  return candidateScoreFromSignals(profile, candidate, calculateSimilarityWithThemes(profile, candidate, themes),
+    preferenceEvidenceForThemes(profile, themes), isExplorationWithThemes(profile, candidate, themes));
+}
+
+function candidateScoreFromSignals(
+  profile: RecommendationPreferenceProfile, candidate: RecommendationCandidate, personalization: number,
+  evidence: readonly PreferenceEvidence[], isExploration: boolean
+): RecommendationCandidateScore {
   const feedbackAction = profile.explicit_content_feedback.get(normalizeFeature(createRecommendationIdentity(candidate)));
-  const themeFeedback = calculatePreferenceEvidence(profile, candidate)
+  const themeFeedback = evidence
     .filter((item) => item.explicit)
     .reduce((sum, item) => sum + (item.state === "negative" ? (item.strength === "excluded" ? -1 : -0.7) : 0.8), 0);
   const explicitFeedback = clamp(
@@ -431,7 +528,7 @@ export function calculateCandidateScore(
   );
   const popularity = clamp(finiteOr(candidate.popularity, 0) / 100, 0, 1);
   const qualityScore = normalizeQuality(candidate);
-  const exploration = classifyExplorationCandidate(profile, candidate) ? 0.15 : 0;
+  const exploration = isExploration ? 0.15 : 0;
   return {
     popularity: roundScore(popularity),
     quality: roundScore(qualityScore),
@@ -454,16 +551,19 @@ export function rankCandidates<T extends RecommendationCandidate>(
   options: RankCandidatesOptions = {}
 ): RankedRecommendation<T>[] {
   const mediaType = options.mediaType ?? "all";
+  const libraryItems = options.libraryItems ?? options.libraryContext?.libraryItems ?? [];
+  const libraryContext = resolveLibraryContext(libraryItems, options.libraryContext);
 
   return candidates
     .filter((candidate) => matchesMediaType(candidate, mediaType))
     .map((candidate) => {
-      const similarityScore = calculateSimilarity(profile, candidate);
       const themes = resolveThemes(candidate);
-      const candidateScore = calculateCandidateScore(profile, candidate);
-      const evidence = calculatePreferenceEvidence(profile, candidate);
-      const isExploration = classifyExplorationCandidate(profile, candidate);
-      const reasonDetail = buildRecommendationReason(profile, candidate, evidence, isExploration, options.libraryItems);
+      const similarityScore = calculateSimilarityWithThemes(profile, candidate, themes);
+      const evidence = preferenceEvidenceForThemes(profile, themes);
+      const isExploration = isExplorationWithThemes(profile, candidate, themes);
+      const candidateScore = candidateScoreFromSignals(profile, candidate, similarityScore, evidence, isExploration);
+      const signals = recommendationSignalsWithContext(profile, candidate, libraryContext, themes);
+      const reasonDetail = recommendationReasonWithSignals(profile, candidate, evidence, isExploration, libraryContext, themes, signals);
       return {
         ...candidate,
         themes,
@@ -471,17 +571,17 @@ export function rankCandidates<T extends RecommendationCandidate>(
         similarity_score: similarityScore,
         recommendation_reason: reasonDetail.message,
         recommendation_reason_detail: reasonDetail,
-        recommendation_signals: createRecommendationSignals(
-          profile,
-          candidate,
-          options.libraryItems
-        ),
+        recommendation_signals: signals,
         is_exploration: isExploration,
         preference_evidence: summarizePreferenceState(evidence),
         candidate_score: candidateScore
       };
     })
     .sort((left, right) => {
+      if (options.ordering === "latest") {
+        const dateDifference = getReleaseTimestamp(right) - getReleaseTimestamp(left);
+        if (dateDifference !== 0) return dateDifference;
+      }
       const leftMonth = getReleaseMonthSortValue(left);
       const rightMonth = getReleaseMonthSortValue(right);
       if (leftMonth !== rightMonth) return rightMonth - leftMonth;
@@ -510,7 +610,8 @@ export function getRecommendationBatch<T extends RecommendationCandidate>(
   candidates: readonly T[],
   options: RecommendationBatchOptions = {}
 ): RecommendationBatch<T> {
-  const profile = buildPreferenceProfile(libraryItems, options.feedback);
+  const libraryContext = resolveLibraryContext(libraryItems, options.libraryContext);
+  const profile = buildPreferenceProfile(libraryItems, options.feedback, libraryContext);
   const limit = clampInteger(options.limit ?? 12, 1, 12);
   const now = toDate(options.now) ?? new Date();
   const explicitExclusions = createNormalizedIdSet(options.excludeIds ?? []);
@@ -523,7 +624,9 @@ export function getRecommendationBatch<T extends RecommendationCandidate>(
 
   const ranked = rankCandidates(profile, candidates, {
     mediaType: options.mediaType ?? "all",
-    libraryItems
+    libraryItems,
+    libraryContext,
+    ...(options.ordering ? { ordering: options.ordering } : {})
   });
   const deduped: RankedRecommendation<T>[] = [];
   const acceptedIdentitySets: Set<string>[] = [];
@@ -587,12 +690,26 @@ export function buildRecommendationReason(
   isExploration = classifyExplorationCandidate(profile, candidate),
   libraryItems: readonly RecommendationLibraryItem[] = []
 ): RecommendationReason {
-  const signals = createRecommendationSignals(profile, candidate, libraryItems);
+  const context = createRecommendationLibraryContext(libraryItems);
+  const themes = resolveThemes(candidate);
+  return recommendationReasonWithSignals(profile, candidate, themeEvidence, isExploration, context, themes,
+    recommendationSignalsWithContext(profile, candidate, context, themes));
+}
+
+function recommendationReasonWithSignals(
+  profile: RecommendationPreferenceProfile,
+  candidate: RecommendationCandidate,
+  themeEvidence: readonly PreferenceEvidence[],
+  isExploration: boolean,
+  context: RecommendationLibraryContext,
+  themes: readonly ContentTheme[],
+  signals: readonly RecommendationSignal[]
+): RecommendationReason {
   const signal = signals[0];
   const title = signal?.library_titles[0];
   const values = signal?.values.slice(0, 3) ?? [];
   const sourceContentIds = title
-    ? libraryItems.filter((item) => item.title_primary?.trim() === title).map(createRecommendationIdentity)
+    ? [...(context.sourceContentIdsByTitle.get(title) ?? [])]
     : [];
 
   if (signal?.type === "shared_people" || signal?.type === "shared_studios") {
@@ -602,14 +719,14 @@ export function buildRecommendationReason(
   if (signal?.type === "shared_themes" || signal?.type === "shared_keywords") {
     const value = values.join("·");
     const keys = signal.type === "shared_themes"
-      ? values.map((label) => themeIdentity(resolveThemes(candidate).find((theme) => theme.label === label) ?? { family: "format", key: normalizeFeature(label) }))
+      ? values.map((label) => themeIdentity(themes.find((theme) => theme.label === label) ?? { family: "format", key: normalizeFeature(label) }))
       : undefined;
     return reason(signal.type === "shared_themes" ? "theme_match" : "tag_match", `‘${title}’와 ${value} ${signal.type === "shared_themes" ? "테마가" : "태그가"} 겹쳐요.`, sourceContentIds, values, "strong", "추천 이유", keys);
   }
 
   const positiveThemes = themeEvidence.filter((item) => item.state === "positive");
   if (positiveThemes.length > 0) {
-    const labels = resolveThemes(candidate)
+    const labels = themes
       .filter((theme) => positiveThemes.some((item) => item.key === themeIdentity(theme)))
       .map((theme) => theme.label)
       .slice(0, 2);
@@ -619,7 +736,7 @@ export function buildRecommendationReason(
   }
 
   if (isExploration) {
-    const theme = resolveThemes(candidate)[0];
+    const theme = themes[0];
     const detail = theme ? `${theme.label} 분위기를 담은 ` : "새로운 분위기의 ";
     return reason("exploration", `기존 선택과 다른 방향으로 ${detail}최근 공개작을 섞어봤어요.`, [], theme ? [theme.label] : [], "weak", "취향 탐색");
   }
@@ -636,44 +753,49 @@ export function createRecommendationSignals(
   candidate: RecommendationCandidate,
   libraryItems: readonly RecommendationLibraryItem[] = []
 ): RecommendationSignal[] {
-  const positiveItems = libraryItems.filter((item) => getLibraryItemWeight(item) > 0);
-  const directSignals: Array<{
-    type: Extract<RecommendationSignalType, "shared_people" | "shared_studios" | "shared_keywords" | "shared_genres" | "shared_themes">;
-    candidateValues: readonly string[] | null | undefined;
-    libraryValues: (item: RecommendationLibraryItem) => readonly string[] | null | undefined;
-    minimumMatches: number;
-    displayValue?: (value: string) => string;
-  }> = [
-    { type: "shared_people", candidateValues: candidate.people, libraryValues: (item) => item.people, minimumMatches: 1 },
-    { type: "shared_studios", candidateValues: candidate.studios, libraryValues: (item) => item.studios, minimumMatches: 1 },
-    {
-      type: "shared_themes",
-      candidateValues: resolveThemes(candidate).map(themeIdentity),
-      libraryValues: (item) => resolveThemes(item).map(themeIdentity),
-      minimumMatches: 1,
-      displayValue: (value) => resolveThemes(candidate).find((theme) => themeIdentity(theme) === value)?.label ?? value
-    },
-    { type: "shared_keywords", candidateValues: candidate.keywords, libraryValues: (item) => item.keywords, minimumMatches: 2 },
-    { type: "shared_genres", candidateValues: candidate.genres, libraryValues: (item) => item.genres, minimumMatches: 2 }
-  ];
+  const context = createRecommendationLibraryContext(libraryItems);
+  return recommendationSignalsWithContext(profile, candidate, context, resolveThemes(candidate));
+}
 
-  for (const definition of directSignals) {
-    const matches = positiveItems
-      .map((item) => ({ item, values: findSharedValues(definition.candidateValues, definition.libraryValues(item)) }))
-      .filter((match) => match.values.length >= definition.minimumMatches)
-      .sort((left, right) => right.values.length - left.values.length);
-    if (matches.length > 0) {
-      const values = Array.from(new Set(matches.flatMap((match) => match.values)))
-        .map((value) => definition.displayValue?.(value) ?? value)
-        .slice(0, 3);
-      const libraryTitles = matches
-        .map((match) => match.item.title_primary?.trim())
-        .filter((title): title is string => Boolean(title))
-        .filter((title, index, titles) => titles.indexOf(title) === index)
-        .slice(0, 2);
-      if (libraryTitles.length > 0) {
-        return [{ type: definition.type, values, library_titles: libraryTitles }];
+function recommendationSignalsWithContext(
+  profile: RecommendationPreferenceProfile,
+  candidate: RecommendationCandidate,
+  context: RecommendationLibraryContext,
+  themes: readonly ContentTheme[]
+): RecommendationSignal[] {
+  const definitions: readonly {
+    type: Extract<RecommendationSignalType, "shared_people" | "shared_studios" | "shared_keywords" | "shared_genres" | "shared_themes">;
+    feature: DirectSignalFeature;
+    values: readonly string[] | null | undefined;
+    minimumMatches: number;
+  }[] = [
+    { type: "shared_people", feature: "people", values: candidate.people, minimumMatches: 1 },
+    { type: "shared_studios", feature: "studios", values: candidate.studios, minimumMatches: 1 },
+    { type: "shared_themes", feature: "themes", values: themes.map(themeIdentity), minimumMatches: 1 },
+    { type: "shared_keywords", feature: "keywords", values: candidate.keywords, minimumMatches: 2 },
+    { type: "shared_genres", feature: "genres", values: candidate.genres, minimumMatches: 2 }
+  ];
+  for (const definition of definitions) {
+    const byItem = new Map<PreparedRecommendationLibraryItem, string[]>();
+    // Preserve distinct displayed spellings ("Drama" and "drama") and candidate order exactly.
+    const displayedValues = new Set((definition.values ?? []).map(value => value.trim()).filter(Boolean));
+    for (const value of displayedValues) {
+      for (const item of context.signalIndexes[definition.feature].get(normalizeFeature(value)) ?? []) {
+        const matched = byItem.get(item) ?? [];
+        matched.push(value);
+        byItem.set(item, matched);
       }
+    }
+    const matches = [...byItem].map(([item, values]) => ({ item, values }))
+      .filter(match => match.values.length >= definition.minimumMatches)
+      .sort((left, right) => right.values.length - left.values.length || left.item.order - right.item.order);
+    if (matches.length > 0) {
+      const values = [...new Set(matches.flatMap(match => match.values))]
+        .map(value => definition.feature === "themes"
+          ? themes.find(theme => themeIdentity(theme) === value)?.label ?? value : value)
+        .slice(0, 3);
+      const libraryTitles = [...new Set(matches.map(match => match.item.title).filter((title): title is string => Boolean(title)))].slice(0, 2);
+      if (libraryTitles.length > 0) return [{ type: definition.type, values, library_titles: libraryTitles }];
     }
   }
 
@@ -782,11 +904,6 @@ function getLibraryItemWeight(item: RecommendationLibraryItem): number {
   return 1;
 }
 
-function addScores(target: Map<string, number>, values: readonly string[] | null | undefined, weight: number): void {
-  const normalizedValues = normalizeValues(values);
-  for (const value of normalizedValues) addScore(target, value, weight);
-}
-
 function addScore(target: Map<string, number>, key: string, weight: number): void {
   if (!key || weight === 0) return;
   target.set(key, (target.get(key) ?? 0) + weight);
@@ -887,20 +1004,6 @@ function scoreNumericPreference(preferred: number | null, candidate: number | nu
   if (!isPositiveFiniteNumber(preferred) || !isPositiveFiniteNumber(candidate)) return null;
   const distance = Math.abs(Math.log1p(preferred) - Math.log1p(candidate));
   return clamp(1 - distance / 3, 0, 1);
-}
-
-function findSharedValues(
-  candidateValues: readonly string[] | null | undefined,
-  libraryValues: readonly string[] | null | undefined
-): string[] {
-  const librarySet = new Set(normalizeValues(libraryValues));
-  return Array.from(
-    new Set(
-      (candidateValues ?? [])
-        .map((value) => value.trim())
-        .filter((value) => value && librarySet.has(normalizeFeature(value)))
-    )
-  );
 }
 
 function matchesMediaType(candidate: RecommendationCandidate, mediaType: RecommendationMediaType): boolean {

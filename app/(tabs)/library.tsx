@@ -60,6 +60,7 @@ import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libra
 import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { ERROR_COPY } from "@/utils/errorCopy";
 
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(["wishlist", "watching", "dropped", "completed"]);
 
@@ -372,7 +373,7 @@ export default function LibraryScreen() {
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "공유 링크를 만들지 못했습니다.";
+      const message = userFacingErrorMessage(error, ERROR_COPY.shareCreate);
       setShareFeedback({ status: "error", message });
     } finally {
       setIsSharing(false);

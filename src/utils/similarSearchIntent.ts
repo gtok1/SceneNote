@@ -39,7 +39,8 @@ export function parseSearchIntent(rawQuery: string): ParsedSearchIntent {
 
   const targetMediaType = detectMediaType(normalizedQuery);
   const focus = detectFocus(normalizedQuery);
-  const sort: SimilaritySort = /최신/u.test(normalizedQuery) ? "latest" : /인기/u.test(normalizedQuery) ? "popular" : "similarity";
+  // Similarity is always primary; this selects the secondary order only.
+  const sort: SimilaritySort = /최신/u.test(normalizedQuery) ? "latest" : /인기/u.test(normalizedQuery) ? "popular" : "latest";
   const modifiers = detectModifiers(normalizedQuery);
   const anchorText = extractAnchorText(normalizedQuery);
 

@@ -1,7 +1,28 @@
 import type { SearchResult } from "@/types/content";
 import type { WatchProvidersResponse } from "@/types/watchProviders";
+import { MANUAL_METADATA_QUERY_OPTIONS } from "./metadataQuery";
 
-export const WATCH_PROVIDER_CACHE_TTL_MS = 60 * 60_000;
+export const WATCH_PROVIDER_QUERY_POLICY = {
+  ...MANUAL_METADATA_QUERY_OPTIONS,
+  refetchInterval: false
+} as const;
+
+export function watchProviderPersistenceNotice(response: { cache_policy?: string; from_cache?: boolean }): string | null {
+  return response.cache_policy === "manual-v1" && typeof response.from_cache === "boolean"
+    ? null : "저장 기능을 아직 사용할 수 없어요. 표시된 정보는 이번에 확인한 결과예요.";
+}
+
+export function formatWatchProviderUpdatedAt(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? "";
+  return `마지막 확인 ${part("year")}.${part("month")}.${part("day")} ${part("hour")}:${part("minute")}`;
+}
 
 export interface WatchProviderLookupInput {
   source: SearchResult["external_source"] | undefined;
@@ -73,6 +94,5 @@ export function shouldLoadWatchProviders(input: {
   if (input.hasData && input.responseCompatible === false) return true;
   if (input.error) return false;
   if (!input.hasData) return true;
-  const cachedAt = input.updatedAt ? Date.parse(input.updatedAt) : NaN;
-  return !Number.isFinite(cachedAt) || (input.now ?? Date.now()) - cachedAt >= WATCH_PROVIDER_CACHE_TTL_MS;
+  return false;
 }

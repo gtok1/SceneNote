@@ -14,7 +14,7 @@ test("parses mood-oriented anime similarity query", () => {
   assert.equal(intent.anchorText, "길티크라운");
   assert.equal(intent.targetMediaType, "anime");
   assert.equal(intent.focus, "mood");
-  assert.equal(intent.sort, "similarity");
+  assert.equal(intent.sort, "latest");
 });
 
 test("parses story, latest sort and supported negative modifier", () => {
@@ -34,4 +34,12 @@ test("handles spacing and feeling syntax", () => {
   assert.equal(intent.anchorText, "태양의후예");
   assert.equal(intent.targetMediaType, "drama");
   assert.equal(intent.focus, "mood");
+});
+
+test("popular is a secondary choice and the similarity request retains its focus", () => {
+  const intent = parseSearchIntent("길티 크라운 느낌의 인기 애니");
+  assert.equal(intent.mode, "similarity");
+  if (intent.mode !== "similarity") return;
+  assert.equal(intent.focus, "mood");
+  assert.equal(intent.sort, "popular");
 });

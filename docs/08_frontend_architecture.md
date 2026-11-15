@@ -10,15 +10,37 @@
 
 ## 현재 구현과 설계 예제의 구분
 
+### 작품 출연진 확인 후 등록 (2026-11-15)
+
+작품 상세 `CastSection`은 등록 여부와 관계없이 `openCastMember`로 `/people/[id]`를 연다. 출처·인물 ID·분류는 기존 `resolveCastMemberPerson`을 사용한다. 작품 상세의 직접 등록 mutation은 제거했다. 인물 상세에서 공개 프로필·소개·출연작 확인 후 `useAddFavoritePerson`으로 명시적으로 등록하고 기존 좋아하는 인물 Query를 무효화한다. 상세 응답의 분류·한글 이름을 등록에 사용하며, 등록 여부 조회 중/실패·기등록·진행 중에는 중복 등록을 막는다. 공개 메타데이터 저장·수동 갱신 계약은 유지한다.
+
+### 공개 메타데이터 저장과 수동 갱신 (2026-11-15)
+
+[69](69_persistent_public_metadata_cache_fixes_spec.md)에 따라 보러가기는 Jotai에서 TanStack Query로 이관했다. 작품/인물 상세도 `MANUAL_METADATA_QUERY_OPTIONS`로 저장 결과를 재사용하고, 데이터/오류가 있으면 자동 query를 비활성화한다. `getExternalContentDetail` 직접 서비스와 화면 훅은 같은 Query key를 공유하며, 핀 제목 보정도 이 경로를 쓴다. 수동 `refresh`만 force_refresh를 보내고 기존 값은 성공 후 교체한다. 메모리 GC는 24시간이며 앱 재시작/콜드 캐시는 서버 DB를 읽어 외부 호출을 생략한다. 캐시는 사용자 기록과 분리되고 로그아웃 시 기존 Query 정리 흐름을 따른다. 공개 회차의 자동 갱신은 유지한다.
+
 ### 방영 중 작품 회차 선택 (2026-10-16)
 
 `EpisodeProgressCard`는 `useEpisodeAvailability`로 실제 시즌의 `released_episodes` 목록을 조회한다. `airing-availability/published-list-v1` 캐시와 `getEpisodeAvailability` → `fetch-episodes` availability_only 계약을 사용한다. AniList streamingEpisodes 또는 공개일이 지난 실제 회차 행의 번호만 선택에 표시하며, 다음 방영 번호에서 역산하거나 번호를 채우지 않는다. 전체 화수와 개인 시청 기록은 별도로 유지한다.
 
+### 개인화 추천의 공개일 순서 (2026-11-15)
+
+검색어가 빈 개인화 추천은 `activeRecommendations`에서 필터와 추가됨 스냅샷을 합친 뒤 `sortRecommendationsByRelease`로 현재까지 받은 후보 전체를 공개일 최신순으로 표시한다([28 §10](28_recommendation_scroll_pagination_fixes_spec.md#10-2026-11-15-사용자-승인--추천-전체-공개일-최신순)). 새 페이지/보충/복원도 같은 정렬을 통과한다. 데이터 캐시·커서·12개 목표는 기존 훅이 관리하고, 추가 스냅샷/비활성 상태·누르기 identity 검증·잠금을 유지한다. 새로 받은 최신작이 앞에 들어오면 기존 표시 위치는 바뀔 수 있다. 일반 제목 검색과 아래 유사 검색의 정렬에는 적용하지 않는다.
+
+[70](70_latest_recommendation_catalog_and_cpu_fixes_spec.md)은 수집 순서도 최신 공개일부터 이어지도록 보완한다. 서비스가 `discovery_mode:latest`를 보내고 응답 확인 전에는 성공으로 처리하지 않는다. Query key의 `latest-catalog-v1`은 이전 인기 보충 목록/커서와 분리된다. 필터·계정별 요청 수명과 12개 목표, 실패 시 기존 목록 보존을 유지한다. 정책 불일치 오류는 포커스/재연결 자동 반복을 막고, invalid cursor에는 별도 `restart`가 null cursor로 처음부터 찾는다. 정상 `refresh`의 다음 12개 동작은 유지하며, 재시작 성공 시에만 목록을 교체한다.
+
+### 유사 작품 검색 페이지 (2026-11-15)
+
+`useSimilarContent`는 `useInfiniteQuery`로 `similar-content`의 불변 공개 후보에서 계정별 미등록 결과를 12개씩 이어 받는다([22 §10](22_search_recommendations_restore_spec.md#10-2026-11-15-사용자-정정--유사도-1차-고정등록-작품-제외)). Query key의 버전은 `similarity-snapshot-v2`이며 **계정·등록 identity 서명**, 기준 출처·유형·ID·시즌, 초점·대상·보조 정렬·수식 조건을 포함한다. 등록 목록 준비 전에는 요청/결과를 막고, 서버와 같은 `similarityLibrary` 순수 함수로 오래된 캐시도 제외한다. 유사도는 항상 1차이고 최신/인기는 동률의 2차 기준이다. `similarContentPagination`이 순서를 보존하며 중복·반복 cursor·구응답을 구별한다. 추가 조회 오류에는 기존 카드를 유지하고, 만료 또는 등록 변경 시 새 첫 페이지부터 찾는다. 재시작은 `fetchInfiniteQuery({pages:1})`로 성공 시에만 교체한다. 일반 제목 검색과 개인화 추천의 페이지 흐름은 별개다.
+
 ### 추천 카드 인물 정보 (2026-10-24)
 
-검색 추천의 갤러리·목록 카드는 `RecommendationCast`에서 기존 `useExternalContentDetail` → `get-content-detail`의 cast를 조회한다. 빠른 보기와 같은 상세 Query key·10분 staleTime을 공유하며 추천 배치 응답이나 추가·완료 요청을 기다리게 하지 않는다. `recommendationCastNames`가 API 출연 순서로 정렬하고 공급자+인물 ID 중복·빈 이름을 제거한 뒤 최대 2명을 표시한다. 모든 작품 유형에서 영역을 표시한다. 애니 및 애니메이션 장르 영화는 성우, 나머지 영화·드라마는 출연배우로 표시한다. 영화는 `movie`, 나머지는 `tv`로 상세를 조회해 TMDB의 동번호 영화/TV가 섞이지 않게 한다. 애니메이션 판정은 추천·상세 장르를 함께 사용해 빈 상세 장르가 기존 분류를 지우지 않는다. 응답 인물이 1명뿐이면 1명만 표시하며, 로딩·실패·정보 없음은 해당 카드의 인물 영역에만 안내한다. 추천 응답의 `people`은 제작진도 포함하므로 출연진 대체값으로 사용하지 않는다. 서버·DB 스키마 변경 없음. 추천 카드의 이름은 기존 `formatPersonName` 공용 변환기를 거쳐 한글 이름/읽기를 우선 표시하고, 안전하게 변환할 수 없으면 API 원문을 유지한다. 구 상세 응답에 cast source가 없으면 작품 source를 사용한다. 검색 보기 기본값은 갤러리이며 `scenenote-search-ui` 저장 버전 1 이관 시 기존 목록 기본값도 한 번 갤러리로 전환한 뒤 이후 사용자 선택은 보존한다.
+검색 추천의 갤러리·목록 카드는 `RecommendationCast`에서 기존 `useExternalContentDetail` → `get-content-detail`의 cast를 조회한다. 빠른 보기와 같은 상세 Query key·수동 갱신 캐시(docs/69)를 공유하며 추천 배치 응답이나 추가·완료 요청을 기다리게 하지 않는다. `recommendationCastNames`가 API 출연 순서로 정렬하고 공급자+인물 ID 중복·빈 이름을 제거한 뒤 최대 2명을 표시한다. 모든 작품 유형에서 영역을 표시한다. 애니 및 애니메이션 장르 영화는 성우, 나머지 영화·드라마는 출연배우로 표시한다. 영화는 `movie`, 나머지는 `tv`로 상세를 조회해 TMDB의 동번호 영화/TV가 섞이지 않게 한다. 애니메이션 판정은 추천·상세 장르를 함께 사용해 빈 상세 장르가 기존 분류를 지우지 않는다. 응답 인물이 1명뿐이면 1명만 표시하며, 로딩·실패·정보 없음은 해당 카드의 인물 영역에만 안내한다. 추천 응답의 `people`은 제작진도 포함하므로 출연진 대체값으로 사용하지 않는다. 서버·DB 스키마 변경 없음. 추천 카드의 이름은 기존 `formatPersonName` 공용 변환기를 거쳐 한글 이름/읽기를 우선 표시하고, 안전하게 변환할 수 없으면 API 원문을 유지한다. 구 상세 응답에 cast source가 없으면 작품 source를 사용한다. 검색 보기 기본값은 갤러리이며 `scenenote-search-ui` 저장 버전 1 이관 시 기존 목록 기본값도 한 번 갤러리로 전환한 뒤 이후 사용자 선택은 보존한다.
 
 라이브러리 목록·갤러리의 `ContentCard`·`ContentGalleryCard`와 검색의 `RecommendationCast`는 공용 `ContentCast`를 사용한다(2026-10-25). 라이브러리는 보유한 `item.cast`를 우선 표시하고, 비었으면 같은 외부 상세 Query로 보완한다. 수동 등록 작품에는 외부 조회를 하지 않는다. 기존 `useLibraryItemCast`의 확장 기능 플래그 차단을 제거했으며 최대 2명·라벨·한글 표기·상태 안내는 위 검색 계약을 공유한다. 상세 응답을 라이브러리 DB나 UI store에 복제하지 않는다.
+
+### 검색 갤러리 밀도 (2026-11-15)
+
+검색의 갤러리 카드는 2:3 포스터와 제목·메타데이터를 나란히 배치한다. 후속 사용자 요청으로 넓은 웹은 `getSearchGalleryLayout`의 3열 정보형 표시를 사용하며 포스터96×144·줄거리·장르·추천 이유를 보여 준다. 좁은 웹과 앱은 compact 표시를 사용한다. `ContentCast compact`는 최대 2명의 라벨과 이름을 두 줄 안에 표시한다. 추천 본문은 빠른 보기, 제목 검색 본문은 작품 상세로 이동하며 행동 버튼은 본문과 형제다. 최근 검색어·예시는 갤러리에서 접을 수 있다. 추천 스켈레톤도 `LoadingSkeleton compact`로 같은 형태를 사용한다. 공용 인물/검색 입력/스켈레톤의 기본 표현은 옵션을 생략한 사용처에서 유지한다. 표시 계약은 [28 후속 변경](28_recommendation_scroll_pagination_fixes_spec.md#갤러리-밀도-후속-변경-2026-11-15)을 따른다.
 
 ### 실제 라우트와 탐색 출발점
 
@@ -66,10 +88,12 @@
 | 검색·라이브러리·추천 UI | `src/stores/searchUiStore.ts`, `searchHistoryStore.ts`, `libraryUiStore.ts`, `recommendationUiStore.ts` | 서버 응답을 새로운 UI store에 복제하지 않는다. 필터/정렬/검색 기록과 응답 캐시를 구분한다. |
 | 핀 작성 | `src/atoms/pinFormAtom.ts`: `pinFormDraftAtom`; `PinComposer`의 로컬 상태·`createPinSchema` | 현재 PinComposer는 Jotai draft + Zod 검증을 사용한다. 아래 RHF 예제는 이 컴포넌트의 실제 구현이 아니다. |
 | 스포일러 | `src/atoms/spoilerAtom.ts`: `revealedSpoilerPinIdsAtom`; 핀 상세는 `isSpoilerRevealed` 로컬 상태 | 전체 핀/작품 핀/홈과 상세의 초기화 범위가 다르므로 사용자 전환·화면 이탈 시 실제 초기화 코드를 확인한다. |
-| 시청처 캐시 | `src/atoms/watchProvidersAtom.ts`: `watchProvidersAtom`; `src/hooks/useWatchProviders.ts` | 서버 응답·loading·error를 Jotai에 저장하는 현행 예외다. TanStack Query 일원화 요구와의 차이를 보존해 기록하며 신규 기능의 표준으로 삼지 않는다. |
+| 시청처 캐시 | `src/hooks/useWatchProviders.ts` → TanStack Query; `get-watch-providers` → DB | docs/69의 수동 갱신 캐시다. `watchProvidersAtom.ts`는 이전 미사용 파일이며 서버 상태 저장에 사용하지 않는다. |
 | 정의만 남은 상태 | `src/stores/pinComposerStore.ts`, `episodeSelectionStore.ts`, `src/atoms/tagFilterAtom.ts` | 점검 시 `app/`·`src/` 사용처 검색에서 import를 찾지 못했다. 실제 작성 폼·회차 선택의 상태 원천으로 오인하지 말고, 제거/재사용은 별도 변경으로 검토한다. |
 
 ### 캐시와 mutation의 현재 동작
+
+라이브러리 진행은 `src/services/library.ts`가 콘텐츠별 조회 결과를 `src/utils/libraryProgress.ts`의 `getLibraryProgressFields`로 매핑한다. 시즌 항목은 해당 시즌의 화수·체크·상대 진행, 작품 전체는 전체 범위를 사용한다. `episodeProgress.ts`의 공통 resolver와 수동 캐시 갱신 helper가 조회·상태 변경·직접 설정을 일치시키며, 수동 절대 회차는 보존한다. 상세 입력·에피소드 선택·방영 안내도 같은 범위를 따른다([17 §11](17_season_library_tracking_spec.md)).
 
 시청처 캐시는 출처·작품 ID뿐 아니라 선택 시즌·제목/원제·방영일/연도·계약 버전도 구분한다. 화면 포커스 복귀 때 1시간 TTL을 확인하며 같은 포커스 안에서는 요청별 자동 조회를 한 번만 시도한다. 구서버/요청 범위 불일치 응답은 TTL과 관계없이 다음 포커스에서 다시 조회하며 실제 데이터 미확인과 다른 안내를 표시한다. AniList TV의 원제에 명시된 기수는 DB의 가상 시즌 1보다 우선한다. 시즌 문맥의 구서버/시리즈 응답은 확정 제공처에서 제외하며, 실패 뒤에는 사용자가 재시도한다. AniList 극장판은 영화 매칭을 지원하기 전까지 기존 TV 캐시와 원격 조회를 사용하지 않는다. 범위 계약은 [54 §15~16](54_anime_sequel_watch_providers_fixes_spec.md#15-2026-10-20-후속-정정--선택한-시즌의-제공처만-표시)를 따른다.
 
@@ -83,7 +107,7 @@
 | 핀 삭제 | `useDeletePin`이 `["pins"]` 전체 취소·snapshot 후 `src/utils/pinCache.ts`: `removePinFromCachedValue`로 낙관적 삭제, 실패 시 복구, 종료 시 핀·태그·통계·라이브러리 무효화 | 단건이 null이 되면 상세가 폼을 언마운트할 수 있다. [31 명세 U-4](31_usability_review_fixes_spec.md)의 삭제 후 이동 결함을 해결 완료로 간주하지 않는다. |
 | 추천 제외·피드 | `useRecommendationPreferences.ts`가 선호 캐시와 `["recommendations", userId]`를 무효화; `usePersonalizedRecommendations.ts`가 취소·보충·피드 상태 관리 | [28 스크롤 추가 로딩](28_recommendation_scroll_pagination_fixes_spec.md), [30 보충·카드 행동](30_recommendation_fill_and_action_consistency_fixes_spec.md), query identity에 영향을 주는 필터·사용자 변경 |
 
-개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 추천 묶음의 표시 수는 등록·제외·중복을 뺀 후보와 현재 문맥의 추가/완료 보존 슬롯을 합쳐 센다. 스크롤 및 추가/완료 성공 그룹은 최신 표시 수 + 12를 목표로 하는 공통 묶음 로딩을 사용한다([47 §15](47_recommendation_batch_topup_spec.md#15-2026-10-05-후속-정정-추가완료-성공-후에도-다음-12개-묶음)). 성공 그룹은 800ms 예약으로 모으고, 진행 중 요청이 끝난 뒤 목록 끝에 붙인다. 부족분 이어 찾기는 같은 목표와 요청 6회·45초·무진전 3회 한도를 사용한다.
+개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 추천 묶음의 표시 수는 등록·제외·중복을 뺀 후보와 현재 문맥의 추가/완료 보존 슬롯을 합쳐 센다. 스크롤 및 추가/완료 성공 그룹은 최신 표시 수 + 12를 목표로 하는 공통 묶음 로딩을 사용한다([47 §15](47_recommendation_batch_topup_spec.md#15-2026-10-05-후속-정정-추가완료-성공-후에도-다음-12개-묶음)). 성공 그룹은 800ms 예약으로 모으고, 진행 중 요청이 끝난 뒤 합친다. 표시할 때는 위 공개일 최신순을 적용한다. 부족분 이어 찾기는 같은 목표와 요청 6회·45초·무진전 3회 한도를 사용한다.
 
 인물 한글 이름을 수동 입력에서 자동으로 되돌리면 `useSetFavoriteKoreanName`이 해당 사용자의 `favorite-korean-names` 캐시를 먼저 stale로 표시한다(`refetchType: "none"`). 이후 좋아하는 인물 목록을 갱신해 최신 후보로 자동 보정을 재실행한다. 같은 후보 signature의 무한 staleTime 캐시가 복원을 막지 않도록 하며, 직접 이름을 입력할 때는 자동 보정 캐시를 무효화하지 않는다.
 

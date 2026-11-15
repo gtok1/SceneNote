@@ -1,9 +1,10 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/query";
-import { getExternalContentDetail, searchContent } from "@/services/contentSearch";
+import { externalContentDetailQueryKey, fetchExternalContentDetail, getExternalContentDetail, searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { mergeSearchPages } from "@/utils/searchPagination";
+import { MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
 import { discoveryFilterKey, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 
 export function useContentSearch(
@@ -48,21 +49,17 @@ export function useExternalContentDetail(
   externalId: string | undefined,
   mediaType?: string
 ) {
-  return useQuery({
-    queryKey: ["content", "external-detail", "v2-anime-voice-type", source, externalId, mediaType] as const,
-    queryFn: () => {
-      const params: {
-        source: SearchResult["external_source"];
-        externalId: string;
-        mediaType?: string;
-      } = {
-        source: source as SearchResult["external_source"],
-        externalId: externalId ?? ""
-      };
-      if (mediaType) params.mediaType = mediaType;
-      return getExternalContentDetail(params);
-    },
-    enabled: Boolean(source && externalId),
-    staleTime: 10 * 60_000
+  const params = { source: source as SearchResult["external_source"], externalId: externalId ?? "", ...(mediaType ? { mediaType } : {}) };
+  const query = useQuery({
+    ...MANUAL_METADATA_QUERY_OPTIONS,
+    queryKey: externalContentDetailQueryKey(params),
+    queryFn: () => fetchExternalContentDetail(params),
+    enabled: (current) => Boolean(source && externalId) && current.state.data === undefined && !current.state.error,
   });
+  return {
+    ...query,
+    refresh: () => source && externalId
+      ? getExternalContentDetail({ ...params, forceRefresh: true })
+      : Promise.reject(new Error("작품 정보가 없어 다시 불러올 수 없어요."))
+  };
 }

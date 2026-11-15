@@ -7,6 +7,7 @@ import { colors, radius, spacing } from "@/constants/theme";
 import { useUpdateLibraryWatchDates } from "@/hooks/useLibrary";
 import { MANUAL_PROGRESS_COPY } from "@/utils/contentDetailView";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { ERROR_COPY } from "@/utils/errorCopy";
 import { useContentReview, useSaveContentReview } from "@/hooks/useReviews";
 
 interface ContentReviewEditorProps {
@@ -215,7 +216,7 @@ export function ContentReviewEditor({
         />
       </View>
 
-      {review.isError ? <Text style={styles.errorText}>{review.error.message}</Text> : null}
+      {review.isError ? <Text style={styles.errorText}>{userFacingErrorMessage(review.error, ERROR_COPY.reviewLoad)}</Text> : null}
       {submitError ? <Text accessibilityLiveRegion="polite" style={styles.errorText}>{submitError}</Text> : null}
 
       <Pressable

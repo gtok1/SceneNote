@@ -185,3 +185,31 @@ it("P-8 preserves zero-total clamping when completed", () => {
   const result=resolveEpisodeProgress({...completedBase,completed:true,episodeCount:0});
   assert.equal(result.source,"manual"); assert.equal(result.watchedThrough,0);
 });
+
+
+describe("season-scoped library progress", () => {
+  const item = {
+    content_type: "jdrama" as const, source_api: "tmdb" as const, season_number: 2,
+    episode_count: 10, watched_episode_count: 3, derived_watched_through: 3,
+    manual_watched_absolute_number: 13, manual_watched_season_number: 2,
+    manual_watched_episode_number: 3,
+    season_episode_counts: [{ season_number: 1, episode_count: 10 }, { season_number: 2, episode_count: 10 }]
+  };
+
+  it("uses the registered season's relative manual position without changing stored absolute progress", () => {
+    const snapshot = structuredClone(item);
+    assert.deepEqual(resolveLibraryItemProgress(item, ["watching"]), {
+      progress_source: "manual", effective_watched_through: 3, next_episode_number: 4
+    });
+    assert.deepEqual(item, snapshot);
+  });
+
+  it("restores season-relative manual progress when completed is removed", () => {
+    assert.equal(resolveLibraryItemProgress(item, ["completed"]).effective_watched_through, 10);
+    assert.equal(resolveLibraryItemProgress(item, ["watching"]).effective_watched_through, 3);
+  });
+
+  it("preserves whole-work absolute progress", () => {
+    assert.equal(resolveLibraryItemProgress({ ...item, season_number: null, episode_count: 20 }, ["watching"]).effective_watched_through, 13);
+  });
+});

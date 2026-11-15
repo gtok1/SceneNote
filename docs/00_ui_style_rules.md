@@ -106,6 +106,7 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
   - 작성 중 이탈 → `confirmDiscard`
 - **UI-6.2 되돌릴 수 있는 가벼운 삭제**(좋아하는 인물 빼기 등)는 확인 창 대신 "되돌리기" 액션 토스트(`docs/36` D-4). 감상 기록이 함께 사라지는 삭제는 확인 창(`docs/31` U-2).
 - **UI-6.3 오류 문구는 한국어.** 서버·Supabase·Edge Function 영문 원문("Edge Function returned a non-2xx status code" 등)을 화면에 내보내지 않는다. 한국어 검증 문구만 통과시키는 `userFacingErrorMessage(error, fallback)`(`src/utils/profileDashboard.ts`), 오류 코드별 문구 함수(`src/utils/libraryShareErrors.ts`) 패턴을 쓴다. 고정 문구 형식: "~하지 못했어요. 잠시 후 다시 시도해 주세요."
+  - 인증 오류는 `useAuth`에서 `authErrorMessage(error, action)`으로 변환하고, 화면별 대체 문구는 `src/utils/errorCopy.ts`의 `ERROR_COPY`를 쓴다(docs/68).
 - **UI-6.4 데이터 영역 상태 순서**(한 영역에 하나만): 로딩 → 스켈레톤(빙글이 상자 대신, 실제 카드 모양) / 오류(데이터 없음) → `ErrorState`(재시도) / 빈 결과 → `EmptyState`(다음 행동 버튼) / 데이터. **오류와 빈 상태를 같이 그리지 않는다**(`docs/31` U-10). 데이터가 있는데 일부 실패면 목록 위 `typography.caption` 안내 한 줄.
 - **UI-6.5 문구 톤.** 해요체, 짧게. 버튼은 동사("추가", "저장", "모두 보기"). 빈 상태는 사과 대신 안내("작품을 라이브러리에 추가하면 …"). 숫자는 `toLocaleString("ko-KR")`. 문구는 순수 함수에 두면 테스트로 고정한다.
 
@@ -137,6 +138,7 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
 | `EmptyState`, `ErrorState`, `LoadingSkeleton` | `src/components/common/` | 상태 표시(UI-6.4). 스켈레톤 variant: `content-card`·`search-result`·`pin-item`·`episode-row`·`recommendation-card` |
 | `AppImage` | `src/components/common/AppImage.tsx` | 이미지(UI-7.1) |
 | `KeyboardScreen` | `src/components/common/KeyboardScreen.tsx` | 입력 화면 골격(UI-5.1) |
+| `PasswordInput` | `src/components/common/PasswordInput.tsx` | 기본 가림·보기/숨기기(44×44), 칸별 상태, `inputRef`로 폼 포커스 연결(docs/68) |
 | `StackBackButton` | `src/components/common/StackBackButton.tsx` | 스택 헤더 뒤로 |
 | `FilterSheet` | `src/components/common/FilterSheet.tsx` | 필터 시트 |
 | `GenreBadgeList`, `WatchStatusBadge` | `src/components/GenreBadge.tsx`, `src/components/content/WatchStatusBadge.tsx` | 장르·상태 배지 |

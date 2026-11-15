@@ -11,15 +11,21 @@ interface ContentCastProps {
   contentType: ContentType;
   genres?: readonly string[];
   cast?: readonly CastMember[];
+  compact?: boolean;
 }
 
 /** Shares the quick-view cache; stored cast needs no additional request. */
-export const ContentCast = memo(function ContentCast({ source, externalId, contentType, genres = [], cast = [] }: ContentCastProps) {
+export const ContentCast = memo(function ContentCast({ source, externalId, contentType, genres = [], cast = [], compact = false }: ContentCastProps) {
   const canFetch = source !== "manual" && Boolean(externalId) && cast.length === 0;
   const detail = useExternalContentDetail(canFetch ? source : undefined, externalId, recommendationCastMediaType(contentType));
   const label = recommendationCastLabel(contentType, [...genres, ...(detail.data?.content.genres ?? [])]);
   const names = recommendationCastNames(cast.length ? cast : detail.data?.content.cast ?? [], source === "anilist" ? "anilist" : "tmdb");
   const copy = names.length ? names.join(" · ") : canFetch && detail.isPending ? "불러오는 중…" : canFetch && detail.isError ? "정보를 불러오지 못했어요" : "정보가 아직 없어요";
+  if (compact) {
+    return <Text numberOfLines={2} style={styles.compactNames}>
+      <Text style={styles.label}>{label} </Text>{copy}
+    </Text>;
+  }
   return <View style={styles.container}>
     <Text style={styles.label}>{label}</Text>
     <Text numberOfLines={2} style={styles.names}>{copy}</Text>
@@ -29,5 +35,6 @@ export const ContentCast = memo(function ContentCast({ source, externalId, conte
 const styles = StyleSheet.create({
   container: { minHeight: 52, gap: spacing.xs, minWidth: 0 },
   label: { ...typography.micro, color: colors.textMuted },
-  names: { ...typography.caption, color: colors.text }
+  names: { ...typography.caption, color: colors.text },
+  compactNames: { ...typography.caption, color: colors.text, minWidth: 0, minHeight: typography.caption.lineHeight * 2 }
 });

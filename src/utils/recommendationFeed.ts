@@ -304,6 +304,19 @@ export function nextRecommendationBatchTarget(visibleCount: number, currentTarge
   return visible === 0 ? currentTarget : Math.max(currentTarget, visible + PERSONALIZED_RECOMMENDATION_BATCH_SIZE);
 }
 
+/** Keep rotation separate from an explicit recovery after an invalid or outdated cursor. */
+export function recommendationReplacementCursor(cursor: string | null, restartFromBeginning: boolean): string | null {
+  return restartFromBeginning ? null : cursor;
+}
+
+export function canShowRecommendationCompletion(input: {
+  hasData: boolean; visibleCount: number; hasError: boolean; isLoading: boolean; stopped: boolean;
+  hasMore: boolean | undefined; nextCursor: string | null; isExhausted: boolean;
+}): boolean {
+  return input.hasData && input.visibleCount > 0 && !input.hasError && !input.isLoading && !input.stopped &&
+    (input.isExhausted || input.hasMore === false || !input.nextCursor);
+}
+
 export function recommendationContinuationLimit(visibleCount: number, targetCount: number): number {
   const visible = Number.isFinite(visibleCount) && visibleCount > 0 ? Math.floor(visibleCount) : 0;
   return Math.min(PERSONALIZED_RECOMMENDATION_BATCH_SIZE, Math.max(0, targetCount - visible));

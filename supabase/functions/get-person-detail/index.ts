@@ -1,49 +1,21 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
-import { requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+import { createPersistentMetadataStore, PersistentMetadataCacheError, readThroughPersistentMetadata, type PersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
+import { calculateStoredPersonAge, createPersonMetadataKey, isStoredPersonDetail, type StoredPersonCredit as PersonCredit, type StoredPersonDetail as PersonDetail } from "../_shared/personMetadataCache.ts";
+import { getStoredTmdbPersonProfile, readSavedTmdbPersonProfile } from "../_shared/personProviderStore.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
-import { hasHangul, resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
-import { anilistKoreanNameInput, tmdbKoreanNameInput, type TmdbPersonNameDetail } from "../_shared/personNames.ts";
+import { hasHangul, resolveKoreanName } from "../_shared/japaneseReading.ts";
+import { anilistKoreanNameInput, tmdbKoreanNameInput } from "../_shared/personNames.ts";
 import { classifyTmdbPersonCategory } from "../_shared/personCredits.ts";
 
 type PersonSource = "tmdb" | "anilist";
 type PersonCategory = "actor" | "voice_actor";
-type ContentType = "anime" | "kdrama" | "jdrama" | "movie" | "other";
 
 interface RequestBody {
   source?: PersonSource;
   external_id?: string;
   category?: PersonCategory;
-}
-
-interface PersonCredit {
-  external_source: PersonSource;
-  external_id: string;
-  title: string;
-  original_title: string | null;
-  poster_url: string | null;
-  content_type: ContentType;
-  air_year: number | null;
-  air_date: string | null;
-  role: string | null;
-}
-
-interface PersonDetail {
-  source: PersonSource;
-  external_id: string;
-  category: PersonCategory;
-  name: string;
-  original_name: string | null;
-  native_name?: string | null;
-  profile_url: string | null;
-  birthday: string | null;
-  deathday?: string | null;
-  age: number | null;
-  birthplace: string | null;
-  gender?: string | null;
-  biography: string | null;
-  credits: PersonCredit[];
-  name_ko: string | null;
-  name_ko_source: Exclude<KoreanNameSource, "user"> | null;
+  force_refresh?: boolean;
 }
 
 interface TmdbPersonFallback {
@@ -82,59 +54,56 @@ Deno.serve(async (req: Request) => {
   if (!body.ok) return jsonError(400, "INVALID_REQUEST", body.message);
 
   const source = body.value.source;
-  const externalId = body.value.external_id?.trim();
+  const externalId = typeof body.value.external_id === "string" ? body.value.external_id.trim() : "";
   const category = body.value.category;
 
   if (!source || !["tmdb", "anilist"].includes(source)) {
     return jsonError(400, "INVALID_REQUEST", "invalid source");
   }
-  if (!externalId) return jsonError(400, "INVALID_REQUEST", "external_id is required");
+  if (!/^\d+$/.test(externalId)) return jsonError(400, "INVALID_REQUEST", "external_id must be numeric");
+  if (body.value.force_refresh !== undefined && typeof body.value.force_refresh !== "boolean") {
+    return jsonError(400, "INVALID_REQUEST", "force_refresh must be boolean");
+  }
   if (!category || !["actor", "voice_actor"].includes(category)) {
     return jsonError(400, "INVALID_REQUEST", "invalid category");
   }
 
-  if (source === "tmdb") return json(await getTmdbPersonDetail(externalId, category));
-  return json(await getAniListPersonDetail(externalId, category));
+  try {
+    const store = createPersistentMetadataStore(createAdminClient());
+    const cached = await readThroughPersistentMetadata<PersonDetail & { updated_at: string }>({
+      key: createPersonMetadataKey(source, externalId, category), source,
+      store,
+      forceRefresh: body.value.force_refresh === true,
+      isValid: (value): value is PersonDetail & { updated_at: string } => isStoredPersonDetail(value, source, externalId) &&
+        typeof (value as { updated_at?: unknown }).updated_at === "string",
+      fetchFresh: async () => ({
+        ...(source === "tmdb" ? await getTmdbPersonDetail(externalId, category, store, body.value.force_refresh === true) : await getAniListPersonDetail(externalId, category)),
+        updated_at: new Date().toISOString()
+      })
+    });
+    let person = cached.data;
+    // Name/category sync can update the shared profile without re-fetching this saved biography.
+    // Read it without a miss fallback, so a stored detail hit never triggers an upstream request.
+    if (source === "tmdb" && cached.fromCache) {
+      const profile = await readSavedTmdbPersonProfile(externalId, { store });
+      if (profile) {
+        const koreanName = resolveKoreanName(tmdbKoreanNameInput(profile));
+        person = { ...person, category: classifyTmdbPersonCategory(profile.combined_credits?.cast ?? [], category),
+          name_ko: koreanName?.nameKo ?? null, name_ko_source: koreanName?.source ?? null };
+      }
+    }
+    return json({ ...person, age: calculateStoredPersonAge(person.birthday, person.deathday),
+      cache_policy: "manual-v1", from_cache: cached.fromCache });
+  } catch (error) {
+    return jsonError(503, error instanceof PersistentMetadataCacheError ? error.code : "PERSON_DETAIL_UNAVAILABLE",
+      "Unable to load person information");
+  }
 });
 
-async function getTmdbPersonDetail(externalId: string, category: PersonCategory): Promise<PersonDetail> {
-  const apiKey = Deno.env.get("TMDB_API_KEY");
-  if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
-
-  const detailUrl = new URL(`https://api.themoviedb.org/3/person/${externalId}`);
-  detailUrl.searchParams.set("language", TMDB_LANGUAGE);
-  detailUrl.searchParams.set("append_to_response", "combined_credits,translations");
-  const headers = applyTmdbAuth(detailUrl, apiKey);
-
-  const detail = await fetchJson<{
-    id: number;
-    name?: string | null;
-    also_known_as?: string[];
-    profile_path?: string | null;
-    birthday?: string | null;
-    deathday?: string | null;
-    place_of_birth?: string | null;
-    gender?: number | null;
-    biography?: string | null;
-    translations?: TmdbPersonNameDetail["translations"];
-    combined_credits?: {
-      cast?: {
-        id: number;
-        media_type?: "movie" | "tv";
-        title?: string | null;
-        name?: string | null;
-        original_title?: string | null;
-        original_name?: string | null;
-        poster_path?: string | null;
-        character?: string | null;
-        release_date?: string | null;
-        first_air_date?: string | null;
-        origin_country?: string[];
-        genre_ids?: number[];
-        popularity?: number | null;
-      }[];
-    };
-  }>(detailUrl.toString(), { headers });
+async function getTmdbPersonDetail(externalId: string, category: PersonCategory, store: PersistentMetadataStore, forceRefresh: boolean): Promise<PersonDetail> {
+  const detail = await getStoredTmdbPersonProfile(externalId, {
+    store, forceRefresh, apiKey: Deno.env.get("TMDB_API_KEY") ?? null
+  });
 
   const credits = (detail.combined_credits?.cast ?? [])
     .filter((item) => item.media_type === "movie" || item.media_type === "tv")
@@ -166,7 +135,7 @@ async function getTmdbPersonDetail(externalId: string, category: PersonCategory)
     profile_url: detail.profile_path ? `https://image.tmdb.org/t/p/w342${detail.profile_path}` : null,
     birthday: detail.birthday ?? null,
     deathday: detail.deathday ?? null,
-    age: calculateAge(detail.birthday, detail.deathday),
+    age: calculateStoredPersonAge(detail.birthday, detail.deathday),
     birthplace: detail.place_of_birth ?? null,
     gender: mapTmdbGender(detail.gender),
     biography: cleanText(detail.biography),
@@ -297,7 +266,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
 
   if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList error");
   const staff = payload.data?.Staff;
-  if (!staff) throw new Error("staff not found");
+  if (!staff || staff.id !== id || !Array.isArray(staff.characterMedia?.edges)) throw new Error("Incomplete AniList staff response");
 
   const birthday = formatAniListDate(staff.dateOfBirth);
   const allCharacterEdges = [...(staff.characterMedia?.edges ?? [])];
@@ -317,8 +286,10 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
       body: JSON.stringify({ query: ANILIST_STAFF_DETAIL_QUERY, variables: { id, page } })
     });
 
-    if (pagePayload.errors?.length) break;
-    allCharacterEdges.push(...(pagePayload.data?.Staff?.characterMedia?.edges ?? []));
+    // A failed required page is not a completed credit list that can be saved indefinitely.
+    const edges = pagePayload.data?.Staff?.characterMedia?.edges;
+    if (pagePayload.errors?.length || !Array.isArray(edges)) throw new Error("Incomplete AniList credit page");
+    allCharacterEdges.push(...edges);
   }
 
   const credits = allCharacterEdges
@@ -373,7 +344,7 @@ async function getAniListPersonDetail(externalId: string, category: PersonCatego
     native_name: nativeName,
     profile_url: staff.image?.large ?? staff.image?.medium ?? koreanFallback?.profile_url ?? null,
     birthday,
-    age: staff.age ?? calculateAge(birthday),
+    age: calculateStoredPersonAge(birthday) ?? staff.age ?? null,
     birthplace: formatPlaceForKorean(staff.homeTown),
     gender: mapAniListGender(staff.gender),
     biography: pickKoreanText(cleanText(staff.description)),
@@ -537,19 +508,6 @@ function formatAniListDate(date?: { year?: number | null; month?: number | null;
   const month = String(date.month ?? 1).padStart(2, "0");
   const day = String(date.day ?? 1).padStart(2, "0");
   return `${date.year}-${month}-${day}`;
-}
-
-function calculateAge(birthday?: string | null, deathday?: string | null): number | null {
-  if (!birthday) return null;
-  const birth = new Date(`${birthday}T00:00:00Z`);
-  if (Number.isNaN(birth.getTime())) return null;
-  const end = deathday ? new Date(`${deathday}T00:00:00Z`) : new Date();
-  let age = end.getUTCFullYear() - birth.getUTCFullYear();
-  const hadBirthday =
-    end.getUTCMonth() > birth.getUTCMonth() ||
-    (end.getUTCMonth() === birth.getUTCMonth() && end.getUTCDate() >= birth.getUTCDate());
-  if (!hadBirthday) age -= 1;
-  return age >= 0 ? age : null;
 }
 
 function mapTmdbGender(value?: number | null): string | null {

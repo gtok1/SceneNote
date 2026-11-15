@@ -24,12 +24,9 @@ import { useAuthStore } from "@/stores/authStore";
 import type { Episode, SearchResult, Season } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter, WatchStatus } from "@/types/library";
 import {
-  createSeasonOffsetsByNumber,
-  resolveEpisodeProgress,
+  libraryManualProgressAfterToggle,
   resolveLibraryItemProgress,
-  syncManualProgressAfterToggle,
-  toAbsoluteEpisodeNumber,
-  toSeasonRelativeEpisodeNumber
+  withLibraryManualProgress
 } from "@/utils/episodeProgress";
 import { createTrailingScheduler, LIBRARY_REFRESH_DEBOUNCE_MS } from "@/utils/recommendationAddFlow";
 import { filterUpcomingAiringItems } from "@/utils/upcomingAiring";
@@ -225,25 +222,11 @@ export function useToggleEpisodeProgress(contentId: string | undefined) {
         queryKeys.content.seasons(contentId ?? episode.content_id)
       ) ?? [];
       const seasonNumber = seasons.find((season) => season.id === episode.season_id)?.season_number ?? null;
-      const absolute = toAbsoluteEpisodeNumber(
-        seasonNumber,
-        episode.episode_number,
-        createSeasonOffsetsByNumber(libraryItem.season_episode_counts)
-      );
-      if (absolute === null) return;
-
-      const nextManual = syncManualProgressAfterToggle({
-        manualWatchedThrough: libraryItem.manual_watched_absolute_number,
-        toggledAbsoluteNumber: absolute,
-        watched: !watched
-      });
-      if (nextManual === libraryItem.manual_watched_absolute_number || nextManual === null) return;
+      const nextManual = libraryManualProgressAfterToggle(libraryItem, seasonNumber, episode.episode_number, !watched);
+      if (nextManual === null) return;
 
       try {
-        await updateLibraryManualProgress(
-          libraryItem.library_item_id,
-          toSeasonRelativeEpisodeNumber(nextManual, libraryItem.season_episode_counts)
-        );
+        await updateLibraryManualProgress(libraryItem.library_item_id, nextManual);
       } catch (error) {
         console.warn("에피소드 체크 후 수동 진행 위치 동기화에 실패했습니다.", error);
         if (user) {
@@ -479,32 +462,7 @@ function updateLibraryItemManualProgressInCache(
       items?.map((item) => {
         if (item.library_item_id !== libraryItemId) return item;
 
-        const manualAbsolute = progress === null
-          ? null
-          : toAbsoluteEpisodeNumber(
-              progress.seasonNumber,
-              progress.episodeNumber,
-              createSeasonOffsetsByNumber(item.season_episode_counts)
-            );
-        const resolved = resolveEpisodeProgress({
-          contentType: item.content_type,
-          episodeCount: item.episode_count,
-          watchedEpisodeCount: item.watched_episode_count,
-          derivedWatchedThrough: progress === null ? item.derived_watched_through : null,
-          manualWatchedThrough: manualAbsolute,
-          completed: item.statuses.includes("completed")
-        });
-
-        return {
-          ...item,
-          manual_watched_season_number: progress?.seasonNumber ?? null,
-          manual_watched_episode_number: progress?.episodeNumber ?? null,
-          manual_watched_absolute_number: manualAbsolute,
-          progress_source: resolved.source,
-          effective_watched_through: resolved.watchedThrough,
-          next_episode_number: resolved.nextEpisodeNumber,
-          manual_progress_available: true
-        };
+        return withLibraryManualProgress(item, progress);
       })
   );
 }

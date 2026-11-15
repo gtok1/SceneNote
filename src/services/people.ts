@@ -50,12 +50,14 @@ export async function getPersonDetail(params: {
   source: PersonSource;
   externalId: string;
   category: PersonCategory;
+  forceRefresh?: boolean;
 }): Promise<PersonDetail> {
   const { data, error } = await supabase.functions.invoke<PersonDetail>("get-person-detail", {
     body: {
       source: params.source,
       external_id: params.externalId,
-      category: params.category
+      category: params.category,
+      force_refresh: params.forceRefresh === true
     }
   });
 

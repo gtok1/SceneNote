@@ -1,4 +1,5 @@
 import { KeyboardScreen } from "@/components/common/KeyboardScreen";
+import { PasswordInput } from "@/components/common/PasswordInput";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -57,11 +58,12 @@ export default function SignUpScreen() {
                 autoComplete="email"
                 returnKeyType="next"
                 onSubmitEditing={() => setFocus("password")}
-                                autoCapitalize="none"
+                autoCapitalize="none"
+                autoCorrect={false}
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
-                placeholder="이메일"
+                placeholder="name@example.com"
                 style={styles.input}
                 value={field.value}
               />
@@ -75,21 +77,24 @@ export default function SignUpScreen() {
           render={({ field, fieldState }) => (
             <View style={styles.field}>
               <Text style={{ color: colors.text, fontWeight: "700" }}>비밀번호</Text>
-              <TextInput
-                ref={field.ref}
+              <PasswordInput
+                inputRef={field.ref}
                 accessibilityLabel="비밀번호"
                 aria-invalid={Boolean(fieldState.error)}
                 autoComplete="new-password"
                 returnKeyType="done"
                 onSubmitEditing={submit}
-                                onBlur={field.onBlur}
+                onBlur={field.onBlur}
                 onChangeText={field.onChange}
-                placeholder="비밀번호"
-                secureTextEntry
+                placeholder="8자 이상"
                 style={styles.input}
                 value={field.value}
               />
-              {fieldState.error ? <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text> : null}
+              {fieldState.error ? (
+                <Text accessibilityRole="alert" style={styles.error}>{fieldState.error.message}</Text>
+              ) : (
+                <Text style={styles.help}>8자 이상으로 입력해 주세요.</Text>
+              )}
             </View>
           )}
         />
@@ -101,10 +106,13 @@ export default function SignUpScreen() {
         ) : null}
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ disabled: formState.isSubmitting || signUp.isPending, busy: formState.isSubmitting || signUp.isPending }}
+          aria-busy={formState.isSubmitting || signUp.isPending}
           disabled={formState.isSubmitting || signUp.isPending}
           onPress={submit}
-          style={[
+          style={({ pressed }) => [
             styles.primaryButton,
+            pressed && styles.pressedButton,
             formState.isSubmitting || signUp.isPending ? styles.disabledButton : null
           ]}
         >
@@ -160,6 +168,9 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.65
   },
+  pressedButton: {
+    opacity: 0.72
+  },
   primaryText: {
     color: colors.surface,
     fontSize: 16,
@@ -176,6 +187,10 @@ const styles = StyleSheet.create({
   },
   error: {
     color: colors.danger,
+    fontSize: 12
+  },
+  help: {
+    color: colors.textMuted,
     fontSize: 12
   },
   success: {

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { deleteAccount as requestDeleteAccount } from "@/services/account";
 import { useAuthStore } from "@/stores/authStore";
 import { getAuthRedirectUrl } from "@/utils/authLinks";
+import { authErrorMessage } from "@/utils/authErrorMessage";
 
 export function useAuth() {
   const session = useAuthStore((state) => state.session);
@@ -15,7 +16,7 @@ export function useAuth() {
   const signIn = useMutation({
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error, "signIn"));
     }
   });
 
@@ -28,7 +29,7 @@ export function useAuth() {
           emailRedirectTo: getAuthRedirectUrl("/sign-in")
         }
       });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error, "signUp"));
       return data;
     }
   });
@@ -38,7 +39,7 @@ export function useAuth() {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: getAuthRedirectUrl("/reset-password")
       });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error, "requestPasswordReset"));
     }
   });
 
@@ -49,18 +50,18 @@ export function useAuth() {
         error: sessionError
       } = await supabase.auth.getSession();
 
-      if (sessionError) throw new Error(sessionError.message);
+      if (sessionError) throw new Error(authErrorMessage(sessionError, "updatePassword"));
       if (!currentSession) throw new Error("비밀번호 재설정 링크로 다시 접속해 주세요");
 
       const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error, "updatePassword"));
     }
   });
 
   const signOut = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.auth.signOut();
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error, "signOut"));
     },
     onSuccess: () => {
       reset();

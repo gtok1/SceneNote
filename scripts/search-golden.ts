@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { evaluateGoldenCase, SEARCH_GOLDEN_CASES, SEARCH_GOLDEN_SPACING_CASES, SEARCH_GOLDEN_SHORT_SPACING_CASES } from "./searchGolden";
+import { evaluateGoldenCase, SEARCH_GOLDEN_CASES, SEARCH_GOLDEN_SPACING_CASES, SEARCH_GOLDEN_SHORT_SPACING_CASES, SEARCH_GOLDEN_RELAXED_WORD_CASES } from "./searchGolden";
 
 loadEnvFile(".env");
 loadEnvFile(".env.local");
@@ -19,13 +19,13 @@ async function main(): Promise<void> {
   const tmdbModulePath: string = "../supabase/functions/search-content/adapters/tmdb.ts";
   const normalizeModulePath: string = "../supabase/functions/search-content/adapters/normalize.ts";
   const { searchTmdb } = await import(tmdbModulePath);
-  const { compactResults, createSearchQueryVariants, filterResponseForVariant, planKoreanWordSplitFallback } =
+  const { compactResults, createSearchQueryVariants, filterResponseForVariant, planKoreanWordSplitFallback, planKoreanRelaxedWordFallback } =
     await import(normalizeModulePath);
   let passed = 0;
-  const expectations = [...SEARCH_GOLDEN_CASES, ...SEARCH_GOLDEN_SPACING_CASES, ...SEARCH_GOLDEN_SHORT_SPACING_CASES];
+  const expectations = [...SEARCH_GOLDEN_CASES, ...SEARCH_GOLDEN_SPACING_CASES, ...SEARCH_GOLDEN_SHORT_SPACING_CASES, ...SEARCH_GOLDEN_RELAXED_WORD_CASES];
   for (const expectation of expectations) {
     const variants = createSearchQueryVariants(expectation.query);
-    const responses = await Promise.all(variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title"; compactQuery: string }) => {
+    const responses = await Promise.all(variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title" | "relaxed-words"; compactQuery: string; words?: readonly string[] }) => {
       try {
         const response = await searchTmdb({
           query: variant.query, mediaType: "all", page: 1, signal: AbortSignal.timeout(8_000)
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
       query: expectation.query, page: 1, sources: ["tmdb"], remainingMs: Number.POSITIVE_INFINITY,
       primaryVariants: variants, primaryResults
     });
-    const fallbackResults = plan.reason === "run" ? await Promise.all(plan.variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title"; compactQuery: string }) => {
+    const fallbackResults = plan.reason === "run" ? await Promise.all(plan.variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title" | "relaxed-words"; compactQuery: string; words?: readonly string[] }) => {
       try {
         const response = await searchTmdb({ query: variant.query, mediaType: "all", page: 1, signal: AbortSignal.timeout(8_000) });
         return filterResponseForVariant(response, variant).results;
@@ -50,7 +50,21 @@ async function main(): Promise<void> {
         return [];
       }
     })) : [];
-    const verdict = evaluateGoldenCase(compactResults([...primaryResults, ...fallbackResults.flat()]), expectation);
+    const priorResults = compactResults([...primaryResults, ...fallbackResults.flat()]);
+    const relaxedPlan = planKoreanRelaxedWordFallback({
+      query: expectation.query, page: 1, sources: ["tmdb"], remainingMs: Number.POSITIVE_INFINITY,
+      existingVariants: [...variants, ...plan.variants], priorResults
+    });
+    const relaxedResults = relaxedPlan.reason === "run" ? await Promise.all(relaxedPlan.variants.map(async (variant: { query: string; matchMode: "direct" | "compact-title" | "relaxed-words"; compactQuery: string; words?: readonly string[] }) => {
+      try {
+        const response = await searchTmdb({ query: variant.query, mediaType: "all", page: 1, signal: AbortSignal.timeout(8_000) });
+        return filterResponseForVariant(response, variant).results;
+      } catch {
+        console.warn(`${expectation.query}: 변형 "${variant.query}" 조회 실패`);
+        return [];
+      }
+    })) : [];
+    const verdict = evaluateGoldenCase(compactResults([...priorResults, ...relaxedResults.flat()]), expectation);
     if (verdict.ok) passed += 1;
     else for (const failure of verdict.failures) console.error(failure);
   }

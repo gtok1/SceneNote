@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query";
 import type { MediaTypeFilter } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
 import { createRecommendationFeedKey } from "@/utils/recommendationFeed";
+import { LATEST_RECOMMENDATION_CACHE_VERSION } from "@/utils/latestRecommendationPolicy";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,14 +25,15 @@ export const queryKeys = {
   search: {
     results: (query: string, mediaType: MediaTypeFilter, page: number, discoverySignature = "[[],[],[]]") =>
       ["search", query, mediaType, page, discoverySignature] as const,
-    similar: (anchorKey: string, focus: string, mediaType: MediaTypeFilter, sort: string, filters: string) =>
-      ["search", "similar", "hybrid-v1-no-embeddings", anchorKey, focus, mediaType, sort, filters] as const
+    similar: (userId: string, librarySignature: string, anchorKey: string, focus: string, mediaType: MediaTypeFilter, sort: string, filters: string) =>
+      ["search", "similar", "similarity-snapshot-v2", userId, librarySignature, anchorKey, focus, mediaType, sort, filters] as const
   },
   recommendations: {
     popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
     personalized: (userId: string, mediaType: MediaTypeFilter, exclusionSignature = "[[],[]]", discoverySignature = "[[],[],[]]") =>
       [
         ...createRecommendationFeedKey(userId, mediaType, exclusionSignature, discoverySignature),
+        LATEST_RECOMMENDATION_CACHE_VERSION,
         "ko-metadata-v2",
         "recent-impressions-v1"
       ] as const
@@ -43,6 +45,7 @@ export const queryKeys = {
     item: (userId: string, contentId: string) => ["library", userId, contentId] as const
   },
   content: {
+    watchProviders: (lookupKey: string) => ["content", "watch-providers", "manual-v1", lookupKey] as const,
     single: (contentId: string) => ["content", contentId] as const,
     seasons: (contentId: string) => ["content", contentId, "seasons"] as const,
     episodes: (contentId: string, seasonId: string | null) =>

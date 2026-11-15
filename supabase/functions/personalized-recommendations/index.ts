@@ -7,6 +7,7 @@ import {
 } from "../_shared/recommendationCatalog.ts";
 import {
   buildPreferenceProfile,
+  createRecommendationLibraryContext,
   rankCandidates,
   createRecommendationIdentityAliases,
   type RecommendationCandidate,
@@ -15,6 +16,7 @@ import {
   type RecommendationFeedbackAction,
   type RecommendationMediaType
 } from "../_shared/recommendationEngine.ts";
+import { scanLatestRecommendationCatalog } from "../_shared/recommendationLatestCatalog.ts";
 import {
   collectRecommendationImpressionIdentityKeys,
   createRecommendationImpressionRows,
@@ -50,6 +52,7 @@ interface PersonalizedRecommendationRequest extends DiscoveryFilterInput {
   mediaTypes?: ("anime" | "drama" | "movie")[];
   exclude_ids?: string[];
   cursor?: string | null;
+  discovery_mode?: "latest" | "mixed";
   impressions?: RecommendationCandidate[];
   feedback?: RecommendationFeedback | RecommendationFeedback[];
 }
@@ -111,6 +114,7 @@ interface ValidatedRecommendationRequest {
   discoveryFilters: DiscoveryFilterInput;
   excludeIds: string[];
   cursor: string | null;
+  discoveryMode: "latest" | "mixed";
 }
 
 interface ValidatedImpressionRequest {
@@ -278,8 +282,68 @@ Deno.serve(async (req: Request) => {
       }
       return { ...page, items: enriched, pendingVerification };
     };
+    const libraryContext = createRecommendationLibraryContext(libraryItems);
+    const profile = buildPreferenceProfile(libraryItems, feedback, libraryContext);
+    if (validated.value.discoveryMode === "latest") {
+      const setupDoneAt = Date.now();
+      const catalogStartedAt = Date.now();
+      const result = await scanLatestRecommendationCatalog(
+        request => fetchRecommendationProviderPage(request, { filters, discoveryFilters, cache: providerCache, deadlineMs: requestDeadline, ordering: "latest", latestLane: request.lane }),
+        {
+          limit: validated.value.limit, mediaType: validated.value.mediaType, discoveryFilters,
+          cursor: validated.value.cursor, excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
+          libraryItems, feedback, libraryContext, profile, candidateFilter, scopeKey: user.id,
+          knownCandidateFilter: candidate => filterRecommendationsForUser([candidate], { excludedThemeKeys: [], excludedGenres: filters.excludedGenres }).length > 0,
+          verifyCandidate: async candidate => {
+            if (filters.excludedThemeKeys.length === 0 || candidate.external_source !== "tmdb") return { candidate, pending: false };
+            let pending = false;
+            const [verified] = await enrichTmdbRecommendationCandidates([candidate], needsKeywordLookup, {
+              cache: providerCache, deadlineMs: requestDeadline, lookupBudget: keywordLookupBudget,
+              onDeferred: () => { pending = true; }
+            });
+            // A confirmed empty keyword list is ineligible under the existing hard filter;
+            // an unfinished/failed lookup is a frontier to retry, never a reason to skip newer work.
+            pending ||= !Array.isArray(verified?.keywords);
+            if (pending) keywordLookupLimited = true;
+            return { candidate: verified ?? candidate, pending };
+          },
+          maxMonthsPerRequest: budget.maxMonths, maxProviderRoundsPerRequest: budget.maxRounds,
+          canContinue: () => Date.now() - scanStartedAt < budget.scanMs
+        }
+      );
+      const catalogDoneAt = Date.now();
+      let ottLookups = 0;
+      const itemsWithProviders = await attachKrOttProviders(result.items, (kind, tmdbId) => {
+        ottLookups++;
+        return fetchKrWatchRegion(kind, tmdbId, { cache: providerCache, deadlineMs: requestDeadline });
+      }, { deadlineMs: requestDeadline });
+      let impressionsSaved = 0;
+      try { impressionsSaved = await recordRecommendationImpressions(userClient, user.id, itemsWithProviders); }
+      catch { console.error("personalized-recommendations response impression write failed"); }
+      const failedSources = normalizeFailedSources(result.failedProviders);
+      const includeDebug = Deno.env.get("RECOMMENDATION_DEBUG") === "true";
+      return json({
+        items: itemsWithProviders.map(item => {
+          if (includeDebug) return { ...item, origin_country: item.countries ?? [] };
+          const { candidate_score: _candidateScore, ...publicItem } = item;
+          return { ...publicItem, origin_country: item.countries ?? [] };
+        }),
+        discovery_mode: "latest", next_cursor: result.nextCursor, has_more: result.hasMore,
+        is_exhausted: result.exhausted, taste_fill_count: 0,
+        scan_budget_reached: result.scanBudgetReached, providers_blocked: result.providersBlocked,
+        broadened: result.broadened, profile_mode: result.profileMode, warnings: result.warnings,
+        filter_limited: keywordLookupLimited, applied_filters: toAppliedDiscoveryFilters(discoveryFilters),
+        failed_sources: failedSources, partial: result.providersBlocked || keywordLookupLimited,
+        diagnostics: {
+          setup_ms: setupDoneAt - requestStartedAt, catalog_ms: catalogDoneAt - catalogStartedAt,
+          taste_fill_ms: 0, total_ms: Date.now() - requestStartedAt, catalog_items: result.items.length,
+          taste_fill_items: 0, taste_fill: "disabled_latest", keyword_lookups_left: keywordLookupBudget.remaining,
+          cache_reads: cacheReads, cache_hits: cacheHits, keyword_lookups_used: budget.keywordLookups - keywordLookupBudget.remaining,
+          ott_lookups: ottLookups, library_rows: libraryItems.length, impressions_saved: impressionsSaved, scan_budget: budget.label
+        }
+      });
+    }
     const cursorState = decodeTasteFillCursor(validated.value.cursor);
-    const profile = buildPreferenceProfile(libraryItems, feedback);
     const setupDoneAt = Date.now();
     const queries = deriveTasteFillQueries({ profile, discoveryFilters, mediaType: validated.value.mediaType, userFilters: filters });
     const taste = initializeTasteFillProgress(queries, cursorState.taste);
@@ -301,6 +365,7 @@ Deno.serve(async (req: Request) => {
       cursor: cursorState.catalog,
       excludeIds: [...validated.value.excludeIds, ...recentSeenIds],
       libraryItems,
+      libraryContext,
       candidateFilter,
       maxMonthsPerRequest: budget.maxMonths,
       maxProviderRoundsPerRequest: budget.maxRounds,
@@ -339,7 +404,7 @@ Deno.serve(async (req: Request) => {
         if (pendingVerification || candidates.some(candidate => candidate.external_source === "tmdb" &&
           needsKeywordLookup(candidate) && !candidate.keywords?.length)) keywordLookupLimited = true;
       }
-      const ranked = rankCandidates(profile, candidates.filter(candidateFilter), { mediaType: validated.value.mediaType, libraryItems });
+      const ranked = rankCandidates(profile, candidates.filter(candidateFilter), { mediaType: validated.value.mediaType, libraryItems, libraryContext });
       fill = selectTasteFillItems({
         ranked, existing: result.items, blockedIdentities: keywordLookupExclusions,
         need: validated.value.limit - result.items.length,
@@ -412,6 +477,9 @@ Deno.serve(async (req: Request) => {
       partial: result.providersBlocked && failedSources.length > 0 && result.items.length < validated.value.limit
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "INVALID_LATEST_RECOMMENDATION_CURSOR") {
+      return jsonError(409, "INVALID_LATEST_RECOMMENDATION_CURSOR", "추천 검색 범위가 바뀌었어요. 새 추천을 불러와 주세요.");
+    }
     if (error instanceof Error && error.message === "INVALID_RECOMMENDATION_CURSOR") {
       return jsonError(400, "INVALID_CURSOR", "Recommendation cursor is invalid or does not match the filter");
     }
@@ -454,6 +522,9 @@ function validateRequest(
     return { ok: true, value: { action, feedback } };
   }
   if (action !== "recommend") return { ok: false, message: "action is invalid" };
+  if (value.discovery_mode !== undefined && value.discovery_mode !== "latest" && value.discovery_mode !== "mixed") {
+    return { ok: false, message: "discovery_mode must be latest or mixed" };
+  }
 
   const limit = value.limit ?? 12;
   if (!Number.isInteger(limit) || limit < 1 || limit > 12) {
@@ -488,7 +559,7 @@ function validateRequest(
   if (value.cursor !== undefined && value.cursor !== null && typeof value.cursor !== "string") {
     return { ok: false, message: "cursor must be a string or null" };
   }
-  if (typeof value.cursor === "string" && value.cursor.length > 4096) {
+  if (typeof value.cursor === "string" && value.cursor.length > (value.discovery_mode === "latest" ? 8192 : 4096)) {
     return { ok: false, message: "cursor is too long" };
   }
 
@@ -505,7 +576,8 @@ function validateRequest(
         ...(value.mediaTypes !== undefined ? { mediaTypes: discoveryFilters.mediaTypes } : {})
       },
       excludeIds: excludeIds.value,
-      cursor: value.cursor?.trim() || null
+      cursor: value.cursor?.trim() || null,
+      discoveryMode: value.discovery_mode ?? "mixed"
     }
   };
 }

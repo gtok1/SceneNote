@@ -39,16 +39,22 @@ export function resolveContentLibraryItem(
     contentId: string;
     libraryItemId?: string | null | undefined;
     seasonNumber?: number | null | undefined;
+    externalSource?: LibraryListItem["source_api"] | undefined;
+    externalId?: string | undefined;
+    mediaType?: "movie" | "tv" | undefined;
   }
 ): ContentLibraryMatch {
+  let rows = items.filter((item) => item.content_id === params.contentId);
+  if (rows.length === 0 && params.externalSource && params.externalSource !== "manual" && params.externalId) {
+    // Public detail snapshots can predate registration. Resolve today's user records independently.
+    rows = items.filter(item => item.source_api === params.externalSource && item.source_id === params.externalId &&
+      (!params.mediaType || (params.mediaType === "movie" ? item.content_type === "movie" : item.content_type !== "movie")));
+  }
   if (params.libraryItemId) {
-    const exact = items.find(
-      (item) => item.content_id === params.contentId && item.library_item_id === params.libraryItemId
-    );
+    const exact = rows.find((item) => item.library_item_id === params.libraryItemId);
     if (exact) return { kind: "library-item", item: exact };
   }
 
-  const rows = items.filter((item) => item.content_id === params.contentId);
   if (rows.length === 0) return { kind: "none" };
 
   if (typeof params.seasonNumber === "number" && Number.isFinite(params.seasonNumber)) {

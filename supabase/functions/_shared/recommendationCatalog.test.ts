@@ -12,6 +12,7 @@ import {
 } from "./recommendationCatalog.ts";
 import {
   createRecommendationIdentityAliases,
+  createRecommendationLibraryContext,
   type RecommendationCandidate,
   type RecommendationLibraryItem
 } from "./recommendationEngine.ts";
@@ -884,4 +885,31 @@ it("Y-4 year catalog starts in December and ends in January, retaining real as-o
   assert.equal(result.exhausted, true);
   const cursor = encodeRecommendationCursor(decodeRecommendationCursor(null, 'anime', NOW, { year: 2025 }));
   assert.throws(() => decodeRecommendationCursor(cursor, 'anime', NOW, { year: 2026 }), /INVALID_RECOMMENDATION_CURSOR/);
+});
+
+it("CPU-CATALOG reuses the prepared library throughout three provider scan rounds", async () => {
+  let featureReads = 0;
+  const libraryItems: RecommendationLibraryItem[] = Array.from({ length: 660 }, (_, index) => ({
+    source_api: "tmdb", source_id: String(900000 + index), content_type: "anime",
+    title_primary: `저장 작품 ${index}`, air_year: 2020, status: "completed",
+    get genres() { featureReads++; return ["Action"]; },
+    get themes() { featureReads++; return []; },
+    get keywords() { featureReads++; return []; },
+    get people() { featureReads++; return []; },
+    get studios() { featureReads++; return []; }
+  }));
+  const libraryContext = createRecommendationLibraryContext(libraryItems);
+  const readsAfterPreparation = featureReads;
+  const works = Array.from({ length: 12 }, (_, index) => candidate(`context-${index}`, "2026-07-01", 100 - index));
+  const calls: string[] = [];
+  const result = await scanRecommendationCatalog(fetcher({
+    anilist: { "2026-07": [works.slice(0, 3), works.slice(3, 7), works.slice(7)] }
+  }, new Set(), calls), {
+    mediaType: "anime", now: NOW, minimumMonth: "2026-07", limit: 12,
+    libraryItems, libraryContext, maxProviderRoundsPerRequest: 4
+  });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(result.items.map(item => item.external_id), works.map(item => item.external_id));
+  assert.equal(featureReads, readsAfterPreparation);
+  assert.ok(readsAfterPreparation <= libraryItems.length * 8);
 });

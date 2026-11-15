@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SearchResult } from "@/types/content";
 import type { WatchProvidersByCategory, WatchProvidersResponse } from "@/types/watchProviders";
-import { supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
+import { isWatchProviderResponseCompatible, supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
 
 export const emptyWatchProviders: WatchProvidersByCategory = {
   flatrate: [],
@@ -19,6 +19,7 @@ export async function getWatchProviders(params: {
   airYear?: number | null;
   airDate?: string | null;
   seasonNumber?: number | null;
+  forceRefresh?: boolean;
 }): Promise<WatchProvidersResponse> {
   if (!supportsWatchProviderLookup(params)) {
     return createEmptyWatchProviders(params.externalId);
@@ -34,12 +35,20 @@ export async function getWatchProviders(params: {
       air_year: params.airYear,
       air_date: params.airDate,
       season_number: params.seasonNumber,
-      watch_region: "KR"
+      watch_region: "KR",
+      force_refresh: params.forceRefresh ?? false
     }
   });
 
   if (error) throw new Error(error.message);
-  return data ?? createEmptyWatchProviders(params.externalId);
+  if (!data || data.lookup_version !== 2 || !isWatchProviderResponseCompatible({
+    response: data,
+    seasonNumber: params.seasonNumber ?? null,
+    requireSeasonMatch: params.seasonNumber != null || (params.source === "anilist" && params.mediaType === "tv")
+  })) {
+    throw new Error("시청 정보를 새로 확인하지 못했어요. 잠시 후 다시 확인해 주세요.");
+  }
+  return data;
 }
 
 export function createEmptyWatchProviders(externalId: string): WatchProvidersResponse {

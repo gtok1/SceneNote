@@ -18,6 +18,8 @@ import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
 import { createCrewShortLine } from "@/utils/contentCrew";
 import { createReviewLabel } from "@/utils/reviewDisplay";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 interface LibraryShareScreenContentProps {
   shareId?: string;
@@ -95,7 +97,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
           <View style={styles.errorTextBox}>
             <Text style={styles.errorTitle}>공유 목록을 열 수 없습니다</Text>
             <Text style={styles.errorText}>
-              {share.error instanceof Error ? share.error.message : "공유 링크가 만료되었거나 존재하지 않습니다."}
+              {userFacingErrorMessage(share.error, ERROR_COPY.shareOpen)}
             </Text>
           </View>
         </View>

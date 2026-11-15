@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as lookup from "./watchProviderLookup";
 
-import { createWatchProviderCacheKey, isWatchProviderResponseCompatible, resolveWatchProviderMediaType, shouldLoadWatchProviders, shouldWaitForWatchProviderMetadata, supportsWatchProviderLookup, WATCH_PROVIDER_CACHE_TTL_MS, type WatchProviderLookupInput } from "./watchProviderLookup";
+import { createWatchProviderCacheKey, isWatchProviderResponseCompatible, resolveWatchProviderMediaType, shouldLoadWatchProviders, shouldWaitForWatchProviderMetadata, supportsWatchProviderLookup, type WatchProviderLookupInput } from "./watchProviderLookup";
 import { resolveWatchSeasonNumber } from "../../supabase/functions/_shared/watchProviderSeason";
 import type { WatchProvidersResponse } from "@/types/watchProviders";
+
+const WATCH_PROVIDER_CACHE_TTL_MS = 60 * 60_000;
 
 const input: WatchProviderLookupInput = {
   source: "anilist", externalId: "123", mediaType: "tv", title: "전생 귀족, 감정 스킬로 성공하다",
@@ -50,13 +53,13 @@ describe("season watch provider cache", () => {
     assert.equal(shouldLoadWatchProviders({ hasData: false, isLoading: true, error: null, force: true }), false);
   });
 
-  it("refreshes an hour-old response on reentry while keeping recent data", () => {
+  it("keeps saved responses on reentry regardless of age until a deliberate refresh", () => {
     const now = Date.parse("2026-10-20T10:00:00Z");
     const cached = { hasData: true, isLoading: false, error: null, now };
     assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: new Date(now - WATCH_PROVIDER_CACHE_TTL_MS + 1).toISOString() }), false);
-    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: new Date(now - WATCH_PROVIDER_CACHE_TTL_MS).toISOString() }), true);
-    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: "invalid" }), true);
-    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: null }), true);
+    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: new Date(now - WATCH_PROVIDER_CACHE_TTL_MS).toISOString() }), false);
+    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: "invalid" }), false);
+    assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: null }), false);
     assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: "2026-10-20T08:00:00Z", error: "요청 실패" }), false);
     assert.equal(shouldLoadWatchProviders({ ...cached, updatedAt: "2026-10-20T08:00:00Z", error: "요청 실패", force: true }), true);
   });
@@ -119,12 +122,44 @@ describe("watch provider response migration", () => {
     }
   });
 
-  it("keeps current confirmed and scoped-unknown responses for the normal TTL", () => {
+  it("keeps confirmed and scoped-unknown responses without automatic expiry", () => {
     for (const provider_scope of ["season", null] as const) {
       assert.equal(compatible({ ...response, provider_scope }), true);
       assert.equal(shouldLoadWatchProviders({ ...cached, responseCompatible: compatible({ ...response, provider_scope }) }), false);
-      assert.equal(shouldLoadWatchProviders({ ...cached, responseCompatible: true, now: Date.parse(response.updated_at) + WATCH_PROVIDER_CACHE_TTL_MS }), true);
+      assert.equal(shouldLoadWatchProviders({ ...cached, responseCompatible: true, now: Date.parse(response.updated_at) + WATCH_PROVIDER_CACHE_TTL_MS }), false);
     }
     assert.equal(compatible({ ...response, provider_scope: null, requested_season_number: null }, null), true);
+  });
+});
+
+describe("manual watch provider cache policy", () => {
+  it("WC-1 disables automatic mount, focus, reconnect, error retry and polling requests", () => {
+    assert.deepEqual(lookup.WATCH_PROVIDER_QUERY_POLICY, {
+      staleTime: Infinity, gcTime: 24 * 60 * 60_000, retry: false, retryOnMount: false,
+      refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchInterval: false
+    });
+  });
+
+  it("WC-2 distinguishes confirmed database reuse from a compatible legacy server response", () => {
+    assert.equal(lookup.watchProviderPersistenceNotice({ cache_policy: "manual-v1", from_cache: true }), null);
+    assert.equal(lookup.watchProviderPersistenceNotice({ cache_policy: "manual-v1", from_cache: false }), null);
+    assert.equal(lookup.watchProviderPersistenceNotice({}), "저장 기능을 아직 사용할 수 없어요. 표시된 정보는 이번에 확인한 결과예요.");
+  });
+
+  it("WC-3 does not advertise permanent storage for an unknown or incomplete policy", () => {
+    for (const response of [{ cache_policy: "manual-v2", from_cache: true }, { cache_policy: "manual-v1" }, { from_cache: true }]) {
+      assert.equal(lookup.watchProviderPersistenceNotice(response), "저장 기능을 아직 사용할 수 없어요. 표시된 정보는 이번에 확인한 결과예요.");
+    }
+  });
+
+  it("WC-4 shows the last successful lookup time in Korea time", () => {
+    assert.equal(lookup.formatWatchProviderUpdatedAt("2026-11-15T09:30:00.000Z"), "마지막 확인 2026.11.15 18:30");
+  });
+
+  it("WC-5 omits missing or invalid lookup timestamps", () => {
+    assert.equal(lookup.formatWatchProviderUpdatedAt(undefined), null);
+    assert.equal(lookup.formatWatchProviderUpdatedAt(null), null);
+    assert.equal(lookup.formatWatchProviderUpdatedAt(""), null);
+    assert.equal(lookup.formatWatchProviderUpdatedAt("invalid"), null);
   });
 });

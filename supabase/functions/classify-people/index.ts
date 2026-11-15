@@ -1,9 +1,10 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
-import { requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+import { createPersistentMetadataStore, type PersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
+import { getStoredTmdbPersonProfile, PERSON_PROVIDER_RECHECK_MS } from "../_shared/personProviderStore.ts";
 import {
   classifyTmdbPersonCategoryOrNull,
-  type PersonCategory,
-  type TmdbPersonCredit
+  type PersonCategory
 } from "../_shared/personCredits.ts";
 
 interface RequestBody {
@@ -38,14 +39,19 @@ Deno.serve(async (req: Request) => {
   if (!people) return jsonError(400, "INVALID_REQUEST", `people must be 1-${MAX_PEOPLE} valid { external_id } items`);
 
   const apiKey = Deno.env.get("TMDB_API_KEY");
-  if (!apiKey) return jsonError(500, "SERVER_MISCONFIGURED", "TMDB_API_KEY is not configured");
+  let store: PersistentMetadataStore;
+  try {
+    store = createPersistentMetadataStore(createAdminClient());
+  } catch {
+    return jsonError(503, "PERSON_METADATA_UNAVAILABLE", "Unable to read person metadata");
+  }
 
   const results = new Array<PersonCategoryResult>(people.length);
   let next = 0;
   async function worker(): Promise<void> {
     while (next < people!.length) {
       const index = next++;
-      results[index] = await classifyPerson(people![index] as PersonRef, apiKey as string);
+      results[index] = await classifyPerson(people![index] as PersonRef, store, apiKey ?? null);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, people.length) }, worker));
@@ -62,22 +68,13 @@ function parsePeople(value: unknown): PersonRef[] | null {
   return people;
 }
 
-async function classifyPerson(person: PersonRef, apiKey: string): Promise<PersonCategoryResult> {
+async function classifyPerson(person: PersonRef, store: PersistentMetadataStore, apiKey: string | null): Promise<PersonCategoryResult> {
   try {
-    const url = new URL(`https://api.themoviedb.org/3/person/${person.external_id}`);
-    url.searchParams.set("append_to_response", "combined_credits");
-    const headers = applyTmdbAuth(url, apiKey);
-    const response = await fetch(url, { headers });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const detail = await response.json() as { combined_credits?: { cast?: TmdbPersonCredit[] } };
+    const detail = await getStoredTmdbPersonProfile(person.external_id, {
+      store, apiKey, recheckAfterMs: PERSON_PROVIDER_RECHECK_MS
+    });
     return { ...person, category: classifyTmdbPersonCategoryOrNull(detail.combined_credits?.cast ?? []) };
   } catch {
     return { ...person, category: null };
   }
-}
-
-function applyTmdbAuth(url: URL, apiKey: string): HeadersInit {
-  if (apiKey.startsWith("eyJ")) return { Authorization: `Bearer ${apiKey}` };
-  url.searchParams.set("api_key", apiKey);
-  return {};
 }

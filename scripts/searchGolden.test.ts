@@ -54,3 +54,14 @@ it("G-8 preserves the four short spacing queries and ids", () => {
     ["너말고", ["314939"]], ["너말", ["314939"]], ["그해우", ["135897"]], ["선재업", ["230923"]]
   ]);
 });
+
+it("G-9 includes the six relaxed word queries and ids", () => {
+  assert.deepEqual(spacingGoldenContract.SEARCH_GOLDEN_RELAXED_WORD_CASES.map(item => [item.query, item.mustInclude.map(expected => expected.externalId)]), [
+    ["추방당한 치트", ["313346"]],
+    ["추방당한 치트 부여 마술사", ["313346"]],
+    ["추방당한 치트 부여 마술사는 자유로운 세컨드 라이프를 구가한다", ["313346"]],
+    ["자유로운 세컨드 라이프", ["313346"]],
+    ["추방당한 마술사는", ["313346"]],
+    ["파티에서 추방된 치유사", ["244625"]]
+  ]);
+});

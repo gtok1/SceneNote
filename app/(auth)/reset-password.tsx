@@ -1,5 +1,6 @@
 import { KeyboardScreen } from "@/components/common/KeyboardScreen";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { PasswordInput } from "@/components/common/PasswordInput";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useRouter, type Href } from "expo-router";
@@ -53,17 +54,16 @@ export default function ResetPasswordScreen() {
             render={({ field, fieldState }) => (
               <View style={styles.field}>
                 <Text style={{ color: colors.text, fontWeight: "700" }}>새 비밀번호</Text>
-              <TextInput
-                ref={field.ref}
-                accessibilityLabel="새 비밀번호"
-                aria-invalid={Boolean(fieldState.error)}
-                autoComplete="new-password"
-                returnKeyType="next"
-                onSubmitEditing={() => setFocus("confirmPassword")}
-                                  onBlur={field.onBlur}
+                <PasswordInput
+                  inputRef={field.ref}
+                  accessibilityLabel="새 비밀번호"
+                  aria-invalid={Boolean(fieldState.error)}
+                  autoComplete="new-password"
+                  returnKeyType="next"
+                  onSubmitEditing={() => setFocus("confirmPassword")}
+                  onBlur={field.onBlur}
                   onChangeText={field.onChange}
-                  placeholder="새 비밀번호"
-                  secureTextEntry
+                  placeholder="8자 이상"
                   style={styles.input}
                   value={field.value}
                 />
@@ -77,17 +77,16 @@ export default function ResetPasswordScreen() {
             render={({ field, fieldState }) => (
               <View style={styles.field}>
                 <Text style={{ color: colors.text, fontWeight: "700" }}>새 비밀번호 확인</Text>
-              <TextInput
-                ref={field.ref}
-                accessibilityLabel="새 비밀번호 확인"
-                aria-invalid={Boolean(fieldState.error)}
-                autoComplete="new-password"
-                returnKeyType="done"
-                onSubmitEditing={submit}
-                                  onBlur={field.onBlur}
+                <PasswordInput
+                  inputRef={field.ref}
+                  accessibilityLabel="새 비밀번호 확인"
+                  aria-invalid={Boolean(fieldState.error)}
+                  autoComplete="new-password"
+                  returnKeyType="done"
+                  onSubmitEditing={submit}
+                  onBlur={field.onBlur}
                   onChangeText={field.onChange}
-                  placeholder="새 비밀번호 확인"
-                  secureTextEntry
+                  placeholder="한 번 더 입력"
                   style={styles.input}
                   value={field.value}
                 />
@@ -98,10 +97,13 @@ export default function ResetPasswordScreen() {
           {updatePassword.error ? <Text accessibilityRole="alert" style={styles.error}>{updatePassword.error.message}</Text> : null}
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ disabled: formState.isSubmitting || updatePassword.isPending, busy: formState.isSubmitting || updatePassword.isPending }}
+            aria-busy={formState.isSubmitting || updatePassword.isPending}
             disabled={formState.isSubmitting || updatePassword.isPending}
             onPress={submit}
-            style={[
+            style={({ pressed }) => [
               styles.primaryButton,
+              pressed && styles.pressedButton,
               formState.isSubmitting || updatePassword.isPending ? styles.disabledButton : null
             ]}
           >
@@ -166,6 +168,9 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.65
+  },
+  pressedButton: {
+    opacity: 0.72
   },
   primaryText: {
     color: colors.surface,

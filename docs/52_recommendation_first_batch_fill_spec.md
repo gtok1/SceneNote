@@ -1,5 +1,7 @@
 # 52. 검색 추천 첫 화면 — 한 번에 채우기와 채우는 동안의 표시
 
+> 최신 모드의 보충/선조회는 2026-11-15 사용자 요청에 따른 [70](70_latest_recommendation_catalog_and_cpu_fixes_spec.md)이 우선한다. 아래 기존 mixed의 예산/보충 계약은 보존한다.
+
 작성일: 2026-10-10
 대상 브랜치 기준: `main` (`c6a0e7e`) + 미커밋 작업(`docs/48`~`51` 구현). 이 시점 `npm test` 1058개 중 1057개 통과 — 실패 1개(`recommendationEngine.test.ts` "uses latest-popular fallback ordering with an empty library")는 무관한 기존 결함
 선행 문서: `docs/41`(취향 보충 레인), `docs/45`(연도·적용 조건), `docs/47`(묶음 목표·자동 이어 찾기), `docs/00_ui_style_rules.md`(UI-6.4 상태 표시)

@@ -9,7 +9,8 @@ import {
   type RecommendationLibraryItem,
   type RecommendationFeedback,
   type RecommendationMediaType,
-  type RecommendationProfileMode
+  type RecommendationProfileMode,
+  type RecommendationLibraryContext
 } from "./recommendationEngine.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "./discoveryFilters.ts";
 import { canFetchRecommendationProvider } from "./recommendationProviderFilters.ts";
@@ -47,6 +48,7 @@ export interface RecommendationCatalogScanOptions<T extends RecommendationCandid
   /** Checked after the first round so the caller can reserve response time. */
   canContinue?: () => boolean;
   libraryItems?: readonly RecommendationLibraryItem[];
+  libraryContext?: RecommendationLibraryContext;
   feedback?: readonly RecommendationFeedback[];
   excludeIds?: readonly string[];
   candidateFilter?: (candidate: T) => boolean;
@@ -125,7 +127,7 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
     1,
     40
   );
-  const profile = buildPreferenceProfile(options.libraryItems ?? [], options.feedback ?? []);
+  const profile = buildPreferenceProfile(options.libraryItems ?? [], options.feedback ?? [], options.libraryContext);
   if (activeProviders.length === 0) {
     return completedResult([], profile.mode, false, new Set(), new Set());
   }
@@ -250,7 +252,8 @@ export async function scanRecommendationCatalog<T extends RecommendationCandidat
           .filter((candidate) => options.candidateFilter?.(candidate) ?? true),
         {
           mediaType: options.discoveryFilters?.mediaTypes !== undefined ? "all" : options.mediaType,
-          ...(options.libraryItems ? { libraryItems: options.libraryItems } : {})
+          ...(options.libraryItems ? { libraryItems: options.libraryItems } : {}),
+          ...(options.libraryContext ? { libraryContext: options.libraryContext } : {})
         }
       )
     );

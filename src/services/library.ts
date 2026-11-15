@@ -1,4 +1,5 @@
 import { readBatchedRows } from "@/utils/batchedQuery";
+import { getLibraryProgressFields, type LibraryProgressRow } from "@/utils/libraryProgress";
 import { parseStoredCrew } from "../../supabase/functions/_shared/contentCrew";
 import { getPrimaryWatchStatus, normalizeWatchStatuses } from "@/constants/status";
 import { supabase } from "@/lib/supabase";
@@ -7,17 +8,13 @@ import type {
   EpisodeProgress,
   LibraryListItem,
   LibraryStatusFilter,
-  SeasonEpisodeCount,
   WatchStatus
 } from "@/types/library";
 import { extractGenreNames, type ContentGenreJoin } from "@/utils/genre";
 import { createSeasonDisplayTitle } from "@/utils/seasonDisplay";
 import { releasedEpisodeFromKnownDates, upcomingEpisodeFromKnownDates } from "@/utils/airingAvailability";
 import {
-  MAX_MANUAL_EPISODE_NUMBER,
-  createSeasonOffsetsByNumber,
-  resolveEpisodeProgress,
-  toAbsoluteEpisodeNumber
+  MAX_MANUAL_EPISODE_NUMBER
 } from "@/utils/episodeProgress";
 
 interface RawLibraryRow {
@@ -66,26 +63,9 @@ interface LibrarySeasonRow {
   air_year: number | null;
 }
 
-interface LibraryProgressRow {
-  content_id: string;
-  episode_id: string;
-  episodes?: {
-    season_id: string | null;
-    episode_number: number | null;
-  } | {
-    season_id: string | null;
-    episode_number: number | null;
-  }[] | null;
-}
-
 interface EpisodeAirDateRow {
   content_id: string;
   air_date: string | null;
-}
-
-interface EpisodeProgressSummary {
-  watchedEpisodeIds: Set<string>;
-  maxWatchedEpisodeNumber: number | null;
 }
 
 const LIBRARY_ITEM_SELECT =
@@ -491,74 +471,32 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
   const reviewsByContentId = new Map(
     ((reviewsResult.data ?? []) as LibraryReviewRow[]).map((review) => [review.content_id, review])
   );
-  const episodeCountsByContentId = new Map<string, number>();
   const firstAirDateByContentId = createFirstAirDateByContentId(
     (episodeAirDatesResult.data ?? []) as EpisodeAirDateRow[]
   );
   const lastAirDateByContentId = createLastAirDateByContentId(
     (episodeAirDatesResult.data ?? []) as EpisodeAirDateRow[]
   );
-  const seasonOffsetsBySeasonId = createSeasonOffsets((seasonsResult.data ?? []) as LibrarySeasonRow[]);
-  const seasonCountsByContentId = new Map<string, SeasonEpisodeCount[]>();
-  const seasonByContentAndNumber = new Map<string, LibrarySeasonRow>(
-    ((seasonsResult.data ?? []) as LibrarySeasonRow[]).map((season) => [
-      `${season.content_id}:${season.season_number}`,
-      season
-    ])
-  );
-
+  const seasonsByContentId = new Map<string, LibrarySeasonRow[]>();
   for (const season of (seasonsResult.data ?? []) as LibrarySeasonRow[]) {
-    const seasonCounts = seasonCountsByContentId.get(season.content_id) ?? [];
-    seasonCounts.push({
-      season_number: season.season_number,
-      episode_count: season.episode_count
-    });
-    seasonCountsByContentId.set(season.content_id, seasonCounts);
-
-    if (!season.episode_count) continue;
-    episodeCountsByContentId.set(
-      season.content_id,
-      (episodeCountsByContentId.get(season.content_id) ?? 0) + season.episode_count
-    );
+    const contentSeasons = seasonsByContentId.get(season.content_id) ?? [];
+    contentSeasons.push(season);
+    seasonsByContentId.set(season.content_id, contentSeasons);
   }
-
-  const progressByContentId = createProgressSummaries(
-    (progressResult.data ?? []) as unknown as LibraryProgressRow[],
-    seasonOffsetsBySeasonId
-  );
-  for (const seasonCounts of seasonCountsByContentId.values()) {
-    seasonCounts.sort((a, b) => a.season_number - b.season_number);
+  const progressByContentId = new Map<string, LibraryProgressRow[]>();
+  for (const row of (progressResult.data ?? []) as unknown as LibraryProgressRow[]) {
+    const contentProgress = progressByContentId.get(row.content_id) ?? [];
+    contentProgress.push(row);
+    progressByContentId.set(row.content_id, contentProgress);
   }
 
   return items.map((item) => {
     const review = reviewsByContentId.get(item.content_id);
-    const episodeCount = episodeCountsByContentId.get(item.content_id) ?? null;
-    const progress = progressByContentId.get(item.content_id);
-    const watchedEpisodeCount = progress?.watchedEpisodeIds.size ?? 0;
-    const seasonCounts = seasonCountsByContentId.get(item.content_id) ?? [];
-    const manualAbsolute = toAbsoluteEpisodeNumber(
-      item.manual_watched_season_number,
-      item.manual_watched_episode_number,
-      createSeasonOffsetsByNumber(seasonCounts)
-    );
-    const resolved = resolveEpisodeProgress({
-      contentType: item.content_type,
-      episodeCount,
-      watchedEpisodeCount,
-      derivedWatchedThrough: progress?.maxWatchedEpisodeNumber ?? null,
-      manualWatchedThrough: manualAbsolute,
-      completed: item.statuses.includes("completed")
-    });
-
-    // A season-scoped row shares its content_id (and so its title/air_date) with the
-    // whole-work row and any other season of the same show. Without this, two rows for
-    // the same VIVANT show render as identical "VIVANT · 2023.07" cards. The `seasons`
-    // table already carries per-season title/episode_count/air_year (no air_date there).
-    // See docs/17_season_library_tracking_spec.md D-5.
+    const contentSeasons = seasonsByContentId.get(item.content_id) ?? [];
     const matchedSeason = typeof item.season_number === "number"
-      ? seasonByContentAndNumber.get(`${item.content_id}:${item.season_number}`)
+      ? contentSeasons.find((season) => season.season_number === item.season_number)
       : undefined;
-    const seasonEpisodeCount = matchedSeason?.episode_count ?? null;
+    const progressFields = getLibraryProgressFields(item, contentSeasons, progressByContentId.get(item.content_id) ?? []);
 
     return {
       ...item,
@@ -571,14 +509,7 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
         (item.content_type === "movie" ? (item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null) : null),
       rating: review?.rating ?? null,
       one_line_review: review?.one_line_review ?? null,
-      episode_count: matchedSeason ? seasonEpisodeCount : episodeCount,
-      watched_episode_count: watchedEpisodeCount,
-      derived_watched_through: progress?.maxWatchedEpisodeNumber ?? null,
-      next_episode_number: resolved.nextEpisodeNumber,
-      manual_watched_absolute_number: manualAbsolute,
-      progress_source: resolved.source,
-      effective_watched_through: resolved.watchedThrough,
-      season_episode_counts: seasonCounts
+      ...progressFields
     };
   });
 }
@@ -637,63 +568,6 @@ function createLastAirDateByContentId(rows: EpisodeAirDateRow[]): Map<string, st
   }
 
   return lastAirDateByContentId;
-}
-
-function createSeasonOffsets(seasons: LibrarySeasonRow[]): Map<string, number> {
-  const seasonsByContentId = new Map<string, LibrarySeasonRow[]>();
-  for (const season of seasons) {
-    const contentSeasons = seasonsByContentId.get(season.content_id) ?? [];
-    contentSeasons.push(season);
-    seasonsByContentId.set(season.content_id, contentSeasons);
-  }
-
-  const offsets = new Map<string, number>();
-  for (const contentSeasons of seasonsByContentId.values()) {
-    let offset = 0;
-    for (const season of contentSeasons.sort((a, b) => a.season_number - b.season_number)) {
-      offsets.set(season.id, offset);
-      offset += Math.max(0, season.episode_count ?? 0);
-    }
-  }
-
-  return offsets;
-}
-
-function createProgressSummaries(
-  rows: LibraryProgressRow[],
-  seasonOffsetsBySeasonId: Map<string, number>
-): Map<string, EpisodeProgressSummary> {
-  const summaries = new Map<string, EpisodeProgressSummary>();
-
-  for (const row of rows) {
-    const summary = summaries.get(row.content_id) ?? {
-      watchedEpisodeIds: new Set<string>(),
-      maxWatchedEpisodeNumber: null
-    };
-
-    summary.watchedEpisodeIds.add(row.episode_id);
-
-    const episode = normalizeJoinedEpisode(row.episodes);
-    const episodeNumber = episode?.episode_number ?? null;
-    const seasonId = episode?.season_id ?? null;
-    if (episodeNumber && episodeNumber > 0) {
-      const seasonOffset = seasonId ? seasonOffsetsBySeasonId.get(seasonId) ?? 0 : 0;
-      const normalizedEpisodeNumber = seasonOffset + episodeNumber;
-      summary.maxWatchedEpisodeNumber =
-        summary.maxWatchedEpisodeNumber === null
-          ? normalizedEpisodeNumber
-          : Math.max(summary.maxWatchedEpisodeNumber, normalizedEpisodeNumber);
-    }
-
-    summaries.set(row.content_id, summary);
-  }
-
-  return summaries;
-}
-
-function normalizeJoinedEpisode(episode: LibraryProgressRow["episodes"]) {
-  if (Array.isArray(episode)) return episode[0] ?? null;
-  return episode ?? null;
 }
 
 export async function getSeasons(contentId: string): Promise<Season[]> {

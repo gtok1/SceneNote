@@ -28,6 +28,8 @@ export interface RecommendationProviderOptions {
   discoveryFilters?: DiscoveryFilterInput;
   cache?: RecommendationCache;
   deadlineMs?: number;
+  ordering?: "latest";
+  latestLane?: string;
 }
 
 export interface RecommendationKeywordOptions<T> {
@@ -154,7 +156,7 @@ export const TMDB_RECOMMENDATION_KEYWORD_LOOKUP_LIMIT = 8;
 
 const providerPageCache = new Map<
   string,
-  { expiresAt: number; promise: Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> }
+  { expiresAt: number; promise: Promise<LaneProviderPage> }
 >();
 const animeLocalizationCache = new Map<
   string,
@@ -422,21 +424,43 @@ export function fetchRecommendationProviderPage(
   if (!canFetchRecommendationProvider(request.provider, options.discoveryFilters, options.filters)) {
     return Promise.resolve({ items: [], hasMore: false });
   }
-  return getCachedProviderPage(request, options);
+  return getCachedProviderPage(request, options).then(page => {
+    if (options.ordering !== "latest" || !options.latestLane) return page;
+    const lane = page.lanes?.[options.latestLane];
+    if (!lane) throw new Error("LATEST_PROVIDER_LANE_UNAVAILABLE");
+    return lane;
+  });
+}
+
+interface LaneProviderPage extends RecommendationProviderPage<CatalogRecommendationCandidate> {
+  lanes?: Record<string, RecommendationProviderPage<CatalogRecommendationCandidate>>;
+}
+
+/** Real upstream pagination streams, including OR branches inside one provider request. */
+export function getLatestRecommendationProviderLanes(provider: RecommendationProviderRequest["provider"], options: RecommendationProviderOptions = {}): string[] {
+  const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
+  const genres = eligibleDiscoveryGenres(discovery.genres, options.filters);
+  if (provider === "tmdb_movie") return ["base"];
+  if (provider === "anilist") {
+    const lanes = genres.includes("animation") ? [] : [...new Set(genres.map(aniListIncludedGenre).filter((genre): genre is string => typeof genre === "string"))];
+    return lanes.length > 1 ? lanes.map((_, index) => `genre${index}`) : ["base"];
+  }
+  const native = genres.some(genre => { const id = tmdbIncludedGenreId(genre, "tv"); return typeof id === "number" && id !== 16; });
+  return [...(!discovery.genres.length || native ? ["native"] : []), ...(genres.some(genre => TMDB_TV_KEYWORD_GENRES.has(genre)) ? ["keywords"] : [])];
 }
 
 interface PersistedProviderPage {
-  page: RecommendationProviderPage<CatalogRecommendationCandidate> | null;
+  page: LaneProviderPage | null;
   expiresAt: number;
 }
 
 async function getCachedProviderPage(
   request: RecommendationProviderRequest,
   options: RecommendationProviderOptions
-): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+): Promise<LaneProviderPage> {
   const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
   const discoveryKey = !discovery.genres.length && !discovery.countries.length && !discovery.mediaTypes.length && discovery.year === undefined ? "" : `:${discoveryFilterKey(discovery)}`;
-  const cacheVersion = request.provider === "anilist" ? ANILIST_PROVIDER_CACHE_VERSION : PROVIDER_CACHE_VERSION;
+  const cacheVersion = (request.provider === "anilist" ? ANILIST_PROVIDER_CACHE_VERSION : PROVIDER_CACHE_VERSION) + (options.ordering === "latest" ? ":latest-v1" : "");
   const key = `${cacheVersion}:${request.provider}:${request.month}:${request.page}:${request.asOfDate}:${recommendationProviderFilterKey(options.filters)}${discoveryKey}`;
   const source = request.provider === "anilist" ? "anilist" : "tmdb";
   const now = Date.now();
@@ -485,7 +509,7 @@ async function getCachedProviderPage(
 async function fetchUncachedProviderPage(
   request: RecommendationProviderRequest,
   options: RecommendationProviderOptions
-): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+): Promise<LaneProviderPage> {
   if (request.provider === "anilist") return fetchAniListMonth(request, options);
   if (request.provider === "tmdb_movie") return fetchTmdbMovieMonth(request, options);
   return fetchTmdbDramaMonth(request, options);
@@ -494,7 +518,7 @@ async function fetchUncachedProviderPage(
 async function fetchTmdbDramaMonth(
   request: RecommendationProviderRequest,
   options: RecommendationProviderOptions
-): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+): Promise<LaneProviderPage> {
   const apiKey = requireTmdbApiKey();
   const bounds = getMonthBounds(request.month, request.asOfDate);
   const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
@@ -506,17 +530,18 @@ async function fetchTmdbDramaMonth(
   const verified = keywordEntries.filter((entry): entry is { genre: string; id: number } => entry.id !== null);
   // Genre-ID and keyword predicates cannot express OR across TMDB parameters.
   // At most two discover lanes provide that union without a country/genre cross product.
-  const lanes: { genreIds: number[]; keywords: typeof verified }[] = [];
-  if (!discovery.genres.length || nativeIds.length) lanes.push({ genreIds: nativeIds.length ? nativeIds : [18], keywords: [] });
-  if (verified.length) lanes.push({ genreIds: [18], keywords: verified });
-  if (!lanes.length) return { items: [], hasMore: false };
+  const lanes: { key: string; genreIds: number[]; keywords: typeof verified }[] = [];
+  if (!discovery.genres.length || nativeIds.length) lanes.push({ key: "native", genreIds: nativeIds.length ? nativeIds : [18], keywords: [] });
+  if (verified.length) lanes.push({ key: "keywords", genreIds: [18], keywords: verified });
+  if (!lanes.length) return { items: [], hasMore: false,
+    ...(options.ordering === "latest" ? { lanes: Object.fromEntries(getLatestRecommendationProviderLanes(request.provider, options).map(key => [key, { items: [], hasMore: false }])) } : {}) };
   const pages = await Promise.all(lanes.map(async (lane) => {
     const url = new URL("https://api.themoviedb.org/3/discover/tv");
     setCommonTmdbParams(url, request.page);
     url.searchParams.set("first_air_date.gte", bounds.startDate);
     url.searchParams.set("first_air_date.lte", bounds.endDate);
     url.searchParams.set("include_null_first_air_dates", "false");
-    url.searchParams.set("sort_by", "popularity.desc");
+    url.searchParams.set("sort_by", options.ordering === "latest" ? "first_air_date.desc" : "popularity.desc");
     applyKrOttDiscoverFilter(url);
     url.searchParams.set("with_genres", lane.genreIds.join("|"));
     url.searchParams.set("with_origin_country", countries.join("|"));
@@ -532,9 +557,10 @@ async function fetchTmdbDramaMonth(
         ? { ...item, genres: [...new Set([...item.genres, lane.keywords[0]!.genre])] }
         : lane.keywords.length ? { ...item, matched_genres: lane.keywords.map((entry) => entry.genre) } : item)
       .filter((item) => matchesDiscoveryFilters(item, discovery));
-    return { items, hasMore: request.page < Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0)) };
+    return { key: lane.key, items, hasMore: request.page < Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0)) };
   }));
-  return { items: pages.flatMap((page) => page.items), hasMore: pages.some((page) => page.hasMore) };
+  return { items: pages.flatMap((page) => page.items), hasMore: pages.some((page) => page.hasMore),
+    ...(options.ordering === "latest" ? { lanes: Object.fromEntries(pages.map(({ key, ...page }) => [key, page])) } : {}) };
 }
 
 function eligibleDiscoveryGenres(genres: readonly string[], exclusions?: UserRecommendationFilters): string[] {
@@ -544,7 +570,7 @@ function eligibleDiscoveryGenres(genres: readonly string[], exclusions?: UserRec
 async function fetchTmdbMovieMonth(
   request: RecommendationProviderRequest,
   options: RecommendationProviderOptions
-): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+): Promise<LaneProviderPage> {
   const apiKey = requireTmdbApiKey();
   const bounds = getMonthBounds(request.month, request.asOfDate);
   const discovery = normalizeDiscoveryFilters(options.discoveryFilters);
@@ -552,7 +578,7 @@ async function fetchTmdbMovieMonth(
   setCommonTmdbParams(url, request.page);
   url.searchParams.set("primary_release_date.gte", bounds.startDate);
   url.searchParams.set("primary_release_date.lte", bounds.endDate);
-  url.searchParams.set("sort_by", "popularity.desc");
+  url.searchParams.set("sort_by", options.ordering === "latest" ? "primary_release_date.desc" : "popularity.desc");
   applyKrOttDiscoverFilter(url);
   if (discovery.countries.length) url.searchParams.set("with_origin_country", discovery.countries.join("|"));
   const includedIds = [...new Set(eligibleDiscoveryGenres(discovery.genres, options.filters).map((genre) => tmdbIncludedGenreId(genre, "movie")).filter((id): id is number => typeof id === "number"))];
@@ -568,13 +594,14 @@ async function fetchTmdbMovieMonth(
     .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
     .filter((item) => matchesDiscoveryFilters(item, discovery));
   const totalPages = Math.min(TMDB_MAX_PAGE, Math.max(0, payload.total_pages ?? 0));
-  return { items, hasMore: request.page < totalPages };
+  const page = { items, hasMore: request.page < totalPages };
+  return { ...page, ...(options.ordering === "latest" ? { lanes: { base: page } } : {}) };
 }
 
 async function fetchAniListMonth(
   request: RecommendationProviderRequest,
   options: RecommendationProviderOptions
-): Promise<RecommendationProviderPage<CatalogRecommendationCandidate>> {
+): Promise<LaneProviderPage> {
   const bounds = getMonthBounds(request.month, request.asOfDate);
   const endpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
   const excluded = aniListExcludedFilters(options.filters);
@@ -593,7 +620,7 @@ async function fetchAniListMonth(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        query: buildAniListMonthQuery(genreLanes, optionalVariables),
+        query: buildAniListMonthQuery(genreLanes, optionalVariables, options.ordering),
         variables: {
           page: request.page,
           perPage: Math.max(1, Math.floor(ANILIST_PAGE_SIZE / Math.max(1, genreLanes.length))),
@@ -606,24 +633,25 @@ async function fetchAniListMonth(
     getCachedKoreanAnimeItems(request, options.cache, options.deadlineMs, discovery.countries.length ? discovery.countries.join("|") : "JP")
   ]);
   if (payload.errors?.length) throw new Error(payload.errors[0]?.message ?? "AniList GraphQL request failed");
-  const pages = Object.values(payload.data ?? {}).filter((page) => page !== undefined && page !== null);
-  const page = { media: pages.flatMap((entry) => entry.media ?? []), pageInfo: { hasNextPage: pages.some((entry) => entry.pageInfo?.hasNextPage) } };
-  const items = (page?.media ?? [])
-    .map((item, index) =>
-      normalizeAniListAnime(
-        item,
-        request,
-        index,
-        findTmdbKoreanAnimeLocalization(item, koreanAnimeItems)
-      )
-    )
-    .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
-    .filter((item) => matchesDiscoveryFilters(item, discovery));
-  return { items, hasMore: Boolean(page?.pageInfo?.hasNextPage) };
+  const entries = Object.entries(payload.data ?? {}).filter((entry): entry is [string, NonNullable<AniListPage["data"]>["Page"] & {}] => entry[1] !== undefined && entry[1] !== null);
+  if (options.ordering === "latest" && entries.length !== Math.max(1, genreLanes.length)) throw new Error("LATEST_PROVIDER_LANE_UNAVAILABLE");
+  const lanes = Object.fromEntries(entries.map(([name, page]) => [genreLanes.length > 1 ? name : "base", {
+    items: (page.media ?? []).map((item, index) => {
+      const candidate = normalizeAniListAnime(item, request, index, findTmdbKoreanAnimeLocalization(item, koreanAnimeItems));
+      return candidate && options.ordering === "latest" && !item.startDate?.day ? { ...candidate, air_date: null } : candidate;
+    })
+      .filter((item): item is CatalogRecommendationCandidate => Boolean(item))
+      .filter(item => matchesDiscoveryFilters(item, discovery)),
+    hasMore: Boolean(page.pageInfo?.hasNextPage)
+  }]));
+  return { items: Object.values(lanes).flatMap(page => page.items), hasMore: Object.values(lanes).some(page => page.hasMore),
+    ...(options.ordering === "latest" ? { lanes } : {}) };
+
 }
 
-function buildAniListMonthQuery(genres: readonly string[], optionalVariables: Record<string, unknown>): string {
+function buildAniListMonthQuery(genres: readonly string[], optionalVariables: Record<string, unknown>, ordering?: "latest"): string {
   let query = genres.length > 1 ? buildAniListGenreUnionQuery(genres) : ANILIST_MONTH_QUERY;
+  if (ordering === "latest") query = query.replaceAll("sort: [POPULARITY_DESC, SCORE_DESC, START_DATE_DESC]", "sort: [START_DATE_DESC, POPULARITY_DESC, SCORE_DESC]");
   // AniList's nullable schema does not imply null-safe resolvers: explicitly
   // passing countryOfOrigin_in: null returns HTTP 500. Omit absent arguments and
   // their declarations, including every aliased Page in a genre union.

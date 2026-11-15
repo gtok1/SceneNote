@@ -15,15 +15,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useEpisodeAvailability } from "@/hooks/useAiringAvailability";
 import { confirmDestructive } from "@/utils/confirmDestructive";
-import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, resolveEpisodeChoiceMode, episodeChoiceInfoText, episodeChoiceSeasonNumber, isEpisodeProgressCompletedMode } from "@/utils/contentDetailView";
+import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, resolveEpisodeChoiceMode, episodeChoiceInfoText, episodeChoiceSeasonNumber, isEpisodeProgressCompletedMode, createEpisodeProgressDraft, progressDraftWatchedThrough } from "@/utils/contentDetailView";
 import type { LibraryListItem } from "@/types/library";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
-  createSeasonOffsetsByNumber,
   normalizeManualEpisodeInput,
   resolveEpisodeProgress,
-  toAbsoluteEpisodeNumber,
-  toSeasonRelativeEpisodeNumber,
+  selectLibraryProgressSeasons,
 } from "@/utils/episodeProgress";
 
 interface EpisodeProgressCardProps {
@@ -48,9 +46,9 @@ export function EpisodeProgressCard({
   highlighted = false,
 }: EpisodeProgressCardProps) {
   const completedMode = isEpisodeProgressCompletedMode({ statuses: item.statuses, totalEpisodes });
-  const seasons = item.season_episode_counts;
+  const seasons = selectLibraryProgressSeasons(item, item.season_episode_counts);
   const hasSeasonSelector = seasons.length > 1;
-  const initialDraft = useMemo(() => getInitialDraft(item, hasSeasonSelector), [item, hasSeasonSelector]);
+  const initialDraft = useMemo(() => createEpisodeProgressDraft(item), [item]);
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number | null>(initialDraft.seasonNumber);
   const [rawEpisodeNumber, setRawEpisodeNumber] = useState(String(initialDraft.episodeNumber));
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +62,7 @@ export function EpisodeProgressCard({
   const selectedSeason = seasons.find((season) => season.season_number === selectedSeasonNumber);
   const availability = useEpisodeAvailability(
     item.content_id, episodeChoiceSeasonNumber(selectedSeasonNumber, item.season_number, seasons),
-    !completedMode
+    !completedMode && seasons.length > 0
   );
   const choiceMode = resolveEpisodeChoiceMode({
     seasonEpisodeCount: selectedSeason?.episode_count,
@@ -78,20 +76,18 @@ export function EpisodeProgressCard({
     ?? totalEpisodes
     ?? MAX_MANUAL_EPISODE_NUMBER;
   const draftEpisodeNumber = rawEpisodeNumber === "" ? 0 : Number(rawEpisodeNumber);
-  const offsets = useMemo(() => createSeasonOffsetsByNumber(seasons), [seasons]);
-  const draftAbsolute = toAbsoluteEpisodeNumber(selectedSeasonNumber, draftEpisodeNumber, offsets) ?? 0;
+  const draftWatchedThrough = progressDraftWatchedThrough(item, { seasonNumber: selectedSeasonNumber, episodeNumber: draftEpisodeNumber });
   const draftProgress = resolveEpisodeProgress({
     contentType: item.content_type,
     episodeCount: totalEpisodes,
     watchedEpisodeCount: item.watched_episode_count,
     derivedWatchedThrough: null,
-    manualWatchedThrough: draftAbsolute,
+    manualWatchedThrough: draftWatchedThrough,
     completed: completedMode,
   });
-  const savedSeasonNumber = hasSeasonSelector ? item.manual_watched_season_number : null;
   const unchanged = item.manual_watched_episode_number !== null
-    && savedSeasonNumber === selectedSeasonNumber
-    && item.manual_watched_episode_number === draftEpisodeNumber;
+    && initialDraft.seasonNumber === selectedSeasonNumber
+    && initialDraft.episodeNumber === draftEpisodeNumber;
   const disabled = isSaving || isUnavailable;
   const saveDisabled = disabled || isOffline || unchanged || rawEpisodeNumber === "";
   const statusLabel = completedMode
@@ -441,31 +437,6 @@ function HorizontalChoiceRail({
       </Pressable>
     </View>
   );
-}
-
-function getInitialDraft(item: LibraryListItem, hasSeasonSelector: boolean) {
-  if (item.manual_watched_episode_number !== null) {
-    return {
-      seasonNumber: hasSeasonSelector ? item.manual_watched_season_number : null,
-      episodeNumber: item.manual_watched_episode_number,
-    };
-  }
-
-  if (item.progress_source === "episode_progress") {
-    const relative = toSeasonRelativeEpisodeNumber(
-      item.effective_watched_through,
-      item.season_episode_counts,
-    );
-    return {
-      seasonNumber: hasSeasonSelector ? relative.seasonNumber : null,
-      episodeNumber: relative.episodeNumber,
-    };
-  }
-
-  return {
-    seasonNumber: hasSeasonSelector ? (item.season_episode_counts[0]?.season_number ?? null) : null,
-    episodeNumber: 0,
-  };
 }
 
 function getErrorMessage(reason: string): string {

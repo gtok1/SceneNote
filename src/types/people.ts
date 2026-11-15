@@ -41,6 +41,9 @@ export interface PersonCredit {
 }
 
 export interface PersonDetail {
+  cache_policy?: "manual-v1";
+  from_cache?: boolean;
+  updated_at?: string;
   source: PersonSource;
   external_id: string;
   category: PersonCategory;

@@ -6,7 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { canDisplayWatchProviderAvailability, describeNoKrProviders, describeNoSeasonProviders, DISNEY_PLUS_HOME_URL, formatRegionNames, normalizeWatchProviderLink, pickInitialWatchCategory, WATCH_PROVIDER_REFRESH_MESSAGE } from "@/utils/watchProviderDisplay";
-import { isWatchProviderResponseCompatible } from "@/utils/watchProviderLookup";
+import { formatWatchProviderUpdatedAt, isWatchProviderResponseCompatible, watchProviderPersistenceNotice } from "@/utils/watchProviderLookup";
 import { useAppUIStore } from "@/stores/appUIStore";
 import {
   WATCH_PROVIDER_CATEGORIES,
@@ -20,6 +20,7 @@ import {
 interface WatchProviderListProps {
   response: WatchProvidersResponse;
   isLoading?: boolean;
+  isRefreshing?: boolean;
   error?: string | null;
   seasonNumber?: number | null;
   requireSeasonMatch?: boolean;
@@ -29,10 +30,14 @@ interface WatchProviderListProps {
 
 const emptyProviders: WatchProvidersByCategory = { flatrate: [], free: [], rent: [], buy: [] };
 
-export function WatchProviderList({ response, isLoading = false, error = null, seasonNumber = null, requireSeasonMatch = false, onRetry, laftelSearchUrl = null }: WatchProviderListProps) {
+export function WatchProviderList({ response, isLoading = false, isRefreshing = false, error = null, seasonNumber = null, requireSeasonMatch = false, onRetry, laftelSearchUrl = null }: WatchProviderListProps) {
   const addToast = useAppUIStore(state => state.addToast);
   const canShowAvailability = canDisplayWatchProviderAvailability({ response, seasonNumber, requireSeasonMatch });
   const responseCompatible = isWatchProviderResponseCompatible({ response, seasonNumber, requireSeasonMatch });
+  const hasLookupResult = response.lookup_version === 2 && responseCompatible;
+  const lastCheckedLabel = hasLookupResult ? formatWatchProviderUpdatedAt(response.updated_at) : null;
+  const persistenceNotice = hasLookupResult ? watchProviderPersistenceNotice(response) : null;
+  const pending = isLoading || isRefreshing;
   const providers = canShowAvailability ? response.providers : emptyProviders;
   const otherRegions = canShowAvailability ? response.other_regions ?? [] : [];
   const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategory(providers));
@@ -65,7 +70,7 @@ export function WatchProviderList({ response, isLoading = false, error = null, s
         <Text style={styles.region}>KR</Text>
       </View>
 
-      {!isLoading && !error && hasAnyProvider ? <View style={styles.tabs}>
+      {!isLoading && hasAnyProvider ? <View style={styles.tabs}>
         {WATCH_PROVIDER_CATEGORIES.map((category) => {
           const selected = selectedCategory === category;
           const count = providers[category].length;
@@ -88,19 +93,20 @@ export function WatchProviderList({ response, isLoading = false, error = null, s
       </View> : null}
 
       {isLoading ? <Text style={styles.emptyText}>시청 가능한 플랫폼 정보를 불러오는 중입니다.</Text> : null}
+      {isRefreshing ? <Text accessibilityLiveRegion="polite" style={styles.scopeHint}>새로운 시청 정보를 확인하고 있어요. 저장된 정보는 계속 볼 수 있어요.</Text> : null}
       {!isLoading && error ? <Text style={styles.emptyText}>{error}</Text> : null}
-      {!isLoading && !error && !hasAnyProvider ? (
+      {!isLoading && (!error || hasLookupResult) && !hasAnyProvider ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>{!responseCompatible ? WATCH_PROVIDER_REFRESH_MESSAGE : requireSeasonMatch ? describeNoSeasonProviders(seasonNumber) : describeNoKrProviders(otherRegions)}</Text>
           {requireSeasonMatch ? <Text style={styles.scopeHint}>다른 시즌의 제공처는 표시하지 않아요.</Text> : null}
           {requireSeasonMatch && otherRegions.length > 0 ? <Text style={styles.scopeHint}>{formatRegionNames(otherRegions)}에서 이 시즌의 제공 정보가 확인됐어요.</Text> : null}
         </View>
       ) : null}
-      {!isLoading && !error && hasAnyProvider && activeProviders.length === 0 ? (
+      {!isLoading && hasAnyProvider && activeProviders.length === 0 ? (
         <Text style={styles.emptyText}>이 이용 방식의 제공 정보를 아직 확인하지 못했어요.</Text>
       ) : null}
 
-      {!isLoading && !error && activeProviders.length > 0 ? (
+      {!isLoading && activeProviders.length > 0 ? (
         <View style={styles.list}>
           {activeProviders.map((provider) => (
             <Pressable
@@ -121,17 +127,22 @@ export function WatchProviderList({ response, isLoading = false, error = null, s
                 </Text>
                 <Text style={styles.providerType}>{provider.service_type_label}</Text>
               </View>
-              <Ionicons color="#9CA3AF" name="chevron-forward" size={20} />
+              <Ionicons color={colors.textSubtle} name="chevron-forward" size={20} />
             </Pressable>
           ))}
         </View>
       ) : null}
-      {!isLoading && onRetry && (error || !hasAnyProvider) ? <Pressable
+      {lastCheckedLabel ? <Text style={styles.scopeHint}>{lastCheckedLabel}</Text> : null}
+      {persistenceNotice ? <Text style={styles.scopeHint}>{persistenceNotice}</Text> : null}
+      {onRetry ? <Pressable
         accessibilityRole="button"
+        accessibilityLabel="시청 정보 다시 불러오기"
+        accessibilityState={{ disabled: pending, busy: pending }}
+        disabled={pending}
         onPress={onRetry}
-        style={({ pressed }) => [styles.retryButton, pressed ? styles.laftelPressed : null]}
-      ><Text style={styles.laftelLabel}>다시 확인하기</Text></Pressable> : null}
-      {!isLoading && !error && activeProviders.some(provider => normalizeWatchProviderLink(provider.link) === DISNEY_PLUS_HOME_URL) ? (
+        style={({ pressed }) => [styles.retryButton, pending || pressed ? styles.laftelPressed : null]}
+      ><Text style={styles.laftelLabel}>{pending ? "불러오는 중…" : "다시 불러오기"}</Text></Pressable> : null}
+      {!isLoading && activeProviders.some(provider => normalizeWatchProviderLink(provider.link) === DISNEY_PLUS_HOME_URL) ? (
         <Text style={styles.emptyText}>디즈니+ 홈으로 연결돼요. 로그인 후 작품명을 검색해 주세요.</Text>
       ) : null}
       {laftelSearchUrl ? (
@@ -166,7 +177,7 @@ const styles = StyleSheet.create({
   laftelTextBox: { flex: 1, minWidth: 0, gap: spacing.xs },
   laftelLabel: { ...typography.label, color: colors.primarySoft },
   section: {
-    backgroundColor: "#111827",
+    backgroundColor: colors.surfaceDark,
     borderRadius: radius.md,
     gap: spacing.md,
     padding: spacing.md
@@ -178,16 +189,14 @@ const styles = StyleSheet.create({
     gap: spacing.sm
   },
   title: {
-    color: "#F9FAFB",
-    fontSize: 16,
-    fontWeight: "900"
+    ...typography.headline,
+    color: colors.textOnDark
   },
   region: {
-    backgroundColor: "#1F2937",
+    ...typography.micro,
+    backgroundColor: colors.surfaceDarkRaised,
     borderRadius: radius.sm,
-    color: "#D1D5DB",
-    fontSize: 11,
-    fontWeight: "900",
+    color: colors.textOnDarkMuted,
     overflow: "hidden",
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs
@@ -200,8 +209,8 @@ const styles = StyleSheet.create({
   tab: {
     minHeight: 44,
     alignItems: "center",
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: colors.surfaceDarkRaised,
+    borderColor: colors.borderDark,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
@@ -210,29 +219,27 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm
   },
   tabSelected: {
-    backgroundColor: "#2563EB",
-    borderColor: "#60A5FA"
+    backgroundColor: colors.primary,
+    borderColor: colors.focusOnDark
   },
   tabText: {
-    color: "#D1D5DB",
-    fontSize: 13,
-    fontWeight: "800"
+    ...typography.label,
+    color: colors.textOnDarkMuted
   },
   tabTextSelected: {
-    color: "#FFFFFF"
+    color: colors.surface
   },
   tabCount: {
-    color: "#9CA3AF",
-    fontSize: 12,
-    fontWeight: "900"
+    ...typography.caption,
+    color: colors.textSubtle
   },
   list: {
     gap: spacing.sm
   },
   item: {
     alignItems: "center",
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: colors.surfaceDarkRaised,
+    borderColor: colors.borderDark,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
@@ -240,30 +247,26 @@ const styles = StyleSheet.create({
     padding: spacing.md
   },
   logo: {
-    backgroundColor: "#374151",
+    backgroundColor: colors.borderDark,
     borderRadius: radius.sm,
     height: 42,
     width: 42
   },
   providerTextBox: {
     flex: 1,
-    gap: 2
+    gap: spacing.xs
   },
   providerName: {
-    color: "#F9FAFB",
-    fontSize: 14,
-    fontWeight: "900"
+    ...typography.headline,
+    color: colors.textOnDark
   },
   providerType: {
-    color: "#9CA3AF",
-    fontSize: 12,
-    fontWeight: "700"
+    ...typography.caption,
+    color: colors.textSubtle
   },
   emptyText: {
-    color: "#D1D5DB",
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19
+    ...typography.label,
+    color: colors.textOnDarkMuted
   },
-  attribution: { fontSize: 11, color: "#9CA3AF" }
+  attribution: { ...typography.micro, color: colors.textSubtle }
 });

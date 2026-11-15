@@ -9,6 +9,7 @@ import {
   createRecommendationIdentity,
   createRecommendationIdentityAliases,
   createRecommendationSignals,
+  createRecommendationLibraryContext,
   getRecommendationBatch,
   rankCandidates,
   type RecommendationCandidate,
@@ -625,4 +626,98 @@ it("ranks provider-confirmed international TV as drama without treating unknown 
   for (const mediaType of ["all", "drama"] as const) {
     assert.deepEqual(rankCandidates(buildPreferenceProfile([]), works, { mediaType }).map((item) => item.external_id), ["international"]);
   }
+});
+
+// Frozen from the pre-optimization implementation, including tied matches and negative rows.
+const CPU_EQUIVALENCE_LIBRARY: RecommendationLibraryItem[] = [
+  {"content_id": "lib-1", "source_api": "tmdb", "source_id": "1", "content_type": "jdrama", "title_primary": "대표 작품", "title_original": "作品 A", "air_year": 2020, "genres": ["Drama", "Mystery"], "keywords": ["revenge", "school"], "people": ["Staff A", "  Staff B  "], "studios": ["Studio Alpha"], "status": "completed", "watch_count": 1, "episode_count": 12},
+  {"content_id": "lib-2", "source_api": "tmdb", "source_id": "2", "content_type": "anime", "title_primary": "둘째 작품", "title_original": "作品 B", "air_year": 2021, "genres": ["Drama", "Mystery"], "keywords": ["unique-key-1", "unique-key-2"], "people": ["staff a"], "studios": ["Studio Alpha"], "status": "recommended", "episode_count": 24},
+  {"content_id": "lib-3", "source_api": "tmdb", "source_id": "3", "content_type": "jdrama", "title_primary": "대표 작품", "air_year": 2022, "genres": ["Crime"], "keywords": ["revenge"], "people": ["Staff B"], "status": "not_recommended", "episode_count": 8}
+];
+const CPU_EQUIVALENCE_CANDIDATES: RecommendationCandidate[] = [
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 0", "title_original": "新作 0", "air_date": "2026-11-01", "air_year": 2026, "popularity": 10, "genres": [], "keywords": [], "people": ["Staff B", "Staff A"], "studios": [], "episode_count": 12, "external_id": "people"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 1", "title_original": "新作 1", "air_date": "2026-11-01", "air_year": 2026, "popularity": 11, "genres": [], "keywords": [], "people": [], "studios": ["studio alpha"], "episode_count": 12, "external_id": "studio"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 2", "title_original": "新作 2", "air_date": "2026-11-01", "air_year": 2026, "popularity": 12, "genres": [], "keywords": ["revenge"], "people": [], "studios": [], "episode_count": 12, "external_id": "themes"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 3", "title_original": "新作 3", "air_date": "2026-11-01", "air_year": 2026, "popularity": 13, "genres": [], "keywords": ["unique-key-1", "unique-key-2"], "people": [], "studios": [], "episode_count": 12, "external_id": "keywords"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 4", "title_original": "新作 4", "air_date": "2026-11-01", "air_year": 2026, "popularity": 14, "genres": ["Drama", "Mystery"], "keywords": [], "people": [], "studios": [], "episode_count": 12, "external_id": "genres"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 5", "title_original": "新作 5", "air_date": "2026-11-01", "air_year": 2026, "popularity": 15, "genres": ["Music"], "keywords": [], "people": [], "studios": [], "episode_count": 12, "external_id": "unknown"},
+  {"external_source": "tmdb", "content_type": "jdrama", "title_primary": "신작 6", "title_original": "新作 6", "air_date": "2026-11-01", "air_year": 2026, "popularity": 16, "genres": ["Drama", "drama"], "keywords": [], "people": [], "studios": [], "episode_count": 12, "external_id": "case-variants"}
+];
+const CPU_EQUIVALENCE_EXPECTED = [
+  {"external_id": "genres", "canonical_id": "work:jdrama:新作4:2026", "similarity_score": 0.9433, "candidate_score": {"popularity": 0.14, "quality": 0, "personalization": 0.9433, "explicit_feedback": 0, "exploration": 0.15, "final_score": 0.7369}, "reason": {"type": "exploration", "message": "기존 선택과 다른 방향으로 새로운 분위기의 최근 공개작을 섞어봤어요.", "source_content_ids": [], "signals": [], "confidence": "weak", "label": "취향 탐색"}, "signals": [{"type": "shared_genres", "values": ["Drama", "Mystery"], "library_titles": ["대표 작품", "둘째 작품"]}], "exploration": true, "evidence": "unknown", "themes": []},
+  {"external_id": "keywords", "canonical_id": "work:jdrama:新作3:2026", "similarity_score": 0.9099, "candidate_score": {"popularity": 0.13, "quality": 0, "personalization": 0.9099, "explicit_feedback": 0, "exploration": 0, "final_score": 0.7045}, "reason": {"type": "tag_match", "message": "‘둘째 작품’와 unique-key-1·unique-key-2 태그가 겹쳐요.", "source_content_ids": ["work:anime:作品b:2021"], "signals": [{"type": "tag_match", "key": "unique-key-1", "value": "unique-key-1", "contribution": 1}, {"type": "tag_match", "key": "unique-key-2", "value": "unique-key-2", "contribution": 1}], "confidence": "strong", "label": "추천 이유"}, "signals": [{"type": "shared_keywords", "values": ["unique-key-1", "unique-key-2"], "library_titles": ["둘째 작품"]}], "exploration": false, "evidence": "unknown", "themes": []},
+  {"external_id": "studio", "canonical_id": "work:jdrama:新作1:2026", "similarity_score": 0.8197, "candidate_score": {"popularity": 0.11, "quality": 0, "personalization": 0.8197, "explicit_feedback": 0, "exploration": 0.15, "final_score": 0.64}, "reason": {"type": "studio_match", "message": "‘대표 작품’와 studio alpha 제작 작품이에요.", "source_content_ids": ["work:jdrama:作品a:2020", "work:jdrama:대표작품:2022"], "signals": [{"type": "studio_match", "key": "studio alpha", "value": "studio alpha", "contribution": 1}], "confidence": "strong", "label": "추천 이유"}, "signals": [{"type": "shared_studios", "values": ["studio alpha"], "library_titles": ["대표 작품", "둘째 작품"]}], "exploration": true, "evidence": "unknown", "themes": []},
+  {"external_id": "themes", "canonical_id": "work:jdrama:新作2:2026", "similarity_score": 0.766, "candidate_score": {"popularity": 0.12, "quality": 0, "personalization": 0.766, "explicit_feedback": 0, "exploration": 0, "final_score": 0.5942}, "reason": {"type": "theme_match", "message": "‘대표 작품’와 복수극 테마가 겹쳐요.", "source_content_ids": ["work:jdrama:作品a:2020", "work:jdrama:대표작품:2022"], "signals": [{"type": "theme_match", "key": "narrative:revenge", "value": "복수극", "contribution": 1}], "confidence": "strong", "label": "추천 이유"}, "signals": [{"type": "shared_themes", "values": ["복수극"], "library_titles": ["대표 작품"]}], "exploration": false, "evidence": "positive", "themes": [{"family": "narrative", "key": "revenge", "label": "복수극", "centrality": 0.45, "source": "tmdb", "source_key": "revenge"}]},
+  {"external_id": "people", "canonical_id": "work:jdrama:新作0:2026", "similarity_score": 0.6114, "candidate_score": {"popularity": 0.1, "quality": 0, "personalization": 0.6114, "explicit_feedback": 0, "exploration": 0, "final_score": 0.4747}, "reason": {"type": "staff_match", "message": "‘대표 작품’와 Staff B·Staff A 참여진이 같아요.", "source_content_ids": ["work:jdrama:作品a:2020", "work:jdrama:대표작품:2022"], "signals": [{"type": "staff_match", "key": "staff b", "value": "Staff B", "contribution": 1}, {"type": "staff_match", "key": "staff a", "value": "Staff A", "contribution": 1}], "confidence": "strong", "label": "추천 이유"}, "signals": [{"type": "shared_people", "values": ["Staff B", "Staff A"], "library_titles": ["대표 작품", "둘째 작품"]}], "exploration": false, "evidence": "unknown", "themes": []},
+  {"external_id": "case-variants", "canonical_id": "work:jdrama:新作6:2026", "similarity_score": 0.15, "candidate_score": {"popularity": 0.16, "quality": 0, "personalization": 0.15, "explicit_feedback": 0, "exploration": 0.15, "final_score": 0.136}, "reason": {"type": "exploration", "message": "기존 선택과 다른 방향으로 새로운 분위기의 최근 공개작을 섞어봤어요.", "source_content_ids": [], "signals": [], "confidence": "weak", "label": "취향 탐색"}, "signals": [{"type": "shared_genres", "values": ["Drama", "drama"], "library_titles": ["대표 작품", "둘째 작품"]}], "exploration": true, "evidence": "unknown", "themes": []},
+  {"external_id": "unknown", "canonical_id": "work:jdrama:新作5:2026", "similarity_score": 0.1312, "candidate_score": {"popularity": 0.15, "quality": 0, "personalization": 0.1312, "explicit_feedback": 0, "exploration": 0.15, "final_score": 0.1207}, "reason": {"type": "exploration", "message": "기존 선택과 다른 방향으로 새로운 분위기의 최근 공개작을 섞어봤어요.", "source_content_ids": [], "signals": [], "confidence": "weak", "label": "취향 탐색"}, "signals": [{"type": "content_pattern", "values": [], "library_titles": []}], "exploration": true, "evidence": "unknown", "themes": []}
+];
+
+describe("prepared recommendation scoring", () => {
+  it("CPU-1 preserves complete reason, signals, scores, theme labels and stable ties", () => {
+    const profile = buildPreferenceProfile(CPU_EQUIVALENCE_LIBRARY);
+    const libraryContext = createRecommendationLibraryContext(CPU_EQUIVALENCE_LIBRARY);
+    const project = (items: ReturnType<typeof rankCandidates>) => items.map(item => ({
+      external_id: item.external_id, canonical_id: item.canonical_id, similarity_score: item.similarity_score,
+      candidate_score: item.candidate_score, reason: item.recommendation_reason_detail,
+      signals: item.recommendation_signals, exploration: item.is_exploration,
+      evidence: item.preference_evidence, themes: item.themes
+    }));
+    assert.deepEqual(project(rankCandidates(profile, CPU_EQUIVALENCE_CANDIDATES, {
+      libraryItems: CPU_EQUIVALENCE_LIBRARY, libraryContext
+    })), CPU_EQUIVALENCE_EXPECTED);
+    assert.deepEqual(project(rankCandidates(profile, CPU_EQUIVALENCE_CANDIDATES, {
+      libraryItems: CPU_EQUIVALENCE_LIBRARY
+    })), CPU_EQUIVALENCE_EXPECTED);
+  });
+
+  it("CPU-2 prepares library features once and does not reread them for 660/5000-row head ranking", () => {
+    for (const size of [660, 5000]) {
+      let themeReads = 0;
+      let featureReads = 0;
+      const plain = Array.from({ length: size }, (_, index) => libraryItem({
+        title_primary: `등록 작품 ${index}`, genres: ["Drama", "Mystery"],
+        keywords: ["revenge", "investigation"], people: [], studios: []
+      }));
+      const profile = buildPreferenceProfile(plain);
+      const observed = plain.map(item => ({ ...item,
+        get themes() { themeReads++; return item.themes; },
+        get genres() { featureReads++; return item.genres; },
+        get keywords() { featureReads++; return item.keywords; },
+        get people() { featureReads++; return item.people; },
+        get studios() { featureReads++; return item.studios; }
+      }));
+      const libraryContext = createRecommendationLibraryContext(observed);
+      assert.ok(themeReads <= size * 2 && featureReads <= size * 8);
+      const preparedReads = { themeReads, featureReads };
+      assert.deepEqual(buildPreferenceProfile(observed, [], libraryContext), profile);
+      for (let index = 0; index < 40; index++) rankCandidates(profile, [candidate(`cpu-${index}`, {
+        genres: ["Drama", "Mystery"], keywords: ["revenge", "investigation"]
+      })], { libraryItems: observed, libraryContext });
+      assert.deepEqual({ themeReads, featureReads }, preparedReads);
+    }
+  });
+
+  it("CPU-3 resolves candidate themes once per ranking while retaining the existing scoring result", () => {
+    const items = [libraryItem({ genres: ["Drama"], keywords: ["revenge"] })];
+    const profile = buildPreferenceProfile(items);
+    let reads = 0;
+    const input = candidate("theme-read", { keywords: ["revenge"] });
+    const observed = { ...input, get themes() { reads++; return input.themes; } };
+    const ranked = rankCandidates(profile, [observed], { libraryItems: items });
+    assert.ok(reads <= 2, `candidate themes read ${reads} times`);
+    assert.deepEqual(ranked, rankCandidates(profile, [input], { libraryItems: items }));
+  });
+
+  it("CPU-4 optional latest ordering puts the complete release day first and preserves the default", () => {
+    const profile = buildPreferenceProfile([libraryItem({ genres: ["Drama"] })]);
+    const items = [
+      candidate("older-popular", { air_date: "2026-11-01", popularity: 1000, genres: ["Drama"] }),
+      candidate("newer", { air_date: "2026-11-14", popularity: 0, genres: ["Music"] })
+    ];
+    assert.equal(rankCandidates(profile, items)[0]!.external_id, "older-popular");
+    assert.equal(rankCandidates(profile, items, { ordering: "latest" })[0]!.external_id, "newer");
+    const tied = items.map(item => ({ ...item, air_date: "2026-11-14" }));
+    assert.deepEqual(rankCandidates(profile, tied, { ordering: "latest" }), rankCandidates(profile, tied));
+  });
 });

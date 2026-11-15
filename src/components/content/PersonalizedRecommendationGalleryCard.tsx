@@ -4,15 +4,16 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { RecommendationCast } from "@/components/content/RecommendationCast";
-import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { PersonalizedRecommendation } from "@/services/personalizedRecommendations";
 import { createRecommendationPressGuard, RECOMMENDATION_ADD_HINT, RECOMMENDATION_COMPLETE_HINT } from "@/utils/recommendationAddFlow";
+import { createDisplayGenreNames } from "@/utils/genre";
 import type { RecommendationPresentation } from "@/utils/recommendationPresentation";
 
 interface PersonalizedRecommendationGalleryCardProps {
   result: PersonalizedRecommendation;
+  expanded?: boolean;
   presentation: RecommendationPresentation;
   onOpenQuickView: () => void;
   onAddToLibrary: () => void;
@@ -28,6 +29,7 @@ interface PersonalizedRecommendationGalleryCardProps {
 export const PersonalizedRecommendationGalleryCard = memo(
   function PersonalizedRecommendationGalleryCard({
     result,
+    expanded = false,
     presentation,
     onOpenQuickView,
     onAddToLibrary,
@@ -40,69 +42,68 @@ export const PersonalizedRecommendationGalleryCard = memo(
     onReduceTheme
   }: PersonalizedRecommendationGalleryCardProps) {
     const addPressGuard = useRef(createRecommendationPressGuard());
-    const reactionLabel = presentation.ratingLabel ?? presentation.popularityLabel;
+    const fullReactionLabel = presentation.ratingLabel ?? presentation.popularityLabel;
+    const reactionLabel = fullReactionLabel?.split(" · ")[0]?.replace(/^평점\s*/, "");
+    const genreLabel = expanded ? createDisplayGenreNames(result.genres ?? []).join(" · ") : "";
+    const reasonLabel = presentation.reasonLabel ?? "추천 이유";
 
     return (
-      <View style={styles.cell}>
-        <View style={styles.card}>
+      <View style={[styles.cell, expanded && styles.expandedCell]}>
+        <View testID="recommendation-gallery-card" style={styles.card}>
           <Pressable
-            accessibilityHint="빠른 보기 창을 엽니다"
+            accessibilityRole="button"
+            accessibilityHint="줄거리와 추천 이유, 출연진을 볼 수 있어요"
             accessibilityLabel={`${result.title_primary} 빠른 보기`}
             onPress={onOpenQuickView}
-            style={styles.mainButton}
+            style={({ pressed }) => [styles.mainButton, expanded && styles.expandedMain, pressed && styles.pressed]}
           >
-            <View style={styles.posterArea}>
-              <Image
-                accessibilityLabel={`${result.title_primary} 포스터`}
-                contentFit="cover"
-                source={result.poster_url ? { uri: result.poster_url } : null}
-                style={styles.poster}
-              />
-              {presentation.statusBadges.length > 0 ? (
-                <View style={styles.statusRow}>
-                  {presentation.statusBadges.map((badge) => (
-                    <Text key={badge} style={styles.statusBadge}>{badge}</Text>
-                  ))}
-                </View>
-              ) : null}
-              {reactionLabel ? <Text style={styles.reactionBadge}>{reactionLabel}</Text> : null}
-            </View>
-
-            <View style={styles.body}>
-              <Text numberOfLines={2} style={styles.title}>{result.title_primary}</Text>
-              <RecommendationCast result={result} />
-              {presentation.watchProviderLabel ? (
-                <View accessibilityLabel={`시청 가능: ${presentation.watchProviderLabel}`} style={styles.watchProviderRow}>
-                  <Ionicons name="tv-outline" size={12} color={colors.primary} />
-                  <Text numberOfLines={1} style={styles.watchProviderText}>{presentation.watchProviderLabel}</Text>
-                </View>
-              ) : null}
-              {presentation.hook ? (
-                <Text numberOfLines={2} style={styles.hook}>{presentation.hook}</Text>
-              ) : null}
-              {presentation.metadataLabel ? (
-                <Text numberOfLines={2} style={styles.meta}>{presentation.metadataLabel}</Text>
-              ) : null}
-              <GenreBadgeList genres={result.genres} maxVisible={3} />
-              {presentation.personalizedReason ? (
-                <View style={[styles.reasonBox, presentation.reasonConfidence === "weak" ? styles.reasonBoxWeak : null]}>
-                  <View style={styles.reasonLabelRow}>
-                    <Ionicons color={colors.primary} name="sparkles-outline" size={12} />
-                    <Text style={styles.reasonLabel}>{presentation.reasonLabel ?? "추천 이유"}</Text>
+            <View style={styles.summary}>
+              <View style={[styles.posterArea, expanded && styles.expandedPosterArea]}>
+                <Image
+                  accessibilityLabel={`${result.title_primary} 포스터`}
+                  contentFit="cover"
+                  source={result.poster_url ? { uri: result.poster_url } : null}
+                  style={[styles.poster, expanded && styles.expandedPoster]}
+                />
+                {presentation.statusBadges.length > 0 ? (
+                  <Text numberOfLines={1} style={styles.statusBadge}>{presentation.statusBadges.join(" · ")}</Text>
+                ) : null}
+                {reactionLabel ? <Text accessibilityLabel={fullReactionLabel ?? undefined} numberOfLines={1} style={styles.reactionBadge}>{reactionLabel}</Text> : null}
+              </View>
+              <View style={styles.body}>
+                <Text numberOfLines={2} style={styles.title}>{result.title_primary}</Text>
+                {presentation.metadataLabel ? (
+                  <Text numberOfLines={expanded ? 1 : 2} style={styles.meta}>{presentation.metadataLabel}</Text>
+                ) : null}
+                {presentation.watchProviderLabel ? (
+                  <View accessibilityLabel={`시청 가능: ${presentation.watchProviderLabel}`} style={styles.watchProviderRow}>
+                    <Ionicons name="tv-outline" size={12} color={colors.primary} />
+                    <Text numberOfLines={1} style={styles.watchProviderText}>{presentation.watchProviderLabel}</Text>
                   </View>
-                  <Text numberOfLines={2} style={styles.reasonText}>{presentation.personalizedReason}</Text>
-                </View>
-              ) : null}
+                ) : null}
+                {expanded ? <RecommendationCast compact result={result} /> : null}
+                {expanded && presentation.hook ? <Text numberOfLines={2} style={styles.overview}>{presentation.hook}</Text> : null}
+              </View>
             </View>
+            {expanded ? (
+              <>
+                {genreLabel ? <Text numberOfLines={1} accessibilityLabel={`장르 ${genreLabel}`} style={styles.genres}>{genreLabel}</Text> : null}
+                {presentation.personalizedReason ? (
+                  <Text numberOfLines={1} accessibilityLabel={`${reasonLabel} ${presentation.personalizedReason}`} style={styles.reason}>
+                    <Text style={styles.reasonLabel}>{reasonLabel} </Text>{presentation.personalizedReason}
+                  </Text>
+                ) : null}
+              </>
+            ) : <RecommendationCast compact result={result} />}
           </Pressable>
 
-          <View style={styles.footer}>
+          <View style={[styles.footer, expanded && styles.expandedFooter]}>
             <View style={styles.footerTopRow}>
               <View style={styles.feedbackActions}>
-                <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={styles.iconButton}>
+                <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
                   <Ionicons color={colors.textMuted} name="close-circle-outline" size={18} />
                 </Pressable>
-                <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={styles.iconButton}>
+                <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
                   <Ionicons color={colors.textMuted} name="git-compare-outline" size={18} />
                 </Pressable>
                 <Pressable
@@ -112,22 +113,13 @@ export const PersonalizedRecommendationGalleryCard = memo(
                   accessibilityState={{ disabled: !onReduceTheme }}
                   disabled={!onReduceTheme}
                   onPress={onReduceTheme}
-                  style={[styles.iconButton, !onReduceTheme ? styles.disabledThemeIcon : null]}
+                  style={({ pressed }) => [styles.iconButton, !onReduceTheme && styles.disabledThemeIcon, pressed && styles.pressed]}
                 >
                   <Ionicons color={colors.textMuted} name="options-outline" size={18} />
                 </Pressable>
               </View>
-              <Pressable
-                accessibilityLabel={`${result.title_primary} 빠른 보기`}
-                accessibilityRole="button"
-                onPress={onOpenQuickView}
-                style={styles.quickButton}
-              >
-                <Ionicons color={colors.text} name="eye-outline" size={14} />
-                <Text style={styles.quickText}>빠른 보기</Text>
-              </Pressable>
             </View>
-            <View style={styles.addActions}>
+            <View style={[styles.addActions, expanded && styles.expandedAddActions]}>
               <Pressable
                 accessibilityHint={RECOMMENDATION_ADD_HINT}
                 accessibilityLabel={`${result.title_primary} ${addLabel}`}
@@ -138,7 +130,7 @@ export const PersonalizedRecommendationGalleryCard = memo(
                 onPress={() => {
                   if (addPressGuard.current.consume(result.canonical_id) && !isAddDisabled) onAddToLibrary();
                 }}
-                style={[styles.addButton, isAddDisabled ? styles.disabled : null]}
+                style={({ pressed }) => [styles.addButton, isAddDisabled && styles.disabled, pressed && styles.pressed]}
               >
                 <Text numberOfLines={1} style={styles.addText}>{addLabel}</Text>
               </Pressable>
@@ -152,7 +144,7 @@ export const PersonalizedRecommendationGalleryCard = memo(
                 onPress={() => {
                   if (addPressGuard.current.consume(result.canonical_id) && !isAddDisabled) onMarkCompleted();
                 }}
-                style={[styles.completeButton, isAddDisabled ? styles.disabled : null]}
+                style={({ pressed }) => [styles.completeButton, isAddDisabled && styles.disabled, pressed && styles.pressed]}
               >
                 <Text numberOfLines={1} style={styles.completeText}>{completeLabel}</Text>
               </Pressable>
@@ -171,76 +163,65 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    flex: 1,
-    overflow: "hidden"
+    flex: 1
   },
-  mainButton: { flex: 1 },
-  posterArea: { position: "relative" },
-  poster: { backgroundColor: colors.surfaceMuted, height: 164, width: "100%" },
-  statusRow: { bottom: spacing.sm, flexDirection: "row", gap: spacing.xs, left: spacing.sm, position: "absolute" },
+  mainButton: { flex: 1, minWidth: 0, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  expandedCell: { paddingVertical: spacing.xs },
+  expandedMain: { gap: spacing.xs },
+  expandedPosterArea: { width: 96 },
+  expandedPoster: { width: 96, height: 144 },
+  expandedFooter: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  expandedAddActions: { flex: 1, minWidth: 120 },
+  overview: { ...typography.caption, color: colors.text, minWidth: 0 },
+  genres: { ...typography.micro, color: colors.primary, minWidth: 0 },
+  reason: { ...typography.caption, color: colors.textMuted, minWidth: 0 },
+  reasonLabel: { ...typography.micro, color: colors.primary },
+  summary: { alignItems: "flex-start", flexDirection: "row", gap: spacing.sm },
+  posterArea: { flexShrink: 0, position: "relative", width: 64 },
+  poster: { backgroundColor: colors.surfaceMuted, borderRadius: radius.sm, height: 96, width: 64 },
   statusBadge: {
-    backgroundColor: "rgba(23, 23, 23, 0.82)",
+    ...typography.micro,
+    backgroundColor: colors.surfaceDark,
     borderRadius: radius.sm,
     color: colors.surface,
-    fontSize: 10,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 6,
-    paddingVertical: 3
+    bottom: spacing.xs,
+    left: spacing.xs,
+    right: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    position: "absolute"
   },
   reactionBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    ...typography.micro,
+    backgroundColor: colors.surface,
     borderRadius: radius.sm,
     color: colors.text,
-    fontSize: 10,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingHorizontal: spacing.xs,
     position: "absolute",
-    right: spacing.sm,
-    top: spacing.sm
+    left: spacing.xs,
+    right: spacing.xs,
+    top: spacing.xs
   },
-  body: { gap: 6, minHeight: 196, padding: spacing.sm },
-  title: { color: colors.text, fontSize: 14, fontWeight: "900", lineHeight: 18, minHeight: 36 },
-  watchProviderRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  watchProviderText: { flexShrink: 1, fontSize: 12, fontWeight: "700", color: colors.primary },
-  hook: { color: colors.text, fontSize: 12, lineHeight: 17, minHeight: 34 },
-  meta: { color: colors.textMuted, fontSize: 11, fontWeight: "700", lineHeight: 15 },
-  reasonBox: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.md,
-    gap: 3,
-    marginTop: spacing.xs,
-    minHeight: 59,
-    padding: spacing.sm
-  },
-  reasonBoxWeak: { backgroundColor: colors.surfaceMuted },
-  reasonLabelRow: { alignItems: "center", flexDirection: "row", gap: spacing.xs },
-  reasonLabel: { color: colors.primary, fontSize: 10, fontWeight: "900" },
-  reasonText: { color: colors.text, fontSize: 11, fontWeight: "700", lineHeight: 15 },
+  body: { flex: 1, gap: spacing.xs, minWidth: 0 },
+  title: { ...typography.headline, color: colors.text, minHeight: typography.headline.lineHeight * 2 },
+  watchProviderRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, minWidth: 0 },
+  watchProviderText: { ...typography.caption, flexShrink: 1, color: colors.primary },
+  meta: { ...typography.micro, color: colors.textMuted, fontVariant: ["tabular-nums"] },
   footer: {
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: spacing.xs,
-    padding: spacing.sm
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
   },
-  footerTopRow: {
-    alignItems: "center",
-    columnGap: spacing.xs,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between"
-  },
+  footerTopRow: { alignItems: "center", flexDirection: "row", justifyContent: "center" },
   feedbackActions: { flexDirection: "row" },
-  quickButton: { minHeight: 44, alignItems: "center", flexDirection: "row", gap: 4, justifyContent: "center", marginLeft: "auto" },
-  iconButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
-  disabledThemeIcon: { opacity: 0.4 },
-  quickText: { color: colors.text, fontSize: 11, fontWeight: "800" },
+  iconButton: { alignItems: "center", minHeight: 44, justifyContent: "center", width: 44 },
+  disabledThemeIcon: { opacity: 0.5 },
   addActions: { flexDirection: "row", gap: spacing.xs, alignItems: "stretch" },
-  completeButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.sm },
+  completeButton: { flex: 1, minWidth: 0, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.xs },
   completeText: { ...typography.label, color: colors.primary },
-  addButton: { flex: 1, alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.sm },
+  addButton: { flex: 1, minWidth: 0, alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.xs },
   disabled: { opacity: 0.55 },
+  pressed: { opacity: 0.72 },
   addText: { ...typography.label, color: colors.surface }
 });

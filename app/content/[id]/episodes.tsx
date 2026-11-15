@@ -1,5 +1,5 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -14,6 +14,9 @@ import { colors, spacing, typography } from "@/constants/theme";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { MANUAL_PROGRESS_COPY, manualProgressSavedToast } from "@/utils/contentDetailView";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { selectLibraryProgressSeasons } from "@/utils/episodeProgress";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import {
   useEpisodeProgress,
   useEpisodes,
@@ -32,22 +35,25 @@ export default function EpisodesScreen() {
   const { gutter } = getHomeLayout(width);
   const [selectedSeasonId, setSeason] = useState<string | null>(null);
   const seasons = useSeasons(id);
-  const episodes = useEpisodes(id, selectedSeasonId);
   const progress = useEpisodeProgress(id);
   const library = useLibrary("all");
   const libraryItem = library.data?.find((item) => item.content_id === id && (libraryItemId ? item.library_item_id === libraryItemId : item.season_number === (requestedSeason ? Number(requestedSeason) : null)));
   const toggleProgress = useToggleEpisodeProgress(id);
   const updateManualProgress = useUpdateLibraryManualProgress();
-  const selectedSeason = seasons.data?.find((season) => season.id === selectedSeasonId);
+  const selectableSeasons = useMemo(() => libraryItem
+    ? selectLibraryProgressSeasons(libraryItem, seasons.data ?? [])
+    : seasons.data ?? [], [libraryItem, seasons.data]);
+  const selectedSeason = selectableSeasons.find((season) => season.id === selectedSeasonId);
+  const episodes = useEpisodes(id, selectedSeason?.id ?? null);
 
   useEffect(() => {
-    const validSelection = seasons.data?.some((season) => season.id === selectedSeasonId);
-    if (!validSelection) setSeason(seasons.data?.find(season => season.season_number === Number(requestedSeason ?? libraryItem?.season_number))?.id ?? seasons.data?.[0]?.id ?? null);
-  }, [seasons.data, selectedSeasonId, setSeason, requestedSeason, libraryItem?.season_number]);
+    const validSelection = selectableSeasons.some((season) => season.id === selectedSeasonId);
+    if (!validSelection) setSeason(selectableSeasons.find(season => season.season_number === Number(requestedSeason ?? libraryItem?.season_number))?.id ?? selectableSeasons[0]?.id ?? null);
+  }, [selectableSeasons, selectedSeasonId, setSeason, requestedSeason, libraryItem?.season_number]);
 
   if (seasons.isLoading) return <ScreenStateFrame><LoadingSkeleton variant="episode-row" /></ScreenStateFrame>;
-  if (seasons.isError) return <ScreenStateFrame><ErrorState message={seasons.error.message} onRetry={() => seasons.refetch()} /></ScreenStateFrame>;
-  if (!seasons.data?.length) {
+  if (seasons.isError) return <ScreenStateFrame><ErrorState message={userFacingErrorMessage(seasons.error, ERROR_COPY.seasonsLoad)} onRetry={() => seasons.refetch()} /></ScreenStateFrame>;
+  if (!selectableSeasons.length) {
     return (
       <ScreenStateFrame>
       <EmptyState
@@ -61,9 +67,9 @@ export default function EpisodesScreen() {
   return (
     <View style={[styles.container, { paddingBottom: spacing.xl + insets.bottom, paddingLeft: Math.max(gutter, insets.left) - spacing.lg, paddingRight: Math.max(gutter, insets.right) - spacing.lg }]}>
       <Text style={styles.notice}>{libraryItem?.title_primary ?? "에피소드"} · {selectedSeason ? `시즌 ${selectedSeason.season_number}` : "시즌 선택"}</Text>
-      <SeasonSelector seasons={seasons.data} selectedSeasonId={selectedSeasonId} onSelect={setSeason} />
+      <SeasonSelector seasons={selectableSeasons} selectedSeasonId={selectedSeasonId} onSelect={setSeason} />
       {episodes.isLoading ? <LoadingSkeleton variant="episode-row" /> : null}
-      {episodes.isError ? <ErrorState message={episodes.error.message} onRetry={() => episodes.refetch()} /> : null}
+      {episodes.isError ? <ErrorState message={userFacingErrorMessage(episodes.error, ERROR_COPY.episodesLoad)} onRetry={() => episodes.refetch()} /> : null}
       <EpisodeSelector
         episodes={episodes.data ?? []}
         {...(libraryItem ? { libraryItem } : {})}
@@ -86,7 +92,7 @@ export default function EpisodesScreen() {
           router.push({ pathname: "/content/[id]", params: { id, ...(libraryItemId ? { libraryItemId } : {}), ...(requestedSeason ? { season: requestedSeason } : {}), focus: "progress" } })
         }
         onSetManualProgress={(episode) => {
-          if (!libraryItem) return;
+          if (!libraryItem || !selectedSeason || episode.season_id !== selectedSeason.id) return;
           if (libraryItem.statuses.includes("completed")) {
             addToast(MANUAL_PROGRESS_COPY.completedNotice, "info");
             return;
@@ -108,9 +114,10 @@ export default function EpisodesScreen() {
             onError: () => addToast(MANUAL_PROGRESS_COPY.saveFailed, "error")
           });
         }}
-        onToggleProgress={(episode, watched) =>
-          toggleProgress.mutate({ episode, watched, ...(libraryItem ? { libraryItem } : {}) })
-        }
+        onToggleProgress={(episode, watched) => {
+          if (!selectedSeason || episode.season_id !== selectedSeason.id) return;
+          toggleProgress.mutate({ episode, watched, ...(libraryItem ? { libraryItem } : {}) });
+        }}
         progress={progress.data ?? []}
       />
     </View>

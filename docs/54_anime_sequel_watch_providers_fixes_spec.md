@@ -524,6 +524,8 @@ app/content/[id].tsx
 
 ## 16. 2026-10-20 후속 정정 — 템빨 누락과 구서버 캐시
 
+> 캐시 금지/1시간 TTL/Jotai 유지 범위는 2026-11-15 사용자의 DB 저장·수동 갱신 요청에 따라 [69](69_persistent_public_metadata_cache_fixes_spec.md)로 대체한다. 아래 시즌 정확성·구응답 차단·배포 승인 제한은 유지한다.
+
 ### 사용자 신고와 원인
 
 사용자가 넷플릭스에서 볼 수 있는 `템빨 ~아이템의 힘~`의 누락을 신고했다. [넷플릭스 공식 작품 페이지](https://www.netflix.com/kr/title/82948047)는 조회 당시 3개 에피소드를 표시했다. AniList 212888은 선공개일 `2026-09-27`, TMDB 324502의 시즌 1은 TV 방영일 `2026-10-02`를 제공한다. [작품 공식 사이트](https://tempal-anime.net/)도 두 날짜를 구분한다. 정확한 `/tv/324502/season/1/watch/providers`의 KR 응답에는 Netflix·Watcha·TVING이 있으므로 작품별 제공처 하드코딩이나 시리즈 대체가 필요하지 않다.

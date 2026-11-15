@@ -1,9 +1,11 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
-import { requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+import { createPersistentMetadataStore, type PersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
+import { getStoredTmdbPersonProfile, PERSON_PROVIDER_RECHECK_MS } from "../_shared/personProviderStore.ts";
 import { inferTmdbTvContentType } from "../_shared/tmdbClassification.ts";
 import { isEligiblePersonCredit, selectPersonCastCredits } from "../_shared/personCredits.ts";
 import { hasHangul, hasJapaneseScript, resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
-import { anilistKoreanNameInput, tmdbKoreanNameInput, type TmdbPersonNameDetail } from "../_shared/personNames.ts";
+import { anilistKoreanNameInput, tmdbKoreanNameInput } from "../_shared/personNames.ts";
 
 type ContentType = "anime" | "kdrama" | "jdrama" | "movie" | "other";
 type PersonCategory = "actor" | "voice_actor";
@@ -88,6 +90,7 @@ Deno.serve(async (req: Request) => {
 async function searchTmdbPeople(query: string): Promise<{ people: PersonResult[]; results: SearchResult[] }> {
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
+  const store = createPersistentMetadataStore(createAdminClient());
 
   const url = new URL("https://api.themoviedb.org/3/search/person");
   url.searchParams.set("query", query);
@@ -124,7 +127,7 @@ async function searchTmdbPeople(query: string): Promise<{ people: PersonResult[]
     .filter((person) => person.known_for_department === "Acting" || (person.known_for?.length ?? 0) > 0)
     .slice(0, 6);
 
-  const koreanNames = await Promise.all(candidatePeople.map((person) => resolveTmdbKoreanName(person, apiKey)));
+  const koreanNames = await Promise.all(candidatePeople.map((person) => resolveTmdbKoreanName(person, apiKey, store)));
 
   const people = candidatePeople.map((person, index) => ({
       source: "tmdb" as const,
@@ -139,7 +142,7 @@ async function searchTmdbPeople(query: string): Promise<{ people: PersonResult[]
     }));
 
   const creditResults = await Promise.allSettled(
-    candidatePeople.slice(0, 3).map((person) => fetchTmdbPersonCredits(String(person.id), apiKey))
+    candidatePeople.slice(0, 3).map((person) => fetchTmdbPersonCredits(String(person.id), apiKey, store))
   );
 
   const results = [
@@ -191,7 +194,8 @@ function koreanNameFields(resolved: ResolvedKoreanName): Pick<PersonResult, "nam
 // 조회 실패는 이름을 못 찾은 것으로 취급하고 검색은 계속한다.
 async function resolveTmdbKoreanName(
   person: { id: number; name?: string | null; original_name?: string | null },
-  apiKey: string
+  apiKey: string,
+  store: PersistentMetadataStore
 ): Promise<ResolvedKoreanName> {
   if (hasHangul(person.name)) {
     return resolveKoreanName({ nativeName: person.original_name?.trim() || null, localizedName: person.name?.trim() || null });
@@ -199,30 +203,19 @@ async function resolveTmdbKoreanName(
   if (!hasJapaneseScript(person.name) && !hasJapaneseScript(person.original_name)) return null;
 
   try {
-    const url = new URL(`https://api.themoviedb.org/3/person/${person.id}`);
-    url.searchParams.set("language", "ko-KR");
-    url.searchParams.set("append_to_response", "translations");
-    const headers = applyTmdbAuth(url, apiKey);
-    const detail = await fetchJson<TmdbPersonNameDetail>(url.toString(), { headers });
+    const detail = await getStoredTmdbPersonProfile(String(person.id), {
+      store, apiKey, recheckAfterMs: PERSON_PROVIDER_RECHECK_MS
+    });
     return resolveKoreanName(tmdbKoreanNameInput(detail));
   } catch {
     return null;
   }
 }
 
-async function fetchTmdbPersonCredits(personId: string, apiKey: string): Promise<TmdbCreditItem[]> {
-  const url = new URL(`https://api.themoviedb.org/3/person/${personId}/combined_credits`);
-  url.searchParams.set("language", "ko-KR");
-  const headers = applyTmdbAuth(url, apiKey);
-  const personUrl = new URL(`https://api.themoviedb.org/3/person/${personId}`);
-  personUrl.searchParams.set("language", "ko-KR");
-  const personHeaders = applyTmdbAuth(personUrl, apiKey);
-  const [payload, person] = await Promise.all([
-    fetchJson<{ cast?: TmdbCreditItem[] }>(url.toString(), { headers }),
-    fetchJson<{ name?: string | null }>(personUrl.toString(), { headers: personHeaders }).catch(() => ({ name: null }))
-  ]);
-  const matchedPersonName = person.name?.trim() || null;
-  return selectPersonCastCredits(payload.cast ?? []).map((item) => ({
+async function fetchTmdbPersonCredits(personId: string, apiKey: string, store: PersistentMetadataStore): Promise<TmdbCreditItem[]> {
+  const person = await getStoredTmdbPersonProfile(personId, { store, apiKey, recheckAfterMs: PERSON_PROVIDER_RECHECK_MS });
+  const matchedPersonName = person.name.trim() || null;
+  return selectPersonCastCredits(person.combined_credits.cast).map((item) => ({
     ...item,
     matched_person_name: matchedPersonName
   }));

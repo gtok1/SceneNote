@@ -38,6 +38,15 @@ export const SEARCH_GOLDEN_SHORT_SPACING_CASES: readonly GoldenExpectation[] = [
   { query: "선재업", mustInclude: [{ externalId: "230923" }] },
 ];
 
+export const SEARCH_GOLDEN_RELAXED_WORD_CASES: readonly GoldenExpectation[] = [
+  { query: "추방당한 치트", mustInclude: [{ externalId: "313346" }] },
+  { query: "추방당한 치트 부여 마술사", mustInclude: [{ externalId: "313346" }] },
+  { query: "추방당한 치트 부여 마술사는 자유로운 세컨드 라이프를 구가한다", mustInclude: [{ externalId: "313346" }] },
+  { query: "자유로운 세컨드 라이프", mustInclude: [{ externalId: "313346" }] },
+  { query: "추방당한 마술사는", mustInclude: [{ externalId: "313346" }] },
+  { query: "파티에서 추방된 치유사", mustInclude: [{ externalId: "244625" }] },
+];
+
 export function evaluateGoldenCase(
   results: readonly Pick<SearchResult, "external_id" | "season_number" | "content_type" | "title_primary" | "series_title">[],
   expectation: GoldenExpectation

@@ -39,6 +39,8 @@
   - 검색·추천·일괄 등록 등 어느 경로로 완료가 되었든, 기존 데이터든 같은 규칙이 적용된다.
 - 전체 화수를 모르면 지금과 같다(계산할 수 없음).
 
+**2026-10-26 범위 확정:** 아래 `episodeCount`와 유효 진행은 등록 범위를 따른다. 시즌 항목은 해당 시즌, 작품 전체 항목은 전체 시즌이다. 저장된 수동 위치 보존 원칙은 유지하며 구체적인 계약은 [17 §11](17_season_library_tracking_spec.md)을 따른다.
+
 ### D-2. 진행을 계산하는 세 곳이 같은 규칙을 쓴다
 - 다음 세 곳이 같은 순수 함수 `resolveLibraryItemProgress(item, statuses)`를 쓴다.
   - 서비스 매핑(`src/services/library.ts:535`)
@@ -227,6 +229,6 @@ export function isEpisodeProgressCompletedMode(input: { statuses: readonly Watch
 |------|------|
 | 완료 해제 시 본 횟수 0(`toggleStatus`의 `completedRemoved`) | 재시청("보는 중")에서 본 횟수를 잃는 문제가 있지만, 실수로 누른 완료를 되돌리는 경우와 구분할 수 없어 사용자 결정이 필요하다(D-7) |
 | 에피소드 화면 → "시청 위치 설정"이 상세 화면을 하나 더 쌓는 문제(`router.push`) | 스택 이동 규칙(`docs/31` U-4)과 함께 별도로 다룬다 |
-| 시즌 단위 등록 항목의 전체 화수 기준(콘텐츠 전체 vs 시즌) | `docs/17` 범위 |
+| 시즌 단위 진행 범위 | 2026-10-26 [docs/17 §11](17_season_library_tracking_spec.md)에서 확정·구현. 이 표의 기존 유보는 해소됨 |
 | 홈·라이브러리 카드 디자인 | 진행 값만 바뀌고 모양은 그대로 |
 | DB·서버 | 계산 규칙만 바뀐다(D-1) |

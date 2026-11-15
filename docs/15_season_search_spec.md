@@ -95,6 +95,8 @@ matched_via?: "direct" | "season_relation";
 - `matched_via === "season_relation"`인 결과를 **무조건 통과**시키고,
 - 그 외에는 기존 `title_primary`/`title_original`에 더해 `match_titles`까지 검사한다.
 
+> **정정(2026-11-08).** 무조건 통과는 시즌 검색(기본 작품이 N기로 대체되어 목록에 없음)을 위한 규칙이다. 시즌 펼치기처럼 기본 작품이 같은 목록에 있으면 그 판정을 따르도록 `docs/67_anilist_season_card_leak_fixes_spec.md`에서 좁힌다(무관한 작품의 2기만 남는 누수 정정).
+
 `match_titles`에는 base의 한국어 synonym에 시즌 토큰을 붙인 문자열(`촌구석 아저씨, 검성이 되다 2기`)도 넣어 사용자의 원 질의와 직접 일치하게 한다.
 
 ### D-4. TMDB — 시즌 인지

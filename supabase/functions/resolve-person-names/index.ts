@@ -1,11 +1,11 @@
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
-import { requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+import { createPersistentMetadataStore, type PersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
+import { getStoredAniListStaffName, getStoredTmdbPersonProfile, PERSON_PROVIDER_RECHECK_MS } from "../_shared/personProviderStore.ts";
 import { resolveKoreanName, type KoreanNameSource } from "../_shared/japaneseReading.ts";
 import {
   anilistKoreanNameInput,
-  tmdbKoreanNameInput,
-  type AniListStaffName,
-  type TmdbPersonNameDetail
+  tmdbKoreanNameInput
 } from "../_shared/personNames.ts";
 
 type PersonSource = "tmdb" | "anilist";
@@ -43,7 +43,12 @@ Deno.serve(async (req: Request) => {
   const people = parsePeople(body.value?.people);
   if (!people) return jsonError(400, "INVALID_REQUEST", `people must be 1-${MAX_PEOPLE} valid { source, external_id } items`);
 
-  return json({ results: await mapWithConcurrency(people, CONCURRENCY, resolvePerson) });
+  try {
+    const store = createPersistentMetadataStore(createAdminClient());
+    return json({ results: await mapWithConcurrency(people, CONCURRENCY, person => resolvePerson(person, store)) });
+  } catch {
+    return jsonError(503, "PERSON_METADATA_UNAVAILABLE", "Unable to read person metadata");
+  }
 });
 
 function parsePeople(value: unknown): PersonRef[] | null {
@@ -77,55 +82,28 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, task: (item: 
   return results;
 }
 
-async function resolvePerson(person: PersonRef): Promise<ResolvedPerson> {
+async function resolvePerson(person: PersonRef, store: PersistentMetadataStore): Promise<ResolvedPerson> {
   try {
     const resolved = person.source === "tmdb"
-      ? await resolveTmdb(person.external_id)
-      : await resolveAniList(person.external_id);
+      ? await resolveTmdb(person.external_id, store)
+      : await resolveAniList(person.external_id, store);
     return { ...person, name_ko: resolved?.nameKo ?? null, name_ko_source: resolved?.source ?? null };
   } catch {
     return { ...person, name_ko: null, name_ko_source: null };
   }
 }
 
-async function resolveTmdb(id: string) {
-  const apiKey = Deno.env.get("TMDB_API_KEY");
-  if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
-
-  const url = new URL(`https://api.themoviedb.org/3/person/${id}`);
-  url.searchParams.set("language", "ko-KR");
-  url.searchParams.set("append_to_response", "translations");
-  const headers = applyTmdbAuth(url, apiKey);
-  const detail = await fetchJson<TmdbPersonNameDetail>(url.toString(), { headers });
+async function resolveTmdb(id: string, store: PersistentMetadataStore) {
+  const detail = await getStoredTmdbPersonProfile(id, {
+    store, apiKey: Deno.env.get("TMDB_API_KEY") ?? null, recheckAfterMs: PERSON_PROVIDER_RECHECK_MS
+  });
   return resolveKoreanName(tmdbKoreanNameInput(detail));
 }
 
-async function resolveAniList(id: string) {
-  const endpoint = Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co";
-  const payload = await fetchJson<{
-    data?: { Staff?: { name?: AniListStaffName | null } | null };
-    errors?: { message?: string }[];
-  }>(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query: "query ($id: Int) { Staff(id: $id) { name { first last full native alternative } } }",
-      variables: { id: Number.parseInt(id, 10) }
-    })
+async function resolveAniList(id: string, store: PersistentMetadataStore) {
+  const name = await getStoredAniListStaffName(id, {
+    store, endpoint: Deno.env.get("ANILIST_API_URL") ?? "https://graphql.anilist.co",
+    recheckAfterMs: PERSON_PROVIDER_RECHECK_MS
   });
-
-  if (payload.errors?.length) throw new Error("AniList error");
-  return resolveKoreanName(anilistKoreanNameInput(payload.data?.Staff?.name));
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as T;
-}
-
-function applyTmdbAuth(url: URL, apiKey: string): HeadersInit {
-  if (apiKey.startsWith("eyJ")) return { Authorization: `Bearer ${apiKey}` };
-  url.searchParams.set("api_key", apiKey);
-  return {};
+  return resolveKoreanName(anilistKoreanNameInput(name));
 }

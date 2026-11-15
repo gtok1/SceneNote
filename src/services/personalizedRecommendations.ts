@@ -13,6 +13,7 @@ import {
   type RecommendationSignal
 } from "../../supabase/functions/_shared/recommendationEngine";
 import { createPersonalizedRecommendationFeedbackBody } from "./personalizedRecommendationFeedback";
+import { assertLatestRecommendationMode, createLatestRecommendationBody, createRecommendationRequestError } from "@/utils/latestRecommendationPolicy";
 
 export type RecommendationProfileMode = "cold_start" | "light" | "personalized";
 
@@ -81,6 +82,7 @@ export interface PersonalizedRecommendationsRequest extends DiscoveryFilterInput
 }
 
 interface PersonalizedRecommendationsApiResponse {
+  discovery_mode?: unknown;
   diagnostics?: unknown;
   applied_filters?: unknown;
   items?: PersonalizedRecommendation[];
@@ -202,13 +204,13 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
 }): Promise<PersonalizedRecommendationPage> {
   const startedAt = Date.now();
   const requested = normalizeDiscoveryFilters(input);
-  const body: Record<string, unknown> = {
+  const body: Record<string, unknown> = createLatestRecommendationBody({
     action: "recommend",
     limit: Math.min(12, Math.max(1, Math.floor(input.limit))),
     media_type: input.mediaType,
     ...requested,
     exclude_ids: Array.from(new Set(input.excludeIds))
-  };
+  });
   if (input.cursor) body.cursor = input.cursor;
 
   const { data, error } = await supabase.functions.invoke<PersonalizedRecommendationsApiResponse>(
@@ -218,14 +220,20 @@ async function fetchPersonalizedRecommendationPage(input: DiscoveryFilterInput &
   if (error) {
     const response = error.context instanceof Response ? error.context : null;
     const status = response?.status ?? null;
+    let code: unknown = null;
+    try {
+      const payload: unknown = response ? await response.clone().json() : null;
+      code = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
+    } catch {
+      // A consumed or non-JSON error body must still become the fixed Korean request error.
+    }
     if (__DEV__ && response) {
-      const payload: unknown = await response.clone().json().catch(() => null);
-      const code = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
-      const knownCodes = ["ALL_PROVIDERS_FAILED", "RECOMMENDATION_FAILED", "INVALID_CURSOR", "LIBRARY_QUERY_FAILED", "FEEDBACK_QUERY_FAILED", "UNAUTHORIZED", "INVALID_REQUEST"];
+      const knownCodes = ["ALL_PROVIDERS_FAILED", "RECOMMENDATION_FAILED", "INVALID_CURSOR", "INVALID_LATEST_RECOMMENDATION_CURSOR", "LIBRARY_QUERY_FAILED", "FEEDBACK_QUERY_FAILED", "UNAUTHORIZED", "INVALID_REQUEST"];
       console.warn("recommendation diagnostic", JSON.stringify({action:"recommend", status, elapsedMs: Date.now() - startedAt, code:typeof code === "string" && knownCodes.includes(code) ? code : "UNKNOWN"}));
     }
-    throw new Error(status ? `추천 서버에 연결하지 못했습니다 (${status}). 다시 시도해 주세요.` : "추천 연결이 끊겼거나 응답 시간이 초과되었습니다. 다시 시도해 주세요.");
+    throw createRecommendationRequestError(status, code);
   }
+  assertLatestRecommendationMode(data?.discovery_mode);
   if (!data || !Array.isArray(data.items)) {
     throw new Error("개인화 추천 응답이 올바르지 않습니다");
   }

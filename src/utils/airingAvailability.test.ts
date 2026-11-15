@@ -111,3 +111,30 @@ describe("watching availability badge", () => {
     ], new Date("2026-09-23T15:00:00Z")), { episodeNumber: 13, airDate: "2026-09-26" });
   });
 });
+
+
+it("season progress does not subtract the previous season again for release and schedule badges", () => {
+  const item = {
+    ...base, source_api: "tmdb" as const, season_number: 2,
+    season_episode_counts: [{ season_number: 1, episode_count: 10 }, { season_number: 2, episode_count: 10 }],
+    effective_watched_through: 3, next_episode_number: 4
+  };
+  assert.equal(releasedUnwatchedCount(item, 2, 5), 2);
+  assert.equal(upcomingEpisodeDate(item, 2, { upcomingEpisodeNumber: 4, nextAirDate: "2026-10-28" }), "2026-10-28");
+  assert.equal(upcomingEpisodeDate(item, 2, { upcomingEpisodeNumber: 1, nextAirDate: "2026-10-28" }), null);
+});
+
+it("AniList third-season registration checks its standalone actual season one", () => {
+  const item = {
+    ...base, source_api: "anilist" as const, season_number: 3,
+    season_episode_counts: [{ season_number: 1, episode_count: 12 }],
+    effective_watched_through: 3, next_episode_number: 4
+  };
+  assert.equal(seasonToCheck(item), 1);
+  assert.equal(releasedUnwatchedCount(item, 1, 5), 2);
+  assert.equal(upcomingEpisodeDate(item, 1, { upcomingEpisodeNumber: 4, nextAirDate: "2026-10-28" }), "2026-10-28");
+});
+
+it("a missing registered TMDB season does not borrow another season's availability", () => {
+  assert.equal(seasonToCheck({ ...base, source_api: "tmdb", season_number: 3 }), null);
+});

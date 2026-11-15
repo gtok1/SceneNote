@@ -43,6 +43,26 @@ describe("matchLibraryItemForSeason", () => {
 });
 
 describe("resolveContentLibraryItem", () => {
+  it("MCACHE-1 resolves registration added after an external detail without a content id was cached", () => {
+    const registered = { ...row("uuid-123", 3, "s3"), source_api: "tmdb", source_id: "123", content_type: "jdrama" } as LibraryListItem;
+    const params = { contentId: "tmdb:123", externalSource: "tmdb" as const, externalId: "123", mediaType: "tv" as const, seasonNumber: 3 };
+    assert.equal(resolveContentLibraryItem([], params).kind, "none");
+    const match = resolveContentLibraryItem([registered], params);
+    assert.equal(match.kind, "season");
+    assert.equal(match.kind === "season" ? match.item.content_id : null, "uuid-123");
+    assert.equal(resolveContentLibraryItem([], params).kind, "none");
+  });
+
+  it("MCACHE-2 keeps provider, movie/TV and season identities separate when resolving cached details", () => {
+    const registered = { ...row("uuid-123", 3, "s3"), source_api: "tmdb", source_id: "123", content_type: "jdrama" } as LibraryListItem;
+    const params = { contentId: "tmdb:123", externalSource: "tmdb" as const, externalId: "123", mediaType: "tv" as const, seasonNumber: 3 };
+    assert.equal(resolveContentLibraryItem([registered], { ...params, externalSource: "anilist" }).kind, "none");
+    assert.equal(resolveContentLibraryItem([registered], { ...params, mediaType: "movie" }).kind, "none");
+    assert.equal(resolveContentLibraryItem([registered], { ...params, externalId: "124" }).kind, "none");
+    assert.equal(resolveContentLibraryItem([registered], { ...params, seasonNumber: 2 }).kind, "none");
+    assert.equal(resolveContentLibraryItem([registered], params).kind, "season");
+  });
+
   it("T-4 prefers the explicit library item", () => {
     const match = resolveContentLibraryItem([row("c1", 2, "a"), row("c1", 3, "b")],
       { contentId: "c1", libraryItemId: "b" });

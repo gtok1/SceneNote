@@ -1,4 +1,5 @@
 import { KeyboardScreen } from "@/components/common/KeyboardScreen";
+import { PasswordInput } from "@/components/common/PasswordInput";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,11 +49,12 @@ export default function SignInScreen() {
                 autoComplete="email"
                 returnKeyType="next"
                 onSubmitEditing={() => setFocus("password")}
-                                autoCapitalize="none"
+                autoCapitalize="none"
+                autoCorrect={false}
                 keyboardType="email-address"
                 onBlur={field.onBlur}
                 onChangeText={field.onChange}
-                placeholder="이메일"
+                placeholder="name@example.com"
                 style={styles.input}
                 value={field.value}
               />
@@ -66,17 +68,16 @@ export default function SignInScreen() {
           render={({ field, fieldState }) => (
             <View style={styles.field}>
               <Text style={{ color: colors.text, fontWeight: "700" }}>비밀번호</Text>
-              <TextInput
-                ref={field.ref}
+              <PasswordInput
+                inputRef={field.ref}
                 accessibilityLabel="비밀번호"
                 aria-invalid={Boolean(fieldState.error)}
                 autoComplete="current-password"
                 returnKeyType="done"
                 onSubmitEditing={submit}
-                                onBlur={field.onBlur}
+                onBlur={field.onBlur}
                 onChangeText={field.onChange}
                 placeholder="비밀번호"
-                secureTextEntry
                 style={styles.input}
                 value={field.value}
               />
@@ -87,9 +88,15 @@ export default function SignInScreen() {
         {signIn.error ? <Text accessibilityRole="alert" style={styles.error}>{signIn.error.message}</Text> : null}
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ disabled: formState.isSubmitting || signIn.isPending, busy: formState.isSubmitting || signIn.isPending }}
+          aria-busy={formState.isSubmitting || signIn.isPending}
           disabled={formState.isSubmitting || signIn.isPending}
           onPress={submit}
-          style={styles.primaryButton}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.pressedButton,
+            formState.isSubmitting || signIn.isPending ? styles.disabledButton : null
+          ]}
         >
           <Text style={styles.primaryText}>{signIn.isPending ? "로그인 중" : "로그인"}</Text>
         </Pressable>
@@ -146,6 +153,12 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontSize: 16,
     fontWeight: "800"
+  },
+  pressedButton: {
+    opacity: 0.72
+  },
+  disabledButton: {
+    opacity: 0.65
   },
   link: {
     minHeight: 48,

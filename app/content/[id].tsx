@@ -1,5 +1,5 @@
 import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
-import { KeyboardAvoidingView, Platform, useWindowDimensions, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, useWindowDimensions, ScrollView, View } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,7 +17,7 @@ import { WatchProviderList } from "@/components/content/WatchProviderList";
 import { createLaftelSearchLink } from "@/utils/watchProviderDisplay";
 import { resolveWatchProviderMediaType, supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
 import { normalizeWatchStatuses } from "@/constants/status";
-import { colors, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useExternalContentDetail } from "@/hooks/useContentSearch";
 import {
   useAddToLibrary,
@@ -29,7 +29,7 @@ import {
   useUpdateLibraryWatchCount,
   useUpdateLibraryStatuses
 } from "@/hooks/useLibrary";
-import { useAddFavoritePerson, useFavoritePeople } from "@/hooks/usePeople";
+import { useFavoritePeople } from "@/hooks/usePeople";
 import { useWatchProviders } from "@/hooks/useWatchProviders";
 import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
@@ -38,14 +38,14 @@ import { resolveCastMemberPerson } from "@/utils/peopleScreen";
 import { createCrewSummary } from "@/utils/contentCrew";
 import { createAirDateLabel, createEpisodeCountLabel } from "@/utils/contentMetaDisplay";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
-import { createSeasonOffsetsByNumber, toAbsoluteEpisodeNumber } from "@/utils/episodeProgress";
 import { resolveContentLibraryItem } from "@/utils/seasonLibraryMatch";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
-import { getContentDetailLayout, createContentDetailMetaItems, createWatchStatusControlModel, contentDetailSections, type ContentDetailSection } from "@/utils/contentDetailView";
+import { getContentDetailLayout, createContentDetailMetaItems, createWatchStatusControlModel, contentDetailSections, progressDraftWatchedThrough, progressEpisodeCount, type ContentDetailSection } from "@/utils/contentDetailView";
 import { createNextWatchStatuses, areSameWatchStatuses } from "@/utils/watchStatusSelection";
 import { createLibraryDeleteConfirmCopy, LIBRARY_DELETE_ZONE_COPY } from "@/utils/libraryFeedbackCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { ERROR_COPY } from "@/utils/errorCopy";
 import { confirmDestructive } from "@/utils/confirmDestructive";
 import { ContentDetailHero } from "@/components/content/ContentDetailHero";
 import { WatchStatusControl } from "@/components/content/WatchStatusControl";
@@ -109,7 +109,6 @@ export default function ContentDetailScreen() {
   const addToLibrary = useAddToLibrary();
   const updateStatuses = useUpdateLibraryStatuses();
   const deleteLibraryItem = useDeleteLibraryItem();
-  const addFavoritePerson = useAddFavoritePerson();
   const favoritePeople = useFavoritePeople();
 
   const dbContent = content.data;
@@ -125,7 +124,10 @@ export default function ContentDetailScreen() {
   const libraryMatch = resolveContentLibraryItem(library.data ?? [], {
     contentId: resolvedContentId,
     libraryItemId: params.libraryItemId ?? null,
-    seasonNumber: requestedSeason
+    seasonNumber: requestedSeason,
+    externalSource: params.source ?? dbDetailSource,
+    externalId: params.externalId ?? dbContent?.source_id,
+    mediaType: (externalDetail.data?.content.content_type ?? params.contentType ?? dbContent?.content_type) === "movie" ? "movie" : "tv"
   });
   const libraryItem = libraryMatch.kind === "none" ? undefined : libraryMatch.item;
   const watchProviderSource = params.source ?? dbDetailSource;
@@ -278,27 +280,6 @@ export default function ContentDetailScreen() {
     );
   };
 
-  const addCastMember = (member: CastMember) => {
-    if (!view) return;
-    const { source, category } = resolveCastMemberPerson(member, view.contentType === "anime");
-
-    addFavoritePerson.mutate(
-      {
-        source,
-        external_id: String(member.id),
-        category,
-        name: member.name,
-        original_name: member.original_name,
-        profile_url: member.profile_url,
-        known_for: [view.title].filter(Boolean)
-      },
-      {
-        onSuccess: () => addToast(`${member.name}을(를) 좋아하는 인물에 등록했어요.`, "success", { actionLabel: "보기", onAction: () => openCastMember(member) }),
-        onError: (error) => addToast(error.message || "등록하지 못했어요.", "error")
-      }
-    );
-  };
-
   const openCastMember = (member: CastMember) => {
     if (!view) return;
     const { source, category, key } = resolveCastMemberPerson(member, view.contentType === "anime");
@@ -329,13 +310,14 @@ export default function ContentDetailScreen() {
   }, [columnsY, progressY, focusProgressCard]);
 
   if (content.isLoading) return <ScreenStateFrame><LoadingSkeleton /></ScreenStateFrame>;
-  if (content.isError) return <ScreenStateFrame><ErrorState message={content.error.message} onRetry={() => content.refetch()} /></ScreenStateFrame>;
+  if (content.isError) return <ScreenStateFrame><ErrorState message={userFacingErrorMessage(content.error, ERROR_COPY.contentLoad)} onRetry={() => content.refetch()} /></ScreenStateFrame>;
   if (!view) return <ScreenStateFrame><EmptyState title="콘텐츠를 찾을 수 없습니다" /></ScreenStateFrame>;
 
   const favoritePersonKeys = new Set(
     favoritePeople.data?.map((person) => `${person.source}:${person.external_id}`) ?? []
   );
   const resolvedEpisodeCount = view.episodeCount ?? libraryItem?.episode_count ?? null;
+  const progressTotalEpisodes = progressEpisodeCount(libraryItem, resolvedEpisodeCount);
   const seasonEpisodeCounts = seasons.data?.map((season) => ({
     season_number: season.season_number,
     episode_count: season.episode_count,
@@ -352,10 +334,20 @@ export default function ContentDetailScreen() {
     updateWatchCount.mutate(
       { libraryItemId: libraryItem.library_item_id, watchCount },
       {
-        onError: (error) => addToast(error.message || "본 횟수를 저장하지 못했습니다.", "error"),
+        onError: (error) => addToast(userFacingErrorMessage(error, ERROR_COPY.watchCountSave), "error"),
         onSuccess: () => addToast(`본 횟수를 ${watchCount}회로 저장했어요.`, "success")
       }
     );
+  };
+
+  const refreshContentInformation = async () => {
+    if (externalDetail.isFetching) return;
+    try {
+      await externalDetail.refresh();
+      addToast("작품 정보를 다시 불러왔어요.", "success");
+    } catch {
+      addToast("작품 정보를 새로 불러오지 못했어요. 저장된 정보는 계속 볼 수 있어요.", "error");
+    }
   };
 
   const openEpisodes = () => {
@@ -372,15 +364,11 @@ export default function ContentDetailScreen() {
       {
         onSuccess: () => {
           if (!progress) return;
-          const absolute = toAbsoluteEpisodeNumber(
-            progress.seasonNumber,
-            progress.episodeNumber,
-            createSeasonOffsetsByNumber(seasonEpisodeCounts),
-          ) ?? progress.episodeNumber;
+          const watchedThrough = progressDraftWatchedThrough(progressLibraryItem ?? libraryItem, progress);
           const suggestion = getProgressStatusSuggestion({
             statuses: libraryItem.statuses,
-            absoluteWatchedThrough: absolute,
-            totalEpisodes: resolvedEpisodeCount,
+            absoluteWatchedThrough: watchedThrough,
+            totalEpisodes: progressTotalEpisodes,
           });
           if (suggestion === "mark_completed") {
             addToast("모든 화를 봤어요. 완료로 표시할까요?", "info", { actionLabel: "완료로 표시", onAction: () => toggleStatus("completed"), durationMs: 8000 });
@@ -408,16 +396,16 @@ export default function ContentDetailScreen() {
         <EpisodeProgressCard highlighted={progressHighlighted}
           isOffline={networkState.isConnected === false || networkState.isInternetReachable === false}
           isSaving={updateManualProgress.isPending} isUnavailable={!libraryItem.manual_progress_available}
-          item={progressLibraryItem ?? libraryItem} onOpenEpisodes={openEpisodes} onSave={saveManualProgress} totalEpisodes={resolvedEpisodeCount} />
+          item={progressLibraryItem ?? libraryItem} onOpenEpisodes={openEpisodes} onSave={saveManualProgress} totalEpisodes={progressTotalEpisodes} />
       </View> : null;
       case "watchCount": return libraryItem ? <WatchCountCard key={key} watchCount={libraryItem.watch_count} isCompleted={selectedStatuses.includes("completed")} isSaving={updateWatchCount.isPending} onSave={saveWatchCount} /> : null;
-      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading}
+      case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} isRefreshing={watchProviders.isRefreshing}
         response={watchProviders.data} seasonNumber={watchProviderSeason} requireSeasonMatch={requireWatchProviderSeason}
         onRetry={watchProviderExternalId && supportsWatchProviderLookup({ source: watchProviderSource, mediaType: watchProviderMediaType }) ? watchProviders.refetch : null}
         laftelSearchUrl={view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle, watchProviderSeason) : null} />;
       case "review": return libraryItem ? <ContentReviewEditor key={key} contentId={libraryItem.content_id} contentAirDate={view.airDate} contentEndDate={view.endDate} contentAirYear={view.airYear} firstWatchedAt={libraryItem.first_watched_at} lastWatchedAt={libraryItem.last_watched_at} libraryItemId={libraryItem.library_item_id} onSaved={() => addToast("내 감상을 저장했어요.", "success")} /> : null;
       case "overview": return <ContentOverviewCard key={key} overview={view.overview} />;
-      case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} pending={addFavoritePerson.isPending} columns={layout.mainWidth >= 520 ? 2 : 1} onAdd={addCastMember} onOpen={openCastMember} />;
+      case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} columns={layout.mainWidth >= 520 ? 2 : 1} onOpen={openCastMember} />;
       case "danger": return <LibraryDangerZone key={key} pending={deleteLibraryItem.isPending} onDelete={confirmRemoveFromLibrary} />;
     }
   };
@@ -429,13 +417,23 @@ export default function ContentDetailScreen() {
           <ContentDetailHero title={view.title} originalTitle={view.originalTitle} posterUrl={view.posterUrl}
             metaItems={createContentDetailMetaItems({ contentType: view.contentType, airDateLabel, episodeLabel })}
             crewLine={crew.text || null} crewAccessibilityLabel={crew.accessibilityLabel}
-            genres={view.genres} poster={layout.poster} warning={externalDetail.isError ? "상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다." : null}>
+            genres={view.genres} poster={layout.poster} warning={externalDetail.isError ? externalDetail.data || dbContent
+              ? "작품 정보를 새로 불러오지 못해 저장된 정보로 표시하고 있어요."
+              : "상세 정보 일부를 불러오지 못해 검색 결과 기준으로 표시합니다." : null}>
             {externalResult || libraryItem ? <WatchStatusControl model={createWatchStatusControlModel(selectedStatuses, Boolean(libraryItem))} pending={statusPending} onSelect={toggleStatus} /> : null}
             {!externalResult || libraryItem ? <ContentActionBar isMovie={view.contentType === "movie"} pinCount={libraryItem?.pin_count}
               onOpenEpisodes={() => router.push({ pathname: "/content/[id]/episodes", params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) } })}
               onAddMoviePin={() => router.push({ pathname: "/pins/new", params: { contentId: libraryItem?.content_id ?? params.id } })}
               onOpenPins={() => router.push({ pathname: "/content/[id]/pins", params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) } })}
               onOpenList={openLibraryList} /> : null}
+            {params.source || dbDetailSource ? <Pressable accessibilityRole="button" accessibilityLabel="작품 정보 다시 불러오기"
+              accessibilityState={{ disabled: externalDetail.isFetching, busy: externalDetail.isFetching }}
+              disabled={externalDetail.isFetching} onPress={() => void refreshContentInformation()}
+              style={({ pressed }) => ({ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: spacing.md,
+                borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+                backgroundColor: pressed ? colors.surfaceMuted : colors.surface, opacity: externalDetail.isFetching ? 0.5 : 1 })}>
+              <Text style={{ ...typography.caption, color: colors.textMuted }}>{externalDetail.isFetching ? "작품 정보 불러오는 중…" : "작품 정보 다시 불러오기"}</Text>
+            </Pressable> : null}
           </ContentDetailHero>
           <View onLayout={event => setColumnsY(event.nativeEvent.layout.y)} style={{ flexDirection: layout.columns === 2 ? "row" : "column", alignItems: layout.columns === 2 ? "flex-start" : "stretch", gap: layout.gap }}>
             <View style={{ width: layout.mainWidth, gap: layout.gap }}>{sections.main.map(renderSection)}</View>

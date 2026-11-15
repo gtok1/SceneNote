@@ -26,6 +26,7 @@ import {
   MAX_AUTOMATIC_EMPTY_RECOMMENDATION_DURATION_MS,
   PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
   nextRecommendationBatchTarget,
+  recommendationReplacementCursor,
   recommendationContinuationLimit,
   refillRecommendationFeedItem,
   removeRecommendationFeedItem,
@@ -45,6 +46,7 @@ import { isUserActionableTheme } from "../../supabase/functions/_shared/recommen
 import { filterVisibleRecommendationCandidates, findVisibleRecommendationReplacement, summarizeRecommendationVisibility } from "@/utils/recommendationVisibility";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 import { recommendationExclusionSignature } from "@/utils/recommendationPreferences";
+import { isLatestRecommendationPolicyError } from "@/utils/latestRecommendationPolicy";
 
 import { createTrailingScheduler, RECOMMENDATION_REFILL_DEBOUNCE_MS, shouldDeferRecommendationRefill } from "@/utils/recommendationAddFlow";
 
@@ -181,7 +183,7 @@ export function usePersonalizedRecommendations(
         return next;
       });
     },
-    enabled,
+    enabled: current => enabled && !isLatestRecommendationPolicyError(current.state.error),
     retry: 0,
     staleTime: 10 * 60_000,
     // Cached pages include the scan cursor. Lifecycle refetches must not start
@@ -241,7 +243,7 @@ export function usePersonalizedRecommendations(
       options.retainedIds ?? []
     );
 
-  const refresh = async (): Promise<boolean> => {
+  const refresh = async (restartFromBeginning = false): Promise<boolean> => {
     if (
       !isCurrent() || !user ||
       refreshMutation.isPending ||
@@ -283,7 +285,7 @@ export function usePersonalizedRecommendations(
       const request = createRequest({
         ...discoveryFilters,
         userId: user.id,
-        cursor: current.next_cursor,
+        cursor: recommendationReplacementCursor(current.next_cursor, restartFromBeginning),
         excludeIds: collectRecommendationSessionSeenIds(current.items),
         limit: PERSONALIZED_RECOMMENDATION_BATCH_SIZE,
         mediaType,
@@ -315,6 +317,7 @@ export function usePersonalizedRecommendations(
         );
         lastFailedRefills.current.delete(mediaType);
         setRefillError(mediaType, null);
+        setLoadMoreError(mediaType, null);
         return true;
       } catch (error) {
         if (!isCurrent()) return false;
@@ -879,7 +882,8 @@ export function usePersonalizedRecommendations(
       collectRecommendationSessionSeenIds(recommendationQuery.data?.items ?? []),
     recommendationCursor: recommendationQuery.data?.next_cursor ?? null,
     isExhausted: getRecommendationRetryAction(recommendationQuery.data) === "complete",
-    refresh,
+    refresh: () => refresh(),
+    restart: () => refresh(true),
     removeOptimistically,
     restore,
     refill,

@@ -1,3 +1,5 @@
+import { readContentMetadata } from "../_shared/contentMetadataStore.ts";
+import { createPersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
 import { planAddToLibraryPath, runAfterResponse, type EdgeRuntimeLike } from "../_shared/addToLibraryFlow.ts";
 import { fetchContentDetail, fetchEpisodesForSeason } from "../_shared/externalContent.ts";
 import { saveContentCrew } from "../_shared/contentCrewStore.ts";
@@ -151,7 +153,10 @@ Deno.serve(async (req: Request) => {
 
   let contentMeta;
   try {
-    contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
+    contentMeta = (await readContentMetadata({
+      source, externalId, mediaType: body.value.media_type, store: createPersistentMetadataStore(adminClient),
+      fetchFresh: () => fetchContentDetail(source, externalId, body.value.media_type)
+    })).data;
   } catch (error) {
     await logSync(adminClient, {
       content_id: null,

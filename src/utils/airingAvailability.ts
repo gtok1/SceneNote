@@ -1,16 +1,16 @@
 import type { LibraryListItem, SeasonEpisodeCount } from "@/types/library";
-import { createSeasonOffsetsByNumber, toSeasonRelativeEpisodeNumber } from "@/utils/episodeProgress";
+import { createSeasonOffsetsByNumber, selectLibraryProgressSeasons, toSeasonRelativeEpisodeNumber } from "@/utils/episodeProgress";
 
 type WatchingItem = Pick<
   LibraryListItem,
   "content_type" | "statuses" | "progress_source" | "season_number" |
   "season_episode_counts" | "effective_watched_through" | "next_episode_number"
->;
+> & Partial<Pick<LibraryListItem, "source_api">>;
 
 export function seasonToCheck(item: WatchingItem): number | null {
   if (!item.statuses.includes("watching") || item.content_type === "movie") return null;
   if (item.progress_source === "none" || item.next_episode_number === null) return null;
-  if (item.season_number !== null) return item.season_number;
+  if (item.season_number !== null) return selectLibraryProgressSeasons(item, item.season_episode_counts)[0]?.season_number ?? null;
   return toSeasonRelativeEpisodeNumber(item.next_episode_number, item.season_episode_counts).seasonNumber;
 }
 
@@ -21,7 +21,7 @@ export function releasedUnwatchedCount(
 ): number {
   if (seasonToCheck(item) !== seasonNumber || releasedEpisodeNumber === null) return 0;
   const offsets = createSeasonOffsetsByNumber(item.season_episode_counts);
-  const seasonOffset = offsets.get(seasonNumber) ?? 0;
+  const seasonOffset = item.season_number === null ? offsets.get(seasonNumber) ?? 0 : 0;
   const season = item.season_episode_counts.find((candidate: SeasonEpisodeCount) => candidate.season_number === seasonNumber);
   const released = Math.min(releasedEpisodeNumber, season?.episode_count ?? releasedEpisodeNumber);
   const watchedInSeason = Math.max(0, item.effective_watched_through - seasonOffset);
@@ -62,7 +62,9 @@ export function upcomingEpisodeDate(
 ): string | null {
   if (seasonToCheck(item) !== seasonNumber || !availability.nextAirDate) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(availability.nextAirDate)) return null;
-  const seasonOffset = createSeasonOffsetsByNumber(item.season_episode_counts).get(seasonNumber) ?? 0;
+  const seasonOffset = item.season_number === null
+    ? createSeasonOffsetsByNumber(item.season_episode_counts).get(seasonNumber) ?? 0
+    : 0;
   const expectedEpisode = Math.max(0, item.effective_watched_through - seasonOffset) + 1;
   return availability.upcomingEpisodeNumber === expectedEpisode ? availability.nextAirDate : null;
 }

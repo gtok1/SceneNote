@@ -18,6 +18,8 @@ import { useAuthStore } from "@/stores/authStore";
 import type { FavoritePerson, PersonCategory, PersonSearchResult, PersonSource } from "@/types/people";
 import { createCategorySyncBatches, personKey, planFavoriteCategorySync, selectFavoritesForCategorySync } from "@/utils/peopleScreen";
 import { selectFavoritesNeedingKoreanName } from "@/utils/personKoreanName";
+import { MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
+import { calculateStoredPersonAge } from "../../supabase/functions/_shared/personMetadataCache";
 
 export function usePersonContentSearch(query: string, category: PersonCategory | "all" = "all") {
   return useQuery({
@@ -46,22 +48,30 @@ export function usePersonDetail(
 ) {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
-  return useQuery({
-    queryKey: ["person-detail", "v3-ko", source, externalId, category],
-    queryFn: async () => {
+  const queryKey = ["person-detail", "manual-v1", source, externalId, category] as const;
+  const load = async (forceRefresh = false) => {
       const data = await getPersonDetail({
         source: source as PersonSource,
         externalId: externalId ?? "",
-        category: category as PersonCategory
+        category: category as PersonCategory,
+        forceRefresh
       });
       if (data.category !== category && user) {
         await queryClient.invalidateQueries({ queryKey: ["favorite-people", user.id] });
       }
       return data;
-    },
-    enabled: PEOPLE_FEATURES_ENABLED && Boolean(source && externalId && category),
-    staleTime: 10 * 60_000
+  };
+  const query = useQuery({
+    queryKey,
+    queryFn: () => load(),
+    enabled: state => PEOPLE_FEATURES_ENABLED && Boolean(source && externalId && category) &&
+      state.state.data === undefined && !state.state.error,
+    ...MANUAL_METADATA_QUERY_OPTIONS,
+    select: data => ({ ...data, age: calculateStoredPersonAge(data.birthday, data.deathday) })
   });
+  return { ...query, refresh: () => queryClient.fetchQuery({
+    queryKey, queryFn: () => load(true), ...MANUAL_METADATA_QUERY_OPTIONS, staleTime: 0
+  }) };
 }
 
 export function useAddFavoritePerson() {

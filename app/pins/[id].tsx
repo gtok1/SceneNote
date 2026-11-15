@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing } from "@/constants/theme";
 import { usePin } from "@/hooks/useTimelinePins";
 import { getHomeLayout } from "@/utils/homeLayout";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 export default function PinDetailScreen() {
   const { id } = useLocalSearchParams<{
@@ -34,7 +36,7 @@ export default function PinDetailScreen() {
   useFocusEffect(useCallback(() => { setSpoilerRevealed(false); return () => setSpoilerRevealed(false); }, []));
 
   if (pin.isLoading) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><LoadingSkeleton variant="pin-item" /></ScreenStateFrame>;
-  if (pin.isError) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><ErrorState message={pin.error.message} onRetry={() => pin.refetch()} /></ScreenStateFrame>;
+  if (pin.isError) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><ErrorState message={userFacingErrorMessage(pin.error, ERROR_COPY.pinLoad)} onRetry={() => pin.refetch()} /></ScreenStateFrame>;
   if (!pin.data) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><EmptyState title="핀을 찾을 수 없습니다" /></ScreenStateFrame>;
   const currentPin = pin.data;
 

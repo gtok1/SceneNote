@@ -2,6 +2,8 @@ import { supabase } from "@/lib/supabase";
 import { searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import type { SimilarityFocus, SimilarityModifier, SimilaritySort } from "@/utils/similarSearchIntent";
+import { SIMILAR_PAGE_SIZE, SIMILAR_PAGINATION_VERSION, SimilarContentError, validateSimilarPage, normalizeSimilaritySecondarySort } from "@/utils/similarContentPagination";
+import type { SimilarityIdentityAlias } from "../../supabase/functions/_shared/similarityEngine";
 
 export interface SimilaritySignal { type: string; label: string; score: number; source: string; }
 export interface SimilarContentResult extends SearchResult {
@@ -13,8 +15,9 @@ export interface SimilarContentResult extends SearchResult {
   studios?: string[];
   popularity?: number | null;
   vote_count?: number | null;
+  identity_aliases?: SimilarityIdentityAlias[];
 }
-export interface SimilarContentResponse { mode:"similarity"; anchor:SearchResult; items:SimilarContentResult[]; has_more:boolean; next_cursor:string|null; warnings:string[]; ranking_version:string; }
+export interface SimilarContentResponse { mode:"similarity"; anchor:SearchResult; items:SimilarContentResult[]; has_more:boolean; next_cursor:string|null; warnings:string[]; ranking_version:string; pagination_version?:string; total_count?:number; }
 
 export async function resolveSimilarityAnchors(anchorText:string, mediaType:MediaTypeFilter, signal?:AbortSignal):Promise<SearchResult[]> {
   const response = await searchContent({query:anchorText,mediaType,page:1,...(signal?{signal}:{})});
@@ -31,10 +34,19 @@ export function shouldAutoSelectAnchor(anchorText:string,candidates:readonly Sea
   return first>=3 && first>second;
 }
 
-export async function getSimilarContent(input:{anchor:SearchResult;targetMediaType:MediaTypeFilter;focus:SimilarityFocus;sort:SimilaritySort;modifiers:SimilarityModifier[];limit?:number;signal?:AbortSignal;}):Promise<SimilarContentResponse>{
-  const {data,error}=await supabase.functions.invoke<SimilarContentResponse>("similar-content",{timeout:10_000,...(input.signal ? {signal:input.signal} : {}),body:{anchor:input.anchor,target_media_type:input.targetMediaType,focus:input.focus,sort:input.sort,filters:{modifiers:input.modifiers},limit:input.limit??12}});
-  if(error) throw new Error(error.message||"유사 작품을 불러오지 못했습니다");
-  if(!data||!Array.isArray(data.items)) throw new Error("유사 작품 응답이 올바르지 않습니다");
+export async function getSimilarContent(input:{anchor:SearchResult;targetMediaType:MediaTypeFilter;focus:SimilarityFocus;sort:SimilaritySort;modifiers:SimilarityModifier[];limit?:number;cursor?:string|null;signal?:AbortSignal;}):Promise<SimilarContentResponse>{
+  const {data,error}=await supabase.functions.invoke<SimilarContentResponse>("similar-content",{timeout:14_000,...(input.signal ? {signal:input.signal} : {}),body:{anchor:input.anchor,target_media_type:input.targetMediaType,focus:input.focus,sort:normalizeSimilaritySecondarySort(input.sort),pagination_version:SIMILAR_PAGINATION_VERSION,filters:{modifiers:input.modifiers},limit:input.limit??SIMILAR_PAGE_SIZE,...(input.cursor?{cursor:input.cursor}:{})}});
+  if(error) {
+    const response = error.context instanceof Response ? error.context : null;
+    const payload: unknown = response ? await response.clone().json().catch(() => null) : null;
+    const code = payload && typeof payload === "object" && "error" in payload && payload.error === "SIMILARITY_RESTART_REQUIRED"
+      ? "SIMILARITY_RESTART_REQUIRED" : "SIMILARITY_PROVIDER_FAILED";
+    throw new SimilarContentError(code);
+  }
+  if(!data || data.mode !== "similarity" || !Array.isArray(data.items) || !Array.isArray(data.warnings) ||
+    data.warnings.some(warning => typeof warning !== "string") ||
+    data.items.some(item => !item || typeof item.external_source !== "string" || typeof item.external_id !== "string" || typeof item.title_primary !== "string")) throw new SimilarContentError("INVALID_RESPONSE");
+  validateSimilarPage(data);
   return data;
 }
 

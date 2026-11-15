@@ -37,6 +37,8 @@ import {
   toPersonSearchResult
 } from "@/utils/peopleScreen";
 import { missingKoreanNameNotice } from "@/utils/personKoreanName";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 function PeopleScreen() {
   const router = useRouter();
@@ -185,7 +187,7 @@ function PeopleScreen() {
             {showSearchSkeleton ? (
               skeletons
             ) : search.isError ? (
-              <ErrorState message={search.error.message} onRetry={() => search.refetch()} />
+              <ErrorState message={userFacingErrorMessage(search.error, ERROR_COPY.peopleSearch)} onRetry={() => search.refetch()} />
             ) : search.data && search.data.people.length === 0 ? (
               <EmptyState {...personSearchEmptyCopy(search.data.query || debouncedQuery)} />
             ) : search.data ? (
@@ -218,7 +220,7 @@ function PeopleScreen() {
           {favorites.isLoading ? (
             skeletons
           ) : favorites.isError ? (
-            <ErrorState message={favorites.error.message} onRetry={() => favorites.refetch()} />
+            <ErrorState message={userFacingErrorMessage(favorites.error, ERROR_COPY.favoritePeopleLoad)} onRetry={() => favorites.refetch()} />
           ) : visibleFavorites.length === 0 ? (
             <EmptyState {...favoriteEmptyCopy(category, favorites.data?.length ?? 0)} />
           ) : (

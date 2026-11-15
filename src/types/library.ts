@@ -50,12 +50,14 @@ export interface LibraryListItem {
   crew?: CrewMember[];
   rating: number | null;
   one_line_review: string | null;
+  /** Progress fields use the registration scope: whole work or the registered actual season. */
   episode_count: number | null;
   watched_episode_count: number;
   derived_watched_through: number | null;
   next_episode_number: number | null;
   manual_watched_season_number: number | null;
   manual_watched_episode_number: number | null;
+  /** Whole-work absolute position retained for episode-toggle synchronization; never persisted. */
   manual_watched_absolute_number: number | null;
   progress_source: EpisodeProgressSource;
   effective_watched_through: number;

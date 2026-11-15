@@ -1,4 +1,6 @@
 import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/query";
+import { MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
 import { normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 import type {
   MediaTypeFilter,
@@ -122,20 +124,48 @@ export interface ContentDetailResponse {
     season_id?: string;
   })[];
   from_db: boolean;
+  from_cache?: boolean;
+  cache_policy?: "manual-v1";
 }
 
-export async function getExternalContentDetail(params: {
+export interface ExternalContentDetailParams {
   source: SearchResult["external_source"];
   externalId: string;
   mediaType?: string;
-}): Promise<ContentDetailResponse> {
+  forceRefresh?: boolean;
+}
+
+export function externalContentDetailQueryKey(params: ExternalContentDetailParams) {
+  return ["content", "external-detail", "manual-v1", params.source, params.externalId, params.mediaType] as const;
+}
+
+/** Direct service consumers (such as pin title enrichment) share the same cache as mounted cards. */
+export function getExternalContentDetail(params: ExternalContentDetailParams): Promise<ContentDetailResponse> {
+  const queryKey = externalContentDetailQueryKey(params);
+  if (!params.forceRefresh) {
+    const saved = queryClient.getQueryData<ContentDetailResponse>(queryKey);
+    if (saved) return Promise.resolve(saved);
+    const previous = queryClient.getQueryState(queryKey);
+    if (previous?.status === "error") return Promise.reject(previous.error);
+  }
+  return queryClient.fetchQuery({
+    ...MANUAL_METADATA_QUERY_OPTIONS,
+    queryKey,
+    queryFn: () => fetchExternalContentDetail(params),
+    ...(params.forceRefresh ? { staleTime: 0 } : {})
+  });
+}
+
+/** Raw query function: never call the cached wrapper from a query for the same key. */
+export async function fetchExternalContentDetail(params: ExternalContentDetailParams): Promise<ContentDetailResponse> {
   const { data, error } = await supabase.functions.invoke<ContentDetailResponse>(
     "get-content-detail",
     {
       body: {
         api_source: params.source,
         external_id: params.externalId,
-        media_type: params.mediaType
+        media_type: params.mediaType,
+        ...(params.forceRefresh ? { force_refresh: true } : {})
       }
     }
   );

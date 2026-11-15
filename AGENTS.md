@@ -67,6 +67,11 @@
 | `docs/63_episode_progress_count_choices_fixes_spec.md` | 시청 진행 회차 버튼이 공개 에피소드 목록이 빌 때 사라지고 숫자 입력만 남는 문제: API 화수(시즌 화수→총 화수, 1~200)가 있으면 무조건 1~화수 버튼, 없으면 공개 목록, 둘 다 없을 때만 직접 입력(`resolveEpisodeChoiceMode`). 14장 Codex 실행 지시 포함 | 시청 진행 카드·회차 선택 작업 |
 | `docs/64_recommendation_invocation_cost_fixes_spec.md` | 추천 호출 비용: 호출 수 집계(앱 이유별·서버 diagnostics), 노출 기록을 추천 응답에 합쳐 별도 호출 제거, 이어 찾기만 탐색 예산 확대(4초·키워드 32·6·6), 자동 호출 60초 12회 안전 상한. 12개 묶음·추가 후 묶음 규칙은 유지. 14장 Codex 실행 지시 포함 | 추천 호출 횟수·비용·이어 찾기 작업 |
 | `docs/65_search_debounce_and_request_timeout_fixes_spec.md` | 검색 탭이 글자마다(한글 조합 중 포함) 작품·인물 검색 함수를 부르는 문제: 300ms 디바운스한 요청 검색어(`useSearchRequestQuery`), 조합 중 자모는 직전 값 유지, 검색 버튼·Enter·최근 검색어는 즉시. 추천·검색 호출 제한 10→14초, 추천 훅 제한·이어 찾기 최소 예산 12→15초. 14장 Codex 실행 지시 포함 | 검색 호출 비용·디바운스·요청 제한 시간 작업 |
+| `docs/66_korean_search_relaxed_words_fixes_spec.md` | 국내 공식 제목과 TMDB 한국어 제목의 단어 형태가 달라("추방당한" ↔ "추방된") 검색 0건인 문제: TMDB 단어 AND·마지막 단어 앞부분 일치 재실측, 앞 단계 결과에 검색어를 담은 제목(정방향 포함)이 없을 때만 "핵심 단어 + 어간" 질의를 TMDB에 4단계로 검색(`planKoreanRelaxedWordFallback`), 단어 2/3 이상 덮는 결과만, 캐시 범위 `searchCacheScope`, 골든 6개. 14장 Codex 실행 지시 포함 | 검색어 변형·검색 누락·제목 표기 차이 작업 |
+| `docs/67_anilist_season_card_leak_fixes_spec.md` | 검색어와 무관한 AniList 작품의 "…2기" 카드만 결과에 남는 문제: `filterResultsByCompactQuery`의 `season_relation` 무조건 통과(docs/15 RC-4용)가 시즌 펼치기에도 적용된 것이 원인(실측 4건). 펼친 시즌은 같은 목록의 기본 작품 판정을 따르고(자기 제목이 맞거나 기본 작품이 없으면 통과), 2단계 판정 막힘도 함께 해소, 캐시 버전 `ko-v16-season-base`. 14장 Codex 실행 지시 포함 | 검색 결과 필터·AniList 시즌 카드·시즌 검색 작업 |
+| `docs/68_auth_usability_and_error_copy_qa_2026-11-15.md` | 로그인 전 화면 사용성 QA + 서버 영문 오류 원문 노출 정정: 온보딩 모든 장에 로그인 링크·이전 버튼(`getOnboardingActions`), 인증 오류 한국어 변환(`authErrorMessage`, `useAuth` 한 곳), 비밀번호 보기 버튼(`PasswordInput`), 입력 안내, 화면 24곳의 `error.message` → `userFacingErrorMessage` + `ERROR_COPY`. 인증 화면 토큰 정리는 범위 밖(D-6). 14장 Codex 실행 지시 포함 | 인증·온보딩 화면, 오류 문구, 비밀번호 입력 작업 |
+| `docs/69_persistent_public_metadata_cache_fixes_spec.md` | 보러가기·작품/인물 상세 DB 영속 재사용, 수동 갱신, 공유 인물 프로필·등록/핀/출연진 캐시 공유. 1시간 OTT/Jotai·10분 상세 정책을 사용자 요청으로 대체. 14장 실행 지시 포함 | 외부 메타데이터 저장·API 호출 최소화·상세 캐시·갱신 UI 작업 |
+| `docs/70_latest_recommendation_catalog_and_cpu_fixes_spec.md` | 최신 추천의 전 기간 인기 보충 분리, 날짜순 공급자/내부lane 커서·미반환 후보 보존, CPU context 재사용과546 정정. 14장 실행 지시 포함 | 최신 추천 후보 수집·페이지·CPU·정책 버전·재시작 작업 |
 
 **규칙**
 
@@ -139,7 +144,7 @@ SceneNote는 애니메이션, 한국 드라마, 일본 드라마, 영화 감상 
 
 - TypeScript 타입을 명확히 작성한다.
 - 서버 데이터는 TanStack Query, UI 상태는 Zustand로 관리한다.
-- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. `watchProvidersAtom`의 서버 응답 캐시는 현재 원칙과 다른 구현으로, 새 서버 상태의 표준으로 복제하지 않는다.
+- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. `watchProvidersAtom`은 이전 구현의 미사용 파일이며, 보러가기 서버 응답은 docs/69의 TanStack Query·DB 저장 경로를 쓴다. Jotai로 새 서버 캐시를 만들지 않는다.
 - 기존 구조·명명·UI 동작을 우선하고 무관한 리팩터링이나 중복 유틸을 섞지 않는다. 오류를 숨기는 임시 우회로 완료 처리하지 않는다.
 - 불확실한 외부 API 동작은 TODO와 문서에 남긴다.
 - 큰 리팩터링보다 설계 문서에 맞는 작은 구현 단위를 선호한다.

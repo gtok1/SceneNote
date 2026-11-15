@@ -1,5 +1,6 @@
 import type { ContentType } from "@/types/content";
-import type { WatchStatus } from "@/types/library";
+import type { LibraryListItem, WatchStatus } from "@/types/library";
+import { createSeasonOffsetsByNumber, selectLibraryProgressSeasons, toAbsoluteEpisodeNumber, toSeasonRelativeEpisodeNumber } from "@/utils/episodeProgress";
 import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { getHomeLayout } from "@/utils/homeLayout";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
@@ -111,4 +112,48 @@ export function episodeChoiceInfoText(input: {
   if (input.isError) return "공개 회차를 불러오지 못했어요.";
   if (input.isFetching) return "공개된 회차를 확인하고 있어요.";
   return EPISODE_CHOICE_MANUAL_COPY;
+}
+
+type ProgressDraftItem = Pick<LibraryListItem,
+  "season_number" | "source_api" | "season_episode_counts" | "manual_watched_season_number" |
+  "manual_watched_episode_number" | "progress_source" | "effective_watched_through"
+>;
+
+/** A season row edits local episode numbers while a whole-work row keeps its season picker. */
+export function createEpisodeProgressDraft(item: ProgressDraftItem): { seasonNumber: number | null; episodeNumber: number } {
+  const seasons = selectLibraryProgressSeasons(item, item.season_episode_counts);
+  if (item.season_number !== null) {
+    return {
+      seasonNumber: seasons[0]?.season_number ?? item.season_number,
+      episodeNumber: item.progress_source === "manual" || item.progress_source === "episode_progress"
+        ? item.effective_watched_through
+        : item.manual_watched_episode_number ?? 0
+    };
+  }
+  const hasSeasonSelector = seasons.length > 1;
+  if (item.manual_watched_episode_number !== null) {
+    return {
+      seasonNumber: hasSeasonSelector ? item.manual_watched_season_number : null,
+      episodeNumber: item.manual_watched_episode_number
+    };
+  }
+  if (item.progress_source === "episode_progress") {
+    const relative = toSeasonRelativeEpisodeNumber(item.effective_watched_through, seasons);
+    return { seasonNumber: hasSeasonSelector ? relative.seasonNumber : null, episodeNumber: relative.episodeNumber };
+  }
+  return { seasonNumber: hasSeasonSelector ? seasons[0]?.season_number ?? null : null, episodeNumber: 0 };
+}
+
+export function progressDraftWatchedThrough(
+  item: Pick<LibraryListItem, "season_number" | "season_episode_counts">,
+  progress: { seasonNumber: number | null; episodeNumber: number }
+): number {
+  return item.season_number !== null
+    ? progress.episodeNumber
+    : toAbsoluteEpisodeNumber(progress.seasonNumber, progress.episodeNumber, createSeasonOffsetsByNumber(item.season_episode_counts)) ?? 0;
+}
+
+/** A missing season total stays unknown; the series header is not a progress denominator. */
+export function progressEpisodeCount(item: Pick<LibraryListItem, "episode_count"> | null | undefined, fallback: number | null): number | null {
+  return item ? item.episode_count : fallback;
 }

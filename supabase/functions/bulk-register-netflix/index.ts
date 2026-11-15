@@ -1,3 +1,5 @@
+import { readContentMetadata } from "../_shared/contentMetadataStore.ts";
+import { createPersistentMetadataStore } from "../_shared/persistentMetadataCache.ts";
 import { fetchContentDetail } from "../_shared/externalContent.ts";
 import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
@@ -336,7 +338,10 @@ async function createTmdbContent(
   tmdbId: string,
   mediaType: TmdbMediaType
 ): Promise<ContentRecord> {
-  const contentMeta = await fetchContentDetail("tmdb", tmdbId, mediaType);
+  const contentMeta = (await readContentMetadata({
+    source: "tmdb", externalId: tmdbId, mediaType, store: createPersistentMetadataStore(adminClient),
+    fetchFresh: () => fetchContentDetail("tmdb", tmdbId, mediaType)
+  })).data;
   const { data: contentRow, error: contentError } = await adminClient
     .from("contents")
     .upsert(

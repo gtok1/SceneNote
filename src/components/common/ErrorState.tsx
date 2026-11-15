@@ -42,8 +42,12 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
   button: {
+    alignItems: "center",
     backgroundColor: colors.danger,
     borderRadius: radius.md,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 44,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md
   },

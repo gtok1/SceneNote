@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useAtom } from "jotai";
@@ -22,6 +22,7 @@ import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useTags } from "@/hooks/useTags";
 import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { usePinsUiStore } from "@/stores/pinsUiStore";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
@@ -55,6 +56,7 @@ export default function PinsScreen() {
   const listRef = useRef<FlashListRef<PinListRow>>(null);
   const allPins = useAllPins();
   const taggedPins = usePinsByTag(selectedTagId ?? undefined);
+  const pullToRefresh = usePullToRefresh([selectedTagId ? taggedPins.refetch : allPins.refetch]);
   const tags = useTags();
   const router = useRouter();
 
@@ -252,6 +254,7 @@ export default function PinsScreen() {
         <View style={[styles.contentGrid, { gap: layout.gap }]}>
           <View style={styles.mainColumn}>
             <FlashList
+              refreshControl={Platform.OS !== "web" ? <RefreshControl refreshing={pullToRefresh.refreshing} onRefresh={pullToRefresh.onRefresh} tintColor={colors.primary} /> : undefined}
               key={viewMode}
               ref={listRef}
               showsVerticalScrollIndicator={false}

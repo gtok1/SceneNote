@@ -58,6 +58,10 @@ export function serializeGenreFilters(genres: readonly string[]): string {
   return normalized.length ? normalized.join("|") : ALL_GENRE_FILTER;
 }
 
+export function filterLibraryItemsByStatus(items: LibraryListItem[], status: LibraryStatusFilter): LibraryListItem[] {
+  return status === "all" ? items : items.filter((item) => item.statuses.includes(status));
+}
+
 export function filterLibraryItems(items: LibraryListItem[], filters: LibraryFilterState): LibraryListItem[] {
   const normalizedSearchQuery = filters.searchQuery.trim().toLocaleLowerCase();
   const compactSearchQuery = normalizedSearchQuery.replace(/\s+/gu, "");

@@ -4,6 +4,7 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { KeyboardAvoidingView, Platform ,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,7 +35,8 @@ import { LibraryStatusFilter as LibraryStatusFilterBar } from "@/components/libr
 import { normalizeWatchStatuses, WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } from "@/hooks/useLibrary";
-import { buildLibraryShareUrl, createLibraryShare, shareLibraryUrl } from "@/services/libraryShare";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { buildLibraryShareUrl, createLibraryShare, getLibraryShareOrigin, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAppUIStore } from "@/stores/appUIStore";
@@ -112,6 +114,7 @@ export default function LibraryScreen() {
   const layout = getHomeLayout(width);
   const { galleryColumns, isDesktop, isMobile } = getLibraryResponsiveLayout(width);
   const library = useLibrary(statusFilter);
+  const pullToRefresh = usePullToRefresh([library.refetch]);
   const updateManualProgress = useUpdateLibraryManualProgress();
   const updateStatuses = useUpdateLibraryStatuses();
   const networkState = useNetworkState();
@@ -340,11 +343,12 @@ export default function LibraryScreen() {
     setShareFeedback({ status: "loading", message: "공유 링크를 생성하고 있습니다." });
     try {
       const title = createLibraryShareTitle(filters);
+      getLibraryShareOrigin();
       const share = await withTimeout(
         createLibraryShare({
           title,
           filters,
-          contentIds: filteredItems.map((item) => item.content_id)
+          libraryItemIds: filteredItems.map((item) => item.library_item_id)
         }),
         15000,
         "공유 링크 생성 요청이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
@@ -368,7 +372,7 @@ export default function LibraryScreen() {
       } catch {
         setShareFeedback({
           status: "success",
-          message: "공유 링크를 생성했습니다. 클립보드 복사는 브라우저에서 허용되지 않았습니다.",
+          message: "공유 링크를 만들었지만 전달하지 못했어요. 링크를 복사해 다시 공유해 주세요.",
           url
         });
       }
@@ -685,7 +689,7 @@ export default function LibraryScreen() {
 
       {library.isLoading ? <View style={styles.sharedInset}><LoadingSkeleton /></View> : null}
       {library.isError ? <ErrorState onRetry={() => library.refetch()} /> : null}
-      {!library.isLoading && !filteredItems.length ? (
+      {!library.isLoading && !library.isError && !filteredItems.length ? (
         <EmptyState
           actionLabel={hasActiveFilter ? "필터 초기화" : "작품 검색하기"}
           description={
@@ -699,6 +703,7 @@ export default function LibraryScreen() {
       ) : null}
 
       <FlashList showsVerticalScrollIndicator={false}
+        refreshControl={Platform.OS !== "web" ? <RefreshControl refreshing={pullToRefresh.refreshing} onRefresh={pullToRefresh.onRefresh} tintColor={colors.primary} /> : undefined}
         maintainVisibleContentPosition={{ disabled: true }}
         onLoad={scrollRestoration.onLoad}
         onLayout={scrollRestoration.onLayout}

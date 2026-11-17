@@ -97,6 +97,10 @@ SceneNote는 애니메이션·한국/일본 드라마·영화의 감상 기록�
 
 테스트는 `node:test`·`node:assert/strict`를 쓰며 React Native/Supabase 런타임이 필요한 모듈을 직접 import하지 않고 순수 함수를 검증한다. 전체 앱 E2E, DB의 실제 RLS, 외부 API, 플랫폼별 UI 검증을 대신하지 않는다. 변경 유형별 검증·결과 기록 방법은 [개발·검증 안내](docs/development_next_steps.md)를 따른다.
 
+AI 작업 중 관련 테스트만 반복하고 완료 시 필요한 전체 검사를 실행하려면 [scenenote-verify](.agents/skills/scenenote-verify/SKILL.md)를 사용한다. 결과는 검사별 한 줄, 전체 로그는 비공개 임시 폴더에 남는다. Git 커밋 전에는 [staged 경로 검사](.githooks/scenenote-staged-guard.py)를 사용할 수 있다. 새 체크아웃에서 `python3 .githooks/install.py`로 설치하고 `python3 .githooks/install.py --check`로 상태를 확인한다. 기존 훅·`core.hooksPath`는 덮어쓰지 않는다. 이 훅은 공백·충돌 표시와 대표 민감 파일명만 확인하며 파일 내용의 비밀값 전수검사는 아니다.
+
+기본 Node가 시작되지 않는 환경에서는 검증 도구에 `--node-bin <Node와 npm이 있는 디렉터리>`를 전달할 수 있다. 해당 실행의 하위 프로세스에만 적용하며 전역 PATH를 변경하지 않는다. 실제 명령·런타임 경로는 검사 로그 폴더의 `summary.json`에서 확인한다.
+
 아래 명령은 별도 대상·권한·부작용 확인이 필요한 작업이다. 일상적인 정적 검사에 묶지 않는다.
 
 | 명령/설정 | 주의할 부작용 |
@@ -109,6 +113,8 @@ SceneNote는 애니메이션·한국/일본 드라마·영화의 감상 기록�
 | `restart`, `web:restart`, `dev:restart` npm 스크립트 | `pkill -f`로 기존 Expo/Functions 프로세스를 넓게 종료할 수 있음. 공유 작업 중 무심코 실행하지 않음 |
 
 ## 호스팅과 남은 확인
+
+네이티브에서 보낼 공개 공유 링크는 [app.config.ts](app.config.ts)의 `extra.publicWebOrigin`에 정식 HTTPS 웹 origin을 설정한 뒤 클라이언트를 다시 빌드한다. 웹은 현재 origin을 사용한다. 설정이 없는 네이티브에서는 잘못된 상대 URL을 보내는 대신 안내를 표시한다. 현재 값은 미설정(`null`)이며 주소를 추측해 채우지 않는다. 시즌별 공유·핀 원자 저장·TMDB 식별자 분리의 운영 반영 순서는 [73](docs/73_project_integrity_fixes_spec.md)과 [작업 현황](docs/development_next_steps.md)을 따른다.
 
 [vercel.json](vercel.json)은 `npm install` → `npm run build` → `dist/`와 상세/공유 경로 rewrite를 정의한다. 설정 파일의 존재는 실제 배포 성공·운영 연결·정적 동적 경로 정상 동작의 증거가 아니다. `.github/workflows`와 `eas.json`은 현재 저장소에서 확인되지 않았다.
 

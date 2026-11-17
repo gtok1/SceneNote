@@ -22,7 +22,7 @@ interface StubPluginBuild {
 const stubs: Record<string, string> = {
   "@/lib/supabase": "export const supabase = { from: table => globalThis.__fakeQuery(table) };",
   "@/stores/authStore": "export const useAuthStore = selector => selector({ user: { id: 'synthetic-user' } });",
-  react: "export const useMemo = fn => fn();",
+  react: "export const useMemo = fn => fn(); export const useCallback = fn => fn;",
   "@tanstack/react-query": `
     export { QueryClient } from '@tanstack/query-core';
     export const useQueryClient = () => globalThis.__queryClient;

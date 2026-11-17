@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useEpisodeAvailability } from "@/hooks/useAiringAvailability";
 import { confirmDestructive } from "@/utils/confirmDestructive";
-import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, resolveEpisodeChoiceMode, episodeChoiceInfoText, episodeChoiceSeasonNumber, isEpisodeProgressCompletedMode, createEpisodeProgressDraft, progressDraftWatchedThrough } from "@/utils/contentDetailView";
+import { EPISODE_PROGRESS_COMPLETED_COPY, MANUAL_PROGRESS_COPY, resolveEpisodeChoiceMode, episodeChoiceInfoText, episodeChoiceSeasonNumber, isEpisodeProgressCompletedMode, createEpisodeProgressDraft, progressDraftWatchedThrough, needsReleasedEpisodeLookup, episodeProgressHeader } from "@/utils/contentDetailView";
 import type { LibraryListItem } from "@/types/library";
 import {
   MAX_MANUAL_EPISODE_NUMBER,
@@ -62,7 +62,10 @@ export function EpisodeProgressCard({
   const selectedSeason = seasons.find((season) => season.season_number === selectedSeasonNumber);
   const availability = useEpisodeAvailability(
     item.content_id, episodeChoiceSeasonNumber(selectedSeasonNumber, item.season_number, seasons),
-    !completedMode && seasons.length > 0
+    !completedMode && seasons.length > 0 && needsReleasedEpisodeLookup({
+      seasonEpisodeCount: selectedSeason?.episode_count,
+      totalEpisodes
+    })
   );
   const choiceMode = resolveEpisodeChoiceMode({
     seasonEpisodeCount: selectedSeason?.episode_count,
@@ -84,6 +87,13 @@ export function EpisodeProgressCard({
     derivedWatchedThrough: null,
     manualWatchedThrough: draftWatchedThrough,
     completed: completedMode,
+  });
+  const progressHeader = episodeProgressHeader({
+    watchedThrough: draftProgress.watchedThrough,
+    draftEpisodeNumber,
+    totalEpisodes,
+    mode: choiceMode,
+    hasSeasonSelector
   });
   const unchanged = item.manual_watched_episode_number !== null
     && initialDraft.seasonNumber === selectedSeasonNumber
@@ -154,24 +164,25 @@ export function EpisodeProgressCard({
         <Text style={styles.title}>시청 진행</Text>
         <View style={styles.headerMeta}>
           <Text style={styles.summary}>
-            {totalEpisodes === null
-              ? `${draftProgress.watchedThrough}화까지 시청`
-              : `${draftProgress.watchedThrough} / ${totalEpisodes}화`}
+            {progressHeader.summary}
           </Text>
           {statusLabel ? <Text style={styles.mode}>{statusLabel}</Text> : null}
         </View>
       </View>
 
-      {totalEpisodes !== null ? (
+      {progressHeader.barMax !== null ? (
         <View
           accessibilityRole="progressbar"
-          accessibilityValue={{ min: 0, max: totalEpisodes, now: draftProgress.watchedThrough }}
+          accessibilityValue={{ min: 0, max: progressHeader.barMax, now: progressHeader.barNow }}
+          aria-valuemin={0}
+          aria-valuemax={progressHeader.barMax}
+          aria-valuenow={progressHeader.barNow}
           style={styles.progressTrack}
         >
           <View
             style={[
               styles.progressFill,
-              { width: `${Math.round((draftProgress.progressRatio ?? 0) * 100)}%` },
+              { width: `${progressHeader.barMax > 0 ? Math.round(progressHeader.barNow / progressHeader.barMax * 100) : 0}%` },
             ]}
           />
         </View>

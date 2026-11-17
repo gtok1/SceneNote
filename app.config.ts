@@ -26,6 +26,9 @@ const config: ExpoConfig = {
   plugins: ["expo-router", "expo-secure-store"],
   experiments: {
     typedRoutes: true
+  },
+  extra: {
+    publicWebOrigin: null
   }
 };
 

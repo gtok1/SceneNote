@@ -1,19 +1,24 @@
 import { supabase } from "@/lib/supabase";
 import { getExternalContentDetail } from "@/services/contentSearch";
+import { getSessionUserId } from "@/services/sessionUser";
 import type { PinInput, TimelinePin } from "@/types/pins";
+import { readAllRows } from "@/utils/batchedQuery";
+import { atomicPinSaveArgs, atomicPinSaveError, createPinSaveIdentity } from "@/utils/pinSave";
 import { enrichLocalizedPinTitles } from "@/utils/pinLocalization";
 import { mapPinRow, PIN_SELECT, type RawPinRow } from "@/utils/pinRow";
 import { sortPinsByScene } from "@/utils/pinSort";
-import { formatSecondsToTimecode } from "@/utils/timecode";
-import { attachTagsToPin, replacePinTags } from "./tags";
+
+const createIdentities = new WeakMap<PinInput, ReturnType<typeof createPinSaveIdentity>>();
 
 export async function getAllPins(): Promise<TimelinePin[]> {
-  const { data, error } = await supabase
+  const { data, error } = await readAllRows((from, to) => supabase
     .from("timeline_pins")
     .select(PIN_SELECT)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id")
+    .range(from, to), { rowKey: row => row.id });
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(error.message === "ROW_LIMIT_EXCEEDED" ? "핀이 너무 많아 불러오지 못했어요." : error.message);
   return enrichLocalizedPinTitles(mapPins(data as unknown as RawPinRow[]), getExternalContentDetail);
 }
 
@@ -68,12 +73,14 @@ export async function getPinsByEpisode(episodeId: string): Promise<TimelinePin[]
 }
 
 export async function getPinsByTag(tagId: string): Promise<TimelinePin[]> {
-  const { data, error } = await supabase
+  const { data, error } = await readAllRows((from, to) => supabase
     .from("timeline_pin_tags")
     .select(`timeline_pins(${PIN_SELECT})`)
-    .eq("tag_id", tagId);
+    .eq("tag_id", tagId)
+    .order("pin_id")
+    .range(from, to), { rowKey: row => row.timeline_pins?.id });
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(error.message === "ROW_LIMIT_EXCEEDED" ? "핀이 너무 많아 불러오지 못했어요." : error.message);
 
   const rows = (data ?? []) as unknown as { timeline_pins: RawPinRow | null }[];
   return enrichLocalizedPinTitles(
@@ -82,53 +89,32 @@ export async function getPinsByTag(tagId: string): Promise<TimelinePin[]> {
 }
 
 export async function createPin(input: PinInput): Promise<TimelinePin> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const { userId } = await getSessionUserId();
 
-  if (!user) throw new Error("로그인이 필요합니다");
+  if (!userId) throw new Error("로그인이 필요합니다");
 
-  const { data, error } = await supabase
-    .from("timeline_pins")
-    .insert({
-      user_id: user.id,
-      content_id: input.content_id,
-      episode_id: input.episode_id ?? null,
-      timestamp_seconds: input.timestamp_seconds,
-      display_time_label:
-        input.timestamp_seconds === null ? null : formatSecondsToTimecode(input.timestamp_seconds),
-      memo: input.memo?.trim() ? input.memo.trim() : null,
-      emotion: input.emotion,
-      is_spoiler: input.is_spoiler
-    })
-    .select("*")
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  const tags = await attachTagsToPin(data.id, input.tagNames);
-  return { ...(data as TimelinePin), tags };
+  let identity = createIdentities.get(input);
+  if (!identity) {
+    identity = createPinSaveIdentity();
+    createIdentities.set(input, identity);
+  }
+  return savePinAtomically(input.client_request_id ?? identity.getId(), input, true);
 }
 
 export async function updatePin(pinId: string, input: Omit<PinInput, "content_id" | "episode_id">) {
-  const { data, error } = await supabase
-    .from("timeline_pins")
-    .update({
-      timestamp_seconds: input.timestamp_seconds,
-      display_time_label:
-        input.timestamp_seconds === null ? null : formatSecondsToTimecode(input.timestamp_seconds),
-      memo: input.memo?.trim() ? input.memo.trim() : null,
-      emotion: input.emotion,
-      is_spoiler: input.is_spoiler
-    })
-    .eq("id", pinId)
-    .select("*")
-    .single();
+  const { userId } = await getSessionUserId();
+  if (!userId) throw new Error("로그인이 필요합니다");
+  return savePinAtomically(pinId, input, false);
+}
 
-  if (error) throw new Error(error.message);
-
-  const tags = await replacePinTags(pinId, input.tagNames);
-  return { ...(data as TimelinePin), tags };
+async function savePinAtomically(pinId: string, input: PinInput | Omit<PinInput, "content_id" | "episode_id">, isCreate: boolean): Promise<TimelinePin> {
+  const { data, error } = await supabase.rpc("save_timeline_pin", atomicPinSaveArgs(pinId, input, isCreate));
+  // A missing RPC must not fall back to the former partially committing multi-write path.
+  if (error) throw new Error(atomicPinSaveError(error));
+  if (!data || typeof data !== "object" || Array.isArray(data) || data.id !== pinId) {
+    throw new Error("핀 저장 결과를 확인하지 못했어요. 같은 화면에서 다시 시도해 주세요.");
+  }
+  return data as unknown as TimelinePin;
 }
 
 export async function deletePin(pinId: string): Promise<void> {

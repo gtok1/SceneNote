@@ -5,13 +5,55 @@ type WatchingItem = Pick<
   LibraryListItem,
   "content_type" | "statuses" | "progress_source" | "season_number" |
   "season_episode_counts" | "effective_watched_through" | "next_episode_number"
-> & Partial<Pick<LibraryListItem, "source_api">>;
+> & Partial<Pick<LibraryListItem, "source_api" | "end_date">>;
+
+export type AiringAvailabilityPlan =
+  | { kind: "none" }
+  | {
+    kind: "local";
+    seasonNumber: number;
+    availability: { releasedEpisodeNumber: number; upcomingEpisodeNumber: null; nextAirDate: null };
+  }
+  | { kind: "remote"; seasonNumber: number };
+
+export function koreaToday(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 export function seasonToCheck(item: WatchingItem): number | null {
   if (!item.statuses.includes("watching") || item.content_type === "movie") return null;
   if (item.progress_source === "none" || item.next_episode_number === null) return null;
   if (item.season_number !== null) return selectLibraryProgressSeasons(item, item.season_episode_counts)[0]?.season_number ?? null;
   return toSeasonRelativeEpisodeNumber(item.next_episode_number, item.season_episode_counts).seasonNumber;
+}
+
+export function planAiringAvailability(item: WatchingItem, todayKst: string): AiringAvailabilityPlan {
+  const seasonNumber = seasonToCheck(item);
+  if (seasonNumber === null || item.source_api === "kitsu") return { kind: "none" };
+
+  const seasonEpisodeCount = item.season_episode_counts.find((season) => season.season_number === seasonNumber)?.episode_count;
+  if (
+    item.source_api === "anilist" &&
+    item.end_date && /^\d{4}-\d{2}-\d{2}$/.test(item.end_date) && item.end_date <= todayKst &&
+    typeof seasonEpisodeCount === "number" && Number.isInteger(seasonEpisodeCount) && seasonEpisodeCount >= 1
+  ) {
+    return {
+      kind: "local",
+      seasonNumber,
+      availability: { releasedEpisodeNumber: seasonEpisodeCount, upcomingEpisodeNumber: null, nextAirDate: null }
+    };
+  }
+  return { kind: "remote", seasonNumber };
+}
+
+export function isAvailabilitySettled(
+  data: { releasedEpisodeNumber: number | null; nextAirDate: string | null } | undefined,
+  seasonEpisodeCount: number | null | undefined
+): boolean {
+  return Boolean(
+    data && typeof seasonEpisodeCount === "number" && Number.isInteger(seasonEpisodeCount) && seasonEpisodeCount >= 1 &&
+    data.releasedEpisodeNumber !== null && data.releasedEpisodeNumber >= seasonEpisodeCount && data.nextAirDate === null
+  );
 }
 
 export function releasedUnwatchedCount(
@@ -32,7 +74,7 @@ export function releasedEpisodeFromKnownDates(
   episodes: { episode_number: number; air_date: string | null }[],
   now: Date = new Date()
 ): number | null {
-  const todayInKorea = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayInKorea = koreaToday(now);
   let latest: number | null = null;
   for (const episode of episodes) {
     if (!Number.isInteger(episode.episode_number) || episode.episode_number < 1) continue;
@@ -47,7 +89,7 @@ export function upcomingEpisodeFromKnownDates(
   episodes: { episode_number: number; air_date: string | null }[],
   now: Date = new Date()
 ): { episodeNumber: number; airDate: string } | null {
-  const todayInKorea = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayInKorea = koreaToday(now);
   const next = episodes
     .filter((episode) => Number.isInteger(episode.episode_number) && episode.episode_number > 0)
     .filter((episode) => episode.air_date && /^\d{4}-\d{2}-\d{2}$/.test(episode.air_date) && episode.air_date > todayInKorea)

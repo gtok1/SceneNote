@@ -193,7 +193,7 @@ function PeopleScreen() {
             ) : search.data ? (
               <>
                 {search.data.failedSources.length > 0 ? (
-                  <Text style={styles.notice}>일부 외부 API 결과가 표시되지 않을 수 있습니다.</Text>
+                  <Text style={styles.notice}>일부 검색 결과를 불러오지 못했어요. 빠진 결과가 있을 수 있어요.</Text>
                 ) : null}
                 <View style={gridStyle}>
                   {search.data.people.map((person) => (

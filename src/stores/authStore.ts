@@ -33,13 +33,10 @@ export const useAuthStore = create<AuthState>()(
     {
       name: "scenenote-auth",
       storage: createJSONStorage(() => (canUsePersistentStorage ? AsyncStorage : noopStorage)),
-      partialize: (state) => ({
-        session: state.session,
-        user: state.user
-      }),
-      onRehydrateStorage: () => (state) => {
-        state?.setLoading(false);
-      }
+      // Supabase owns persisted credentials. Legacy Zustand hydration must never
+      // overwrite a newer SDK event or finish SDK initialization (docs/73).
+      partialize: () => ({}),
+      merge: (_persistedState, currentState) => currentState
     }
   )
 );

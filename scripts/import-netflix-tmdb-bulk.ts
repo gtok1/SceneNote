@@ -366,7 +366,7 @@ async function processRow({
 
   const tmdbId = String(tmdbMatch.candidate.id);
   const mediaType = tmdbMatch.candidate.media_type;
-  const existingAfterTmdb = findContentByTmdb(contents, tmdbId);
+  const existingAfterTmdb = findContentByTmdb(contents, tmdbId, mediaType);
 
   if (existingAfterTmdb) {
     const statusResult = await maybeUpsertCompletedStatus(supabase, {
@@ -501,8 +501,11 @@ export function normalizeWorkRows(rows: JsonRecord[]): WorkRow[] {
 }
 
 export function findExistingContentForRow(row: WorkRow, contents: ContentRecord[]): ExistingMatch {
-  if (row.tmdbId) {
-    const tmdbMatch = findContentByTmdb(contents, row.tmdbId);
+  const mediaType = row.tmdbMediaType ?? (row.mediaHint === "unknown" ? null : row.mediaHint);
+  // A numeric TMDB id alone is ambiguous across movie/TV. Untyped rows must
+  // still pass the existing title confirmation or provider matching below.
+  if (row.tmdbId && mediaType) {
+    const tmdbMatch = findContentByTmdb(contents, row.tmdbId, mediaType);
     if (tmdbMatch) {
       return { status: "matched", content: tmdbMatch, reason: "tmdb_id matched existing content" };
     }
@@ -520,8 +523,8 @@ export function findExistingContentForRow(row: WorkRow, contents: ContentRecord[
 
   if (!matches.length) return { status: "none", reason: "no exact title match" };
 
-  const mediaMatches = filterByMediaHint(matches, row.mediaHint);
-  const candidates = mediaMatches.length ? mediaMatches : matches;
+  const candidates = filterByMediaHint(matches, mediaType ?? "unknown");
+  if (!candidates.length) return { status: "none", reason: "no exact title match for requested media type" };
   if (candidates.length === 1 && candidates[0]) {
     return { status: "matched", content: candidates[0], reason: "single exact title match" };
   }
@@ -675,6 +678,7 @@ async function createOrUpdateTmdbContent(
         content_type: contentType,
         source_api: "tmdb",
         source_id: tmdbId,
+        source_media_type: mediaType,
         title_primary: titlePrimary,
         title_original: titleOriginal,
         poster_url: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
@@ -683,7 +687,7 @@ async function createOrUpdateTmdbContent(
         air_date: airDate,
         end_date: isMovie ? airDate : dateOnly(detail.last_air_date)
       },
-      { onConflict: "source_api,source_id" }
+      { onConflict: "source_api,source_id,source_media_type" }
     )
     .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date")
     .single();
@@ -696,9 +700,10 @@ async function createOrUpdateTmdbContent(
     {
       content_id: content.id,
       api_source: "tmdb",
-      external_id: tmdbId
+      external_id: tmdbId,
+      media_type: mediaType
     },
-    { onConflict: "api_source,external_id", ignoreDuplicates: true }
+    { onConflict: "api_source,external_id,media_type", ignoreDuplicates: true }
   );
   if (externalError) throw new Error(externalError.message);
 
@@ -952,8 +957,9 @@ function tmdbCandidateTitles(candidate: TmdbSearchCandidate): string[] {
   ]);
 }
 
-function findContentByTmdb(contents: ContentRecord[], tmdbId: string): ContentRecord | undefined {
+function findContentByTmdb(contents: ContentRecord[], tmdbId: string, mediaType: TmdbMediaType): ContentRecord | undefined {
   return contents.find((content) => {
+    if ((content.content_type === "movie" ? "movie" : "tv") !== mediaType) return false;
     if (content.source_api === "tmdb" && content.source_id === tmdbId) return true;
     return content.content_external_ids?.some(
       (externalId) => externalId.api_source === "tmdb" && externalId.external_id === tmdbId

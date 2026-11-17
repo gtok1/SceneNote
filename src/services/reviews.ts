@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getSessionUserId } from "@/services/sessionUser";
 import type { ContentReview, SaveContentReviewInput } from "@/types/reviews";
 import { contentReviewSchema } from "@/utils/validation";
 
@@ -16,11 +17,9 @@ export async function getContentReview(contentId: string): Promise<ContentReview
 }
 
 export async function saveContentReview(input: SaveContentReviewInput): Promise<ContentReview> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const { userId } = await getSessionUserId();
 
-  if (!user) throw new Error("로그인이 필요합니다");
+  if (!userId) throw new Error("로그인이 필요합니다");
 
   const payload = {
     ...input,
@@ -37,7 +36,7 @@ export async function saveContentReview(input: SaveContentReviewInput): Promise<
     .from("reviews")
     .upsert(
       {
-        user_id: user.id,
+        user_id: userId,
         content_id: parsed.data.content_id,
         rating: parsed.data.rating,
         one_line_review: parsed.data.one_line_review,

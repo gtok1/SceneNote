@@ -73,6 +73,9 @@
 | [68 로그인 전 화면 사용성·오류 원문 노출 QA](68_auth_usability_and_error_copy_qa_2026-11-15.md) | 온보딩 로그인 링크·이전, 인증 오류 한국어화, 비밀번호 보기, 화면 24곳 서버 영문 오류 문구 교체 | 구현: T-1~T-17·24곳 연결, 로그인 전 웹 확인. 실제 인증 실패·로그인 후 오프라인·iOS 수동 확인 남음. 앱만 변경, 서버 배포 불필요. 증거는 development_next_steps 참조 |
 | [69 공개 메타데이터 영속 재사용](69_persistent_public_metadata_cache_fixes_spec.md) | 보러가기·작품/인물 상세 DB 저장·수동 갱신, 공유 인물 프로필·핀/등록 캐시 공유, 전체 API 흐름 점검 | 구현·검증/운영 적용 여부는 development_next_steps 참조. DB 스키마·RLS 변경 없음 |
 | [70 최신 추천 수집·CPU 오류 정정](70_latest_recommendation_catalog_and_cpu_fixes_spec.md) | 최신모드와 all-year 인기fill 분리, 날짜순 stream cursor·CPU 반복 계산 정정, 새 앱 정책/재시작 | 구현·검증·운영 적용 여부는 development_next_steps 참조 |
+| [71 의미 없는 API 호출 차단·편의성 정정](71_meaningless_api_calls_and_usability_fixes_spec.md) | 응답을 안 쓰는 공개 회차 조회 차단, 카드 조회 계획, Edge 목록 조회 재시도·창 복귀 재조회 끄기, "API" 문구 제거, 총 화수 미정 진행 막대, 앱 당겨서 새로고침 | 앱 구현·자동 검사 통과, 웹 공개 8화/저장 7화 확인. M-2~M-4·M-6 일부·네이티브 M-7~M-8 미확인. 배포 없음([검증 기록](development_next_steps.md#의미-없는-api-호출-차단편의성-docs71-2026-11-16)) |
+| [72 라이브러리 1000행 잘림·중복 조회 정정](72_library_row_limit_and_redundant_reads_fixes_spec.md) | 라이브러리·핀 끝까지 읽기, 저장 전 인증 왕복 제거, 라이브러리 단일 캐시, 회차 방영일 조회 축소 | 앱 구현·자동 검사 통과. 웹/앱 M-1~M-8 화면 미확인, 배포 없음([검증 기록](development_next_steps.md#라이브러리-1000행-잘림중복-조회-docs72-2026-11-16)) |
+| [73 프로젝트 정합성 결함 11건 보완](73_project_integrity_fixes_spec.md) | TMDB 식별자·인증 복원·쓰기/복구·회차 완전성·목록/추천 입력·시즌 공유·원자적 핀 저장/이동 | 코드·자동 검사 완료, 사용자 승인 후 운영 DB 3개·함수 7개 반영 완료. 웹/iOS/Android 화면 미확인, 공개 웹 origin 미설정([검증 기록](development_next_steps.md#프로젝트-정합성-보완-docs73-2026-11-16)) |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시
@@ -91,6 +94,6 @@
 - [AGENTS.md](../AGENTS.md): 공통 규칙과 작업별 읽기 경로. [CLAUDE.md](../CLAUDE.md): 같은 규칙을 참조하는 Claude용 안내.
 - [.claude/agents](../.claude/agents/): 역할별 전문 지침. `.claude/agent-memory/`는 과거 기억이며 개인 메모를 새 문서로 복사하지 않는다.
 - [Codex orchestrate](../.agents/skills/orchestrate/SKILL.md): 역할 산출물 통합의 진입점. [공통 절차](../.claude/skills/orchestrate/SKILL.md)를 참조한다. 일반 코드 수정·문서 점검에 강제 적용하지 않는다.
-- 신규 스킬이나 별도 점검 보고서는 추가하지 않았다. 실행은 루트 README, 구조는 04/08, 검증·작업 재개는 development_next_steps에서 관리한다.
+- [scenenote-verify](../.agents/skills/scenenote-verify/SKILL.md): 작업 중 기능별 선택 테스트와 완료 검사, 짧은 출력·개별 로그. [Claude 진입점](../.claude/skills/scenenote-verify/SKILL.md)은 같은 절차를 참조한다. 커밋 전 경로 검사 설치·상태 확인은 [README](../README.md#실행빌드검증-명령)를 따른다. 검증·작업 재개 증거는 development_next_steps에서 관리한다.
 
 Codex 지침은 실행 시 구성되므로 편집 즉시 현재 세션에 재적용된다고 가정하지 않는다. 같은 위치의 override, 작업 디렉터리, 실제 로드한 지침 경로를 새 세션에서 확인한다. 저장소 스킬은 `.agents/skills` 아래에서 발견된다. 근거: [공식 AGENTS 안내](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [공식 스킬 안내](https://learn.chatgpt.com/docs/build-skills).

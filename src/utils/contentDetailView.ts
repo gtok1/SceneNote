@@ -84,15 +84,24 @@ export type EpisodeChoiceMode =
   | { kind: "count"; numbers: number[] }
   | { kind: "released"; numbers: number[] }
   | { kind: "manual" };
-export const EPISODE_CHOICE_MANUAL_COPY = "API에서 이 작품의 화수를 알려 주지 않아요. 본 회차를 직접 입력해 주세요.";
+export const EPISODE_CHOICE_MANUAL_COPY = "아직 화수 정보가 없어요. 본 회차를 직접 입력해 주세요.";
+
+/** The same count boundary controls numbered choices and whether released rows are needed. */
+export function needsReleasedEpisodeLookup(input: {
+  seasonEpisodeCount: number | null | undefined;
+  totalEpisodes: number | null;
+}): boolean {
+  const count = input.seasonEpisodeCount ?? input.totalEpisodes;
+  return !(count !== null && Number.isInteger(count) && count >= 1 && count <= EPISODE_CHOICE_MAX);
+}
 
 export function resolveEpisodeChoiceMode(input: {
   seasonEpisodeCount: number | null | undefined;
   totalEpisodes: number | null;
   releasedEpisodes: readonly { episode_number: number }[];
 }): EpisodeChoiceMode {
-  const count = input.seasonEpisodeCount ?? input.totalEpisodes;
-  if (count !== null && Number.isInteger(count) && count >= 1 && count <= EPISODE_CHOICE_MAX) {
+  if (!needsReleasedEpisodeLookup(input)) {
+    const count = (input.seasonEpisodeCount ?? input.totalEpisodes) as number;
     return { kind: "count", numbers: Array.from({ length: count }, (_, i) => i + 1) };
   }
   const numbers = episodeChoiceNumbers(input.releasedEpisodes);
@@ -107,11 +116,46 @@ export function episodeChoiceInfoText(input: {
 }): string | null {
   if (input.mode.kind === "count") return null;
   if (input.mode.kind === "released") {
-    return `API 공개 회차 ${input.mode.numbers.length}개 · 최근 ${input.mode.numbers.at(-1)}화${input.totalEpisodes === null ? " · 총 화수 미정" : ""}`;
+    return `공개된 회차 ${input.mode.numbers.length}개 · 최근 ${input.mode.numbers.at(-1)}화${input.totalEpisodes === null ? " · 총 화수 미정" : ""}`;
   }
   if (input.isError) return "공개 회차를 불러오지 못했어요.";
   if (input.isFetching) return "공개된 회차를 확인하고 있어요.";
   return EPISODE_CHOICE_MANUAL_COPY;
+}
+
+export function episodeProgressHeader(input: {
+  watchedThrough: number;
+  draftEpisodeNumber: number;
+  totalEpisodes: number | null;
+  mode: EpisodeChoiceMode;
+  hasSeasonSelector: boolean;
+}): { summary: string; barMax: number | null; barNow: number } {
+  const watchedThrough = Number.isFinite(input.watchedThrough) ? input.watchedThrough : 0;
+  if (input.totalEpisodes !== null) {
+    return {
+      summary: `${watchedThrough} / ${input.totalEpisodes}화`,
+      barMax: input.totalEpisodes,
+      barNow: watchedThrough
+    };
+  }
+  if (input.mode.kind === "released" && !input.hasSeasonSelector) {
+    const latest = input.mode.numbers.at(-1);
+    if (latest !== undefined) {
+      const draftEpisodeNumber = Number.isFinite(input.draftEpisodeNumber)
+        ? input.draftEpisodeNumber
+        : watchedThrough;
+      return {
+        summary: `${draftEpisodeNumber} / 공개 ${latest}화`,
+        barMax: latest,
+        barNow: Math.min(draftEpisodeNumber, latest)
+      };
+    }
+  }
+  return {
+    summary: `${watchedThrough}화까지 시청`,
+    barMax: null,
+    barNow: watchedThrough
+  };
 }
 
 type ProgressDraftItem = Pick<LibraryListItem,

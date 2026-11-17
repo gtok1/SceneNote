@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getSessionUserId } from "@/services/sessionUser";
 import type { Tag } from "@/types/pins";
 
 export async function getTags(): Promise<Tag[]> {
@@ -8,11 +9,9 @@ export async function getTags(): Promise<Tag[]> {
 }
 
 export async function createTag(name: string): Promise<Tag> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const { userId } = await getSessionUserId();
 
-  if (!user) throw new Error("로그인이 필요합니다");
+  if (!userId) throw new Error("로그인이 필요합니다");
 
   const normalized = name.trim();
   if (!normalized) throw new Error("태그 이름을 입력해 주세요");
@@ -21,7 +20,7 @@ export async function createTag(name: string): Promise<Tag> {
     .from("tags")
     .upsert(
       {
-        user_id: user.id,
+        user_id: userId,
         name: normalized
       },
       { onConflict: "user_id,name" }

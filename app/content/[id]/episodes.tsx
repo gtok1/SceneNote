@@ -57,7 +57,7 @@ export default function EpisodesScreen() {
     return (
       <ScreenStateFrame>
       <EmptyState
-        description="외부 API에서 아직 시즌 정보를 찾지 못했거나, 이 작품은 에피소드 정보가 없는 형식입니다."
+        description="아직 시즌 정보를 찾지 못했거나, 회차 정보가 없는 작품이에요."
         title="시즌 정보가 없습니다"
       />
       </ScreenStateFrame>

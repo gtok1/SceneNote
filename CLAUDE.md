@@ -119,6 +119,7 @@ UI(화면·컴포넌트·스타일) 작업과 UI 명세·프롬프트는 [docs/0
 **스킬** (`.claude/skills/`) — 현재 대화에서 Claude가 직접 수행하는 작업:
 
 - **orchestrate**: 여러 역할(PM, Tech Lead, FE, BE) 산출물을 검토·조율하여 최종 MVP 통합 계획 수렴
+- [**scenenote-verify**](.claude/skills/scenenote-verify/SKILL.md): AGENTS의 검증 지침에 따라 기능별 중간 테스트와 완료 검사를 실행한다. 절차는 공통 스킬에서 관리한다.
 
 새 기능을 시작하거나 설계 결정이 필요할 때는 해당 에이전트를 사용한다. 역할 산출물 통합이 필요할 때만 `/orchestrate` 스킬을 호출한다. Codex 진입점은 `.agents/skills/orchestrate/SKILL.md`이며 공통 절차는 `.claude/skills/orchestrate/SKILL.md`에 있다.
 

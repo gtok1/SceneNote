@@ -7,6 +7,7 @@ import { extractGenreNames, upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ContentMeta, ExternalSource } from "../_shared/types.ts";
+import { contentMediaType, matchesStoredMediaType, requestMediaType } from "../_shared/contentIdentity.ts";
 
 interface GetContentDetailRequest {
   api_source?: ExternalSource;
@@ -46,16 +47,23 @@ Deno.serve(async (req: Request) => {
     return jsonError(400, "INVALID_REQUEST", "external_id is required");
   }
 
+  const mediaType = requestMediaType(source, body.value.media_type);
+  if (mediaType === null) return jsonError(400, "INVALID_REQUEST", "TMDB media_type must be movie or tv");
+
   const adminClient = createAdminClient();
 
   const { data: externalRow, error: externalError } = await adminClient
     .from("content_external_ids")
-    .select("content_id")
+    .select("content_id,contents(content_type,source_api,source_media_type)")
     .eq("api_source", source)
     .eq("external_id", externalId)
+    .eq("media_type", mediaType)
     .maybeSingle();
 
   if (externalError) return jsonError(500, "DB_ERROR", externalError.message);
+  if (externalRow && !matchesStoredMediaType(externalRow.contents, source, mediaType)) {
+    return jsonError(409, "CONTENT_IDENTITY_MISMATCH", "저장된 작품 종류가 요청과 달라 갱신하지 않았어요.");
+  }
 
   if (body.value.force_refresh !== undefined && typeof body.value.force_refresh !== "boolean") {
     return jsonError(400, "INVALID_REQUEST", "force_refresh must be a boolean");
@@ -68,6 +76,7 @@ Deno.serve(async (req: Request) => {
       forceRefresh: body.value.force_refresh === true,
       fetchFresh: async () => {
         const contentMeta = await fetchContentDetail(source, externalId, body.value.media_type);
+        if (contentMediaType(source, contentMeta.content_type) !== mediaType) throw new Error("CONTENT_IDENTITY_MISMATCH");
         // Required content writes finish before publishing the shared snapshot. A failed mirror
         // must not make a failed refresh visible to later readers as a successful replacement.
         if (externalRow?.content_id) {

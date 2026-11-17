@@ -1,4 +1,5 @@
 import { decodeTasteFillCursor, deriveTasteFillQueries, encodeTasteFillCursor, initializeTasteFillProgress, selectTasteFillItems, shouldPrefetchTasteFill, planTasteFill, recommendationScanBudget } from "../_shared/recommendationTasteFill.ts";
+import { readAllRows } from "../_shared/readAllRows.ts";
 import {
   hasKoreanDisplayTitle,
   scanRecommendationCatalog,
@@ -179,16 +180,22 @@ Deno.serve(async (req: Request) => {
 
   try {
     const [libraryResult, feedbackResult, recentSeenIds] = await Promise.all([
-      userClient
+      readAllRows((from, to) => userClient
         .from("user_library_items")
         .select(
-          "content_id,status,status_flags,watch_count,contents(id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id),content_genres(genres(name)),content_themes(family,key,label,centrality,source,source_key),seasons(episode_count))"
+          "id,content_id,status,status_flags,watch_count,contents(id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,content_external_ids(api_source,external_id,media_type),content_genres(genres(name)),content_themes(family,key,label,centrality,source,source_key),seasons(episode_count))"
         )
-        .eq("user_id", user.id),
-      userClient
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to), { rowKey: row => (row as { id?: string }).id }),
+      readAllRows((from, to) => userClient
         .from("user_content_feedback")
-        .select("target_type,target_key,action,weight,source_content_id,updated_at")
-        .eq("user_id", user.id),
+        .select("id,target_type,target_key,action,weight,source_content_id,updated_at")
+        .eq("user_id", user.id)
+        .order("target_type")
+        .order("target_key")
+        .order("action")
+        .range(from, to), { rowKey: row => (row as { id?: string }).id }),
       loadRecentSeenIdentityKeys(userClient, user.id)
     ]);
 

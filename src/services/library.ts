@@ -1,4 +1,9 @@
-import { readBatchedRows } from "@/utils/batchedQuery";
+import { readAllRows, readBatchedRows } from "@/utils/batchedQuery";
+import { contentIdsNeedingEpisodeAirDates } from "@/utils/libraryAirDates";
+import { getSessionUserId } from "@/services/sessionUser";
+import { assertLibraryWriteApplied } from "@/utils/libraryWrite";
+import { hasKnownEpisodeCount, isEpisodeListReusable } from "../../supabase/functions/_shared/episodeCache";
+import { requestMediaType } from "../../supabase/functions/_shared/contentIdentity";
 import { getLibraryProgressFields, type LibraryProgressRow } from "@/utils/libraryProgress";
 import { parseStoredCrew } from "../../supabase/functions/_shared/contentCrew";
 import { getPrimaryWatchStatus, normalizeWatchStatuses } from "@/constants/status";
@@ -77,32 +82,38 @@ const LIBRARY_ITEM_FALLBACK_SELECT =
   "id,user_id,content_id,status,watch_count,added_at,updated_at,contents(*,content_genres(genres(name)))";
 
 export async function getLibraryItems(status: LibraryStatusFilter): Promise<LibraryListItem[]> {
-  let query = supabase
-    .from("user_library_items")
-    .select(LIBRARY_ITEM_SELECT)
-    .order("updated_at", { ascending: false });
-
-  if (status !== "all") {
-    query = query.contains("status_flags", [status]);
-  }
-
-  let { data, error } = await query;
-
-  if (error && isMissingOptionalLibraryColumnError(error.message)) {
-    let fallbackQuery = supabase
+  // max_rows(1000)를 넘겨 읽는다. 잘린 목록을 성공으로 돌려주지 않는다(docs/72 D-1).
+  let { data, error }: { data: unknown[] | null; error: { message: string } | null } = await readAllRows((from, to) => {
+    let query = supabase
       .from("user_library_items")
-      .select(LIBRARY_ITEM_FALLBACK_SELECT)
-      .order("updated_at", { ascending: false });
+      .select(LIBRARY_ITEM_SELECT)
+      .order("updated_at", { ascending: false })
+      .order("id");
 
     if (status !== "all") {
-      fallbackQuery = fallbackQuery.eq("status", status);
+      query = query.contains("status_flags", [status]);
     }
+    return query.range(from, to);
+  }, { rowKey: row => (row as unknown as RawLibraryRow).id });
 
-    const fallback = await fallbackQuery;
-    data = fallback.data as typeof data;
+  if (error && isMissingOptionalLibraryColumnError(error.message)) {
+    const fallback = await readAllRows((from, to) => {
+      let fallbackQuery = supabase
+        .from("user_library_items")
+        .select(LIBRARY_ITEM_FALLBACK_SELECT)
+        .order("updated_at", { ascending: false })
+        .order("id");
+
+      if (status !== "all") {
+        fallbackQuery = fallbackQuery.eq("status", status);
+      }
+      return fallbackQuery.range(from, to);
+    }, { rowKey: row => row.id });
+    data = fallback.data;
     error = fallback.error;
   }
 
+  if (error?.message === "ROW_LIMIT_EXCEEDED") throw new Error("라이브러리 작품이 너무 많아 불러오지 못했어요.");
   if (error) throw new Error(error.message);
 
   const items = ((data ?? []) as unknown as RawLibraryRow[])
@@ -239,12 +250,13 @@ export async function updateLibraryStatuses(
     patch.watch_count = Math.max(0, Math.floor(options.watchCount));
   }
 
-  const { error } = await supabase
+  const result = await supabase
     .from("user_library_items")
     .update(patch)
-    .eq("id", libraryItemId);
+    .eq("id", libraryItemId)
+    .select("id");
 
-  if (error && error.message.includes("status_flags")) {
+  if (result.error && result.error.message.includes("status_flags")) {
     const fallbackPatch: { status: WatchStatus; watch_count?: number } = { status: primaryStatus };
     if (options.watchCount !== undefined) {
       fallbackPatch.watch_count = Math.max(0, Math.floor(options.watchCount));
@@ -253,13 +265,14 @@ export async function updateLibraryStatuses(
     const fallback = await supabase
       .from("user_library_items")
       .update(fallbackPatch)
-      .eq("id", libraryItemId);
+      .eq("id", libraryItemId)
+      .select("id");
 
-    if (fallback.error) throw new Error(fallback.error.message);
+    assertLibraryWriteApplied(fallback, "상태를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
     return;
   }
 
-  if (error) throw new Error(error.message);
+  assertLibraryWriteApplied(result, "상태를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
 }
 
 export async function updateLibraryWatchCount(
@@ -305,30 +318,32 @@ export async function updateLibraryManualProgress(
     throw new Error("회차는 9999 이하로 입력해 주세요");
   }
 
-  const { error } = await supabase
+  const result = await supabase
     .from("user_library_items")
     .update(patch)
-    .eq("id", libraryItemId);
+    .eq("id", libraryItemId)
+    .select("id");
 
-  if (error && isMissingOptionalLibraryColumnError(error.message)) {
+  if (result.error && isMissingOptionalLibraryColumnError(result.error.message)) {
     throw new Error("시청 진행 위치 기능은 서버 업데이트 후 사용할 수 있습니다.");
   }
-  if (error) throw new Error(error.message);
+  assertLibraryWriteApplied(result, "시청 위치를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
 }
 
 export async function updateLibraryWatchDates(
   libraryItemId: string,
   dates: { firstWatchedAt: string | null; lastWatchedAt: string | null }
 ): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from("user_library_items")
     .update({
       first_watched_at: dates.firstWatchedAt,
       last_watched_at: dates.lastWatchedAt
     })
-    .eq("id", libraryItemId);
+    .eq("id", libraryItemId)
+    .select("id");
 
-  if (error) throw new Error(error.message);
+  assertLibraryWriteApplied(result, "본 시기를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
 }
 
 export async function deleteLibraryItem(libraryItemId: string): Promise<void> {
@@ -342,13 +357,17 @@ export async function deleteLibraryItem(libraryItemId: string): Promise<void> {
 
 export async function getLibraryStatusByExternalId(
   source: ExternalSource,
-  externalId: string
+  externalId: string,
+  mediaType?: "movie" | "tv"
 ): Promise<LibraryListItem | null> {
+  const namespace = requestMediaType(source, mediaType);
+  if (namespace === null) throw new Error("영화 또는 TV 종류를 선택해 주세요.");
   const { data: externalRow, error: externalError } = await supabase
     .from("content_external_ids")
     .select("content_id")
     .eq("api_source", source)
     .eq("external_id", externalId)
+    .eq("media_type", namespace)
     .maybeSingle();
 
   if (externalError) throw new Error(externalError.message);
@@ -435,6 +454,7 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
   if (items.length === 0) return items;
 
   const contentIds = Array.from(new Set(items.map((item) => item.content_id)));
+  const episodeAirDateContentIds = contentIdsNeedingEpisodeAirDates(items);
   const [reviewsResult, seasonsResult, progressResult, episodeAirDatesResult] = await Promise.all([
     readBatchedRows(contentIds, (ids, from, to) => supabase
       .from("reviews")
@@ -454,7 +474,7 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       .in("content_id", ids)
       .order("id")
       .range(from, to)),
-    readBatchedRows(contentIds, (ids, from, to) => supabase
+    readBatchedRows(episodeAirDateContentIds, (ids, from, to) => supabase
       .from("episodes")
       .select("content_id,air_date")
       .in("content_id", ids)
@@ -503,10 +523,11 @@ async function enrichLibraryMetadata(items: LibraryListItem[]): Promise<LibraryL
       title_primary: createSeasonDisplayTitle(item.title_primary, item.season_number, matchedSeason?.title ?? null),
       air_date: matchedSeason ? null : item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null,
       air_year: matchedSeason?.air_year ?? item.air_year,
-      end_date:
-        item.end_date ??
-        lastAirDateByContentId.get(item.content_id) ??
-        (item.content_type === "movie" ? (item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null) : null),
+      end_date: item.source_api === "anilist"
+        ? item.end_date
+        : item.end_date ??
+          lastAirDateByContentId.get(item.content_id) ??
+          (item.content_type === "movie" ? (item.air_date ?? firstAirDateByContentId.get(item.content_id) ?? null) : null),
       rating: review?.rating ?? null,
       one_line_review: review?.one_line_review ?? null,
       ...progressFields
@@ -582,15 +603,40 @@ export async function getSeasons(contentId: string): Promise<Season[]> {
 }
 
 export async function getEpisodes(contentId: string, seasonId: string): Promise<Episode[]> {
-  const { data, error } = await supabase
-    .from("episodes")
-    .select("*")
-    .eq("content_id", contentId)
-    .eq("season_id", seasonId)
-    .order("episode_number", { ascending: true });
+  const [episodesResult, seasonResult] = await Promise.all([
+    readAllRows((from, to) => supabase
+      .from("episodes")
+      .select("*")
+      .eq("content_id", contentId)
+      .eq("season_id", seasonId)
+      .order("episode_number", { ascending: true })
+      .order("id")
+      .range(from, to), { rowKey: row => row.id }),
+    supabase.from("seasons")
+      .select("episode_count,episodes_synced_at,published_episode_numbers")
+      .eq("id", seasonId).eq("content_id", contentId).maybeSingle()
+  ]);
+  if (episodesResult.error?.message === "ROW_LIMIT_EXCEEDED") throw new Error("회차가 너무 많아 불러오지 못했어요.");
+  if (episodesResult.error) throw new Error(episodesResult.error.message);
 
-  if (error) throw new Error(error.message);
-  if (data && data.length > 0) return data as Episode[];
+  // A staged app may run before the new sync-marker columns have been applied.
+  let season: { episode_count: number | null; episodes_synced_at?: string | null; published_episode_numbers?: number[] | null } | null = seasonResult.data;
+  if (seasonResult.error && /episodes_synced_at|published_episode_numbers/.test(seasonResult.error.message)) {
+    const legacy = await supabase.from("seasons").select("episode_count")
+      .eq("id", seasonId).eq("content_id", contentId).maybeSingle();
+    if (legacy.error) throw new Error(legacy.error.message);
+    season = legacy.data;
+  } else if (seasonResult.error) throw new Error(seasonResult.error.message);
+  if (!season) throw new Error("시즌 정보를 찾지 못했어요. 작품을 다시 확인해 주세요.");
+
+  const episodes = (episodesResult.data ?? []) as Episode[];
+  if (isEpisodeListReusable(episodes, season.episode_count, season.episodes_synced_at, new Date(), season.published_episode_numbers)) {
+    if (!hasKnownEpisodeCount(season.episode_count)) {
+      const published = new Set(season.published_episode_numbers ?? []);
+      return episodes.filter(episode => published.has(episode.episode_number));
+    }
+    return episodes;
+  }
 
   const { data: functionData, error: functionError } = await supabase.functions.invoke<{
     episodes: Episode[];
@@ -600,12 +646,17 @@ export async function getEpisodes(contentId: string, seasonId: string): Promise<
   }>("fetch-episodes", {
     body: {
       content_id: contentId,
-      season_id: seasonId
+      season_id: seasonId,
+      force_refresh: true
     }
   });
 
   if (functionError) throw new Error(functionError.message);
-  return functionData?.episodes ?? [];
+  const fresh = functionData?.episodes ?? [];
+  if (hasKnownEpisodeCount(season.episode_count) && !isEpisodeListReusable(fresh, season.episode_count, null)) {
+    throw new Error("회차 목록을 모두 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
+  }
+  return fresh;
 }
 
 export interface EpisodeAvailability {
@@ -643,11 +694,14 @@ export async function getEpisodeAvailability(contentId: string, seasonId: string
 }
 
 export async function getEpisodeProgress(contentId: string): Promise<EpisodeProgress[]> {
-  const { data, error } = await supabase
+  const { data, error } = await readAllRows((from, to) => supabase
     .from("user_episode_progress")
     .select("*")
-    .eq("content_id", contentId);
+    .eq("content_id", contentId)
+    .order("id")
+    .range(from, to), { rowKey: row => row.id });
 
+  if (error?.message === "ROW_LIMIT_EXCEEDED") throw new Error("시청 기록이 너무 많아 불러오지 못했어요.");
   if (error) throw new Error(error.message);
   return (data ?? []) as EpisodeProgress[];
 }
@@ -656,11 +710,8 @@ export async function toggleEpisodeProgress(
   episode: Episode,
   currentlyWatched: boolean
 ): Promise<void> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) throw new Error("로그인이 필요합니다");
+  const { userId } = await getSessionUserId();
+  if (!userId) throw new Error("로그인이 필요합니다");
 
   if (currentlyWatched) {
     const { error } = await supabase
@@ -673,7 +724,7 @@ export async function toggleEpisodeProgress(
 
   const { error } = await supabase.from("user_episode_progress").upsert(
     {
-      user_id: user.id,
+      user_id: userId,
       episode_id: episode.id,
       content_id: episode.content_id,
       watched_at: new Date().toISOString()

@@ -5,6 +5,7 @@ import { upsertGenres } from "../_shared/genres.ts";
 import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ContentMeta, ContentType, ExternalSource, WatchStatus } from "../_shared/types.ts";
+import { contentMediaType as storedContentMediaType } from "../_shared/contentIdentity.ts";
 
 type MediaHint = "tv" | "movie" | "unknown";
 type TmdbMediaType = "tv" | "movie";
@@ -349,6 +350,7 @@ async function createTmdbContent(
         content_type: contentMeta.content_type,
         source_api: "tmdb",
         source_id: tmdbId,
+        source_media_type: storedContentMediaType("tmdb", contentMeta.content_type),
         title_primary: contentMeta.title_primary,
         title_original: contentMeta.title_original,
         poster_url: contentMeta.poster_url,
@@ -357,7 +359,7 @@ async function createTmdbContent(
         air_date: contentMeta.air_date,
         end_date: contentMeta.end_date
       },
-      { onConflict: "source_api,source_id" }
+      { onConflict: "source_api,source_id,source_media_type" }
     )
     .select("id,content_type,source_api,source_id,title_primary,title_original,air_year,air_date,end_date")
     .single();
@@ -373,9 +375,10 @@ async function createTmdbContent(
     {
       content_id: contentId,
       api_source: "tmdb",
-      external_id: tmdbId
+      external_id: tmdbId,
+      media_type: mediaType
     },
-    { onConflict: "api_source,external_id", ignoreDuplicates: true }
+    { onConflict: "api_source,external_id,media_type", ignoreDuplicates: true }
   );
   if (externalIdError) throw new Error(externalIdError.message);
 
@@ -539,8 +542,10 @@ function findExistingContentForRow(
   row: WorkRow,
   contents: ContentRecord[]
 ): { status: "none" | "matched" | "ambiguous"; content?: ContentRecord; reason: string } {
-  if (row.tmdbId) {
-    const tmdbMatch = findContentByTmdb(contents, row.tmdbId, row.tmdbMediaType ?? undefined);
+  const mediaType = row.tmdbMediaType ?? (row.mediaHint === "unknown" ? null : row.mediaHint);
+  // Do not resolve a raw TMDB id until its movie/TV namespace is known.
+  if (row.tmdbId && mediaType) {
+    const tmdbMatch = findContentByTmdb(contents, row.tmdbId, mediaType);
     if (tmdbMatch) return { status: "matched", content: tmdbMatch, reason: "tmdb_id matched existing content" };
   }
 
@@ -555,8 +560,8 @@ function findExistingContentForRow(
   );
   if (!matches.length) return { status: "none", reason: "no exact title match" };
 
-  const mediaMatches = filterByMediaHint(matches, row.mediaHint);
-  const candidates = mediaMatches.length ? mediaMatches : matches;
+  const candidates = filterByMediaHint(matches, mediaType ?? "unknown");
+  if (!candidates.length) return { status: "none", reason: "no exact title match for requested media type" };
   if (candidates.length === 1 && candidates[0]) {
     return { status: "matched", content: candidates[0], reason: "single exact title match" };
   }
@@ -647,10 +652,10 @@ function scoreTmdbCandidate(row: WorkRow, candidate: TmdbSearchCandidate): numbe
 function findContentByTmdb(
   contents: ContentRecord[],
   tmdbId: string,
-  mediaType?: TmdbMediaType
+  mediaType: TmdbMediaType
 ): ContentRecord | undefined {
   return contents.find((content) => {
-    if (mediaType && contentMediaType(content.content_type) !== mediaType) return false;
+    if (contentMediaType(content.content_type) !== mediaType) return false;
     if (content.source_api === "tmdb" && content.source_id === tmdbId) return true;
     return content.content_external_ids?.some(
       (externalId) => externalId.api_source === "tmdb" && externalId.external_id === tmdbId

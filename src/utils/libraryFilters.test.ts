@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { CrewMember } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
+import * as libraryFilters from "./libraryFilters";
 
 import {
   filterLibraryItems,
@@ -133,4 +134,37 @@ it("F-1 finds library items by crew names", () => {
 it("F-2 finds original crew names without case sensitivity", () => {
   const withCrew = {...item("frieren","anime",[]),crew:[crewMember(2,"斎藤圭一郎","Keiichiro Saito")]};
   assert.deepEqual(filterLibraryItems([withCrew], {...baseFilters,searchQuery:"saito"}).map(entry => entry.content_id), ["frieren"]);
+});
+
+it("72 T-11: all-status selection preserves the original array reference", () => {
+  const entries = [item("first", "anime", []), item("second", "movie", [])];
+  assert.equal(libraryFilters.filterLibraryItemsByStatus(entries, "all"), entries);
+});
+
+it("72 T-12: status selection includes an item with multiple matching statuses", () => {
+  const entries: LibraryListItem[] = [
+    { ...item("first", "anime", []), statuses: ["watching", "recommended"] },
+    { ...item("second", "movie", []), statuses: ["completed"] }
+  ];
+  assert.deepEqual(libraryFilters.filterLibraryItemsByStatus(entries, "watching"), [entries[0]]);
+});
+
+it("72 T-13: all six status filters preserve matching items and their original order", () => {
+  const statuses = libraryFilters.STATUS_FILTERS.filter((status) => status !== "all");
+  assert.equal(statuses.length, 6);
+  for (const status of statuses) {
+    const otherStatus = statuses.find((candidate) => candidate !== status)!;
+    const entries: LibraryListItem[] = [
+      { ...item(`${status}-first`, "anime", []), statuses: [status] },
+      { ...item("other", "movie", []), statuses: [otherStatus] },
+      { ...item(`${status}-second`, "anime", []), statuses: [status] }
+    ];
+    assert.deepEqual(libraryFilters.filterLibraryItemsByStatus(entries, status), [entries[0], entries[2]]);
+  }
+});
+
+it("72 T-14: status selection returns an empty array for empty or unmatched lists", () => {
+  assert.deepEqual(libraryFilters.filterLibraryItemsByStatus([], "watching"), []);
+  const completed: LibraryListItem = { ...item("completed", "anime", []), statuses: ["completed"] };
+  assert.deepEqual(libraryFilters.filterLibraryItemsByStatus([completed], "watching"), []);
 });

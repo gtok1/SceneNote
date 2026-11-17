@@ -1,6 +1,12 @@
-import { LIBRARY_SHARE_MAX_ITEMS } from "../../supabase/functions/_shared/libraryShare";
+import Constants from "expo-constants";
+import { Platform, Share } from "react-native";
+
+import { LIBRARY_SHARE_MAX_ITEMS, selectSharedLibraryRows } from "../../supabase/functions/_shared/libraryShare";
 import { supabase } from "@/lib/supabase";
 import { getLibraryItems } from "@/services/library";
+import { getSessionUserId } from "@/services/sessionUser";
+import { readBatchedRows } from "@/utils/batchedQuery";
+import { resolveLibraryShareOrigin } from "@/utils/libraryShareUrl";
 import {
   type LibraryShareAction,
   type LibraryShareErrorInfo,
@@ -9,13 +15,14 @@ import {
 } from "@/utils/libraryShareErrors";
 import type { Json } from "@/types/database";
 import type { LibraryListItem } from "@/types/library";
-import type { LibraryShareDetail, LibraryShareFilters, LibraryShareSummary } from "@/types/libraryShare";
+import type { CreateLibraryShareInput, LibraryShareDetail, LibraryShareFilters, LibraryShareSummary } from "@/types/libraryShare";
 
 interface CreateLibraryShareResponse {
   id: string;
   title: string;
   item_count: number;
   created_at: string;
+  scope?: string;
 }
 
 interface GetLibraryShareResponse {
@@ -26,6 +33,7 @@ interface GetLibraryShareResponse {
   item_count: number;
   created_at: string;
   items: LibraryShareDetail["items"];
+  contract_version?: string;
 }
 
 interface DirectLibraryShareRow {
@@ -34,6 +42,7 @@ interface DirectLibraryShareRow {
   title: string;
   filters: Json;
   content_ids: string[];
+  library_item_ids: string[] | null;
   item_count: number;
   created_at: string;
 }
@@ -47,26 +56,31 @@ export type LibraryShareDeliveryResult = "shared" | "copied" | "ready";
 const SHARE_TABLE_MISSING_MESSAGE =
   "공유 테이블이 아직 DB에 없습니다. Supabase 마이그레이션 0012_library_shares.sql을 적용한 뒤 다시 시도해 주세요.";
 
-export async function createLibraryShare(params: {
-  title: string;
-  filters: LibraryShareFilters;
-  contentIds: string[];
-}): Promise<LibraryShareSummary> {
-  const contentIds = Array.from(new Set(params.contentIds));
-  if (contentIds.length > LIBRARY_SHARE_MAX_ITEMS) throw new Error(tooManyShareItemsMessage(LIBRARY_SHARE_MAX_ITEMS));
+export async function createLibraryShare(params: CreateLibraryShareInput): Promise<LibraryShareSummary> {
+  const libraryItemIds = params.libraryItemIds === undefined ? null : Array.from(new Set(params.libraryItemIds));
+  const contentIds = Array.from(new Set(params.contentIds ?? []));
+  const selection = libraryItemIds ?? contentIds;
+  if (!selection.length) throw new Error("공유할 작품이 없습니다.");
+  if (selection.length > LIBRARY_SHARE_MAX_ITEMS) throw new Error(tooManyShareItemsMessage(LIBRARY_SHARE_MAX_ITEMS));
 
   const body = {
     title: params.title,
     filters: params.filters,
-    content_ids: contentIds
+    content_ids: contentIds,
+    ...(libraryItemIds === null ? {} : { library_item_ids: libraryItemIds })
   };
 
   const { data, error } = await supabase.functions.invoke<CreateLibraryShareResponse>("create-library-share", { body });
 
-  if (!error && data) return toLibraryShareSummary(data);
+  if (!error && data) {
+    if (libraryItemIds !== null && data.scope !== "library-item-v1") {
+      throw new Error("공유 서버가 아직 업데이트되지 않았어요. 잠시 후 다시 시도해 주세요.");
+    }
+    return toLibraryShareSummary(data);
+  }
 
   if (error && shouldFallbackToDirectShare(error)) {
-    return createLibraryShareDirectly({ ...params, contentIds });
+    return createLibraryShareDirectly({ ...params, contentIds, libraryItemIds });
   }
 
   if (error) throw new Error(await toShareFunctionErrorMessage(error, "create"));
@@ -136,26 +150,36 @@ async function createLibraryShareDirectly(params: {
   title: string;
   filters: LibraryShareFilters;
   contentIds: string[];
+  libraryItemIds: string[] | null;
 }): Promise<LibraryShareSummary> {
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
+  const { userId, error: userError } = await getSessionUserId();
 
   if (userError) throw new Error(userError.message);
-  if (!user) throw new Error("공유 링크를 만들려면 로그인이 필요합니다.");
+  if (!userId) throw new Error("공유 링크를 만들려면 로그인이 필요합니다.");
 
-  const contentIds = Array.from(new Set(params.contentIds));
+  let contentIds = Array.from(new Set(params.contentIds));
+  if (params.libraryItemIds !== null) {
+    const owned = await readBatchedRows(params.libraryItemIds, (ids, from, to) => supabase
+      .from("user_library_items").select("id,content_id").eq("user_id", userId)
+      .in("id", ids).order("id").range(from, to));
+    if (owned.error) throw new Error(owned.error.message);
+    const byId = new Map((owned.data ?? []).map(item => [item.id, item.content_id]));
+    if (params.libraryItemIds.some(id => !byId.has(id))) {
+      throw new Error("공유할 작품을 확인하지 못했어요. 라이브러리를 새로고침해 주세요.");
+    }
+    contentIds = Array.from(new Set(params.libraryItemIds.map(id => byId.get(id)!)));
+  }
   if (!contentIds.length) throw new Error("공유할 작품이 없습니다.");
 
   const { data, error } = await supabase
     .from("library_shares")
     .insert({
-      owner_user_id: user.id,
+      owner_user_id: userId,
       title: normalizeShareTitle(params.title),
       filters: params.filters as unknown as Json,
       content_ids: contentIds,
-      item_count: contentIds.length
+      library_item_ids: params.libraryItemIds,
+      item_count: params.libraryItemIds?.length ?? contentIds.length
     })
     .select("id,title,item_count,created_at")
     .single();
@@ -197,6 +221,9 @@ export async function getLibraryShare(id: string): Promise<LibraryShareDetail> {
 
   if (error) throw new Error(await toShareFunctionErrorMessage(error, "open"));
   if (!data) throw new Error("공유 목록 응답이 비어 있습니다.");
+  if (data.contract_version !== "library-share-v2") {
+    throw new Error("공유 서버가 아직 업데이트되지 않았어요. 잠시 후 다시 시도해 주세요.");
+  }
 
   return {
     id: data.id,
@@ -212,7 +239,7 @@ export async function getLibraryShare(id: string): Promise<LibraryShareDetail> {
 async function getLibraryShareDirectly(id: string): Promise<LibraryShareDetail> {
   const { data, error } = await supabase
     .from("library_shares")
-    .select("id,owner_user_id,title,filters,content_ids,item_count,created_at")
+    .select("id,owner_user_id,title,filters,content_ids,library_item_ids,item_count,created_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -221,10 +248,9 @@ async function getLibraryShareDirectly(id: string): Promise<LibraryShareDetail> 
 
   const share = data as DirectLibraryShareRow;
   const allItems = await getLibraryItems("all");
-  const itemsByContentId = new Map(allItems.map((item) => [item.content_id, item]));
-  const items = share.content_ids
-    .map((contentId) => itemsByContentId.get(contentId))
-    .filter((item): item is LibraryListItem => Boolean(item));
+  const rows = allItems.map(item => ({ ...item, id: item.library_item_id }));
+  const items: LibraryListItem[] = selectSharedLibraryRows(rows, share.library_item_ids ?? null, share.content_ids)
+    .map(({ id: _id, ...item }) => item);
 
   return {
     id: share.id,
@@ -239,11 +265,15 @@ async function getLibraryShareDirectly(id: string): Promise<LibraryShareDetail> 
 
 export function buildLibraryShareUrl(shareId: string): string {
   const path = `/share?id=${encodeURIComponent(shareId)}`;
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}${path}`;
-  }
+  return `${getLibraryShareOrigin()}${path}`;
+}
 
-  return path;
+export function getLibraryShareOrigin(): string {
+  return resolveLibraryShareOrigin({
+    platform: Platform.OS,
+    configuredOrigin: Constants.expoConfig?.extra?.publicWebOrigin,
+    webOrigin: typeof window !== "undefined" ? window.location?.origin : null
+  });
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -256,6 +286,14 @@ export async function shareLibraryUrl(params: {
   title: string;
   url: string;
 }): Promise<LibraryShareDeliveryResult> {
+  if (Platform.OS !== "web") {
+    const origin = getLibraryShareOrigin();
+    if (new URL(params.url).origin !== origin || !params.url.startsWith(`${origin}/share?`)) {
+      throw new Error("공유 링크 주소가 올바르지 않아요.");
+    }
+    const result = await Share.share({ title: params.title, message: params.url, url: params.url });
+    return result.action === Share.dismissedAction ? "ready" : "shared";
+  }
   if (typeof navigator !== "undefined") {
     const webNavigator = navigator as OptionalWebShareNavigator;
     if (webNavigator.share) {

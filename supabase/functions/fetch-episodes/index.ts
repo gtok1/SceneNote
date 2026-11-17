@@ -3,6 +3,8 @@ import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ExternalSource } from "../_shared/types.ts";
 import { resolveSeasonContent } from "./seasonContent.ts";
+import { hasKnownEpisodeCount, isEpisodeListReusable, mergeEpisodeRows } from "../_shared/episodeCache.ts";
+import { readAllRows } from "../_shared/readAllRows.ts";
 
 interface FetchEpisodesRequest {
   content_id?: string;
@@ -28,6 +30,9 @@ Deno.serve(async (req: Request) => {
   const seasonId = body.value.season_id?.trim();
   const forceRefresh = body.value.force_refresh ?? false;
   const availabilityOnly = body.value.availability_only ?? false;
+  if (typeof forceRefresh !== "boolean" || typeof availabilityOnly !== "boolean") {
+    return jsonError(400, "INVALID_REQUEST", "Refresh flags must be boolean");
+  }
 
   if (!contentId || !seasonId) {
     return jsonError(400, "INVALID_REQUEST", "content_id and season_id are required");
@@ -37,7 +42,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: season, error: seasonError } = await adminClient
     .from("seasons")
-    .select("id,content_id,season_number,episode_count,contents(source_api,source_id)")
+    .select("id,content_id,season_number,episode_count,episodes_synced_at,published_episode_numbers,contents(source_api,source_id)")
     .eq("id", seasonId)
     .eq("content_id", contentId)
     .maybeSingle();
@@ -46,6 +51,7 @@ Deno.serve(async (req: Request) => {
   if (!season) return jsonError(404, "SEASON_NOT_FOUND", "Season was not found");
 
   const seasonRow = { ...season, contents: resolveSeasonContent(season.contents) };
+  const knownTotal = hasKnownEpisodeCount(seasonRow.episode_count);
 
   if (availabilityOnly) {
     if (!seasonRow.contents) return jsonError(404, "CONTENT_NOT_FOUND", "Related content metadata was not found");
@@ -69,22 +75,22 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  if (!forceRefresh) {
-    const { data: existingEpisodes, error: existingError } = await adminClient
+  const { data: existingEpisodes, error: existingError } = await readAllRows((from, to) => adminClient
       .from("episodes")
       .select("*")
       .eq("season_id", seasonId)
-      .order("episode_number", { ascending: true });
+      .order("episode_number", { ascending: true })
+      .order("id")
+      .range(from, to));
 
-    if (existingError) return jsonError(500, "DB_ERROR", existingError.message);
+  if (existingError) return jsonError(500, "DB_ERROR", existingError.message);
 
-    if (existingEpisodes && existingEpisodes.length > 0) {
+  if (!forceRefresh && isEpisodeListReusable(existingEpisodes ?? [], seasonRow.episode_count, seasonRow.episodes_synced_at, new Date(), seasonRow.published_episode_numbers)) {
       return json({
-        episodes: existingEpisodes,
+        episodes: knownTotal ? existingEpisodes : (existingEpisodes ?? []).filter(episode => seasonRow.published_episode_numbers.includes(episode.episode_number)),
         from_db: true,
         season_id: seasonId
       });
-    }
   }
 
   if (!seasonRow.contents) {
@@ -113,16 +119,22 @@ Deno.serve(async (req: Request) => {
   }
 
   if (episodeMeta.length === 0) {
+    // A successful unknown-total AniList check may legitimately have no released rows yet.
+    if (seasonRow.contents.source_api === "anilist" && !knownTotal) {
+      const { error: syncError } = await adminClient.from("seasons").update({ episodes_synced_at: new Date().toISOString(), published_episode_numbers: [] }).eq("id", seasonId);
+      if (syncError) return jsonError(500, "DB_ERROR", syncError.message);
+    }
     return json({
-      episodes: [],
+      episodes: seasonRow.contents.source_api === "anilist" && !knownTotal ? [] : existingEpisodes ?? [],
       from_db: false,
       season_id: seasonId,
       warning: "NO_EPISODE_METADATA"
     });
   }
 
+  const mergedEpisodes = mergeEpisodeRows(existingEpisodes ?? [], episodeMeta);
   const { error: upsertError } = await adminClient.from("episodes").upsert(
-    episodeMeta.map((episode) => ({
+    mergedEpisodes.map((episode) => ({
       season_id: seasonId,
       content_id: contentId,
       episode_number: episode.episode_number,
@@ -135,13 +147,20 @@ Deno.serve(async (req: Request) => {
 
   if (upsertError) return jsonError(500, "DB_ERROR", upsertError.message);
 
-  const { data: episodes, error: episodesError } = await adminClient
+  const { data: episodes, error: episodesError } = await readAllRows((from, to) => adminClient
     .from("episodes")
     .select("*")
     .eq("season_id", seasonId)
-    .order("episode_number", { ascending: true });
+    .order("episode_number", { ascending: true })
+    .order("id")
+    .range(from, to));
 
   if (episodesError) return jsonError(500, "DB_ERROR", episodesError.message);
+  const publishedNumbers = knownTotal ? null : episodeMeta.map(episode => episode.episode_number);
+  const { error: syncError } = await adminClient.from("seasons").update({
+    episodes_synced_at: new Date().toISOString(), published_episode_numbers: publishedNumbers
+  }).eq("id", seasonId);
+  if (syncError) return jsonError(500, "DB_ERROR", syncError.message);
 
   await logSync(adminClient, {
     content_id: contentId,
@@ -153,7 +172,7 @@ Deno.serve(async (req: Request) => {
   });
 
   return json({
-    episodes: episodes ?? [],
+    episodes: knownTotal ? episodes ?? [] : (episodes ?? []).filter(episode => publishedNumbers!.includes(episode.episode_number)),
     from_db: false,
     season_id: seasonId
   });

@@ -72,6 +72,9 @@
 | `docs/68_auth_usability_and_error_copy_qa_2026-11-15.md` | 로그인 전 화면 사용성 QA + 서버 영문 오류 원문 노출 정정: 온보딩 모든 장에 로그인 링크·이전 버튼(`getOnboardingActions`), 인증 오류 한국어 변환(`authErrorMessage`, `useAuth` 한 곳), 비밀번호 보기 버튼(`PasswordInput`), 입력 안내, 화면 24곳의 `error.message` → `userFacingErrorMessage` + `ERROR_COPY`. 인증 화면 토큰 정리는 범위 밖(D-6). 14장 Codex 실행 지시 포함 | 인증·온보딩 화면, 오류 문구, 비밀번호 입력 작업 |
 | `docs/69_persistent_public_metadata_cache_fixes_spec.md` | 보러가기·작품/인물 상세 DB 영속 재사용, 수동 갱신, 공유 인물 프로필·등록/핀/출연진 캐시 공유. 1시간 OTT/Jotai·10분 상세 정책을 사용자 요청으로 대체. 14장 실행 지시 포함 | 외부 메타데이터 저장·API 호출 최소화·상세 캐시·갱신 UI 작업 |
 | `docs/70_latest_recommendation_catalog_and_cpu_fixes_spec.md` | 최신 추천의 전 기간 인기 보충 분리, 날짜순 공급자/내부lane 커서·미반환 후보 보존, CPU context 재사용과546 정정. 14장 실행 지시 포함 | 최신 추천 후보 수집·페이지·CPU·정책 버전·재시작 작업 |
+| `docs/71_meaningless_api_calls_and_usability_fixes_spec.md` | 의미 없는 API 호출 차단(앱만, 배포 없음): 화수를 아는 작품 상세의 공개 회차 조회 중단(`needsReleasedEpisodeLookup`), 카드 조회 계획(`planAiringAvailability` — Kitsu 제외·AniList 완결작 앱 확정·전 회차 공개 시 30분 재조회 중단), Edge 목록 조회의 자동 재시도·창 복귀 재조회 끄기(`EDGE_LIST_QUERY_OPTIONS`). 사용자 문구의 "API" 제거, 총 화수 미정 작품 진행 막대(`episodeProgressHeader`), 앱 당겨서 새로고침. 14장 실행 지시 포함 | 공개 회차·검색 호출 정책, 시청 진행 카드, 라이브러리·핀·홈 새로고침을 고칠 때 |
+| `docs/72_library_row_limit_and_redundant_reads_fixes_spec.md` | 라이브러리·핀 목록이 1000행(`max_rows`)에서 조용히 잘리는 구멍 정정(`readAllRows`, 동률 기준 `id`, 상한 초과는 오류), 저장 전 `auth.getUser()` 왕복 7곳을 세션으로(`getSessionUserId`), 라이브러리 단일 캐시 + `select` 상태 필터(`filterLibraryItemsByStatus`), 회차 방영일 조회 대상 축소(`contentIdsNeedingEpisodeAirDates`). 앱만, 배포 없음. 14장 실행 지시 포함 | 라이브러리·핀 목록 조회, 저장 서비스의 본인 확인, 라이브러리 캐시 키를 고칠 때 |
+| `docs/73_project_integrity_fixes_spec.md` | 정합성 결함 11건: TMDB movie/tv 식별자 분리, SDK 인증 복원, UPDATE 0행 실패, 항목별 rollback, 회차 캐시 완전성·목록/추천 입력 pagination, 등록 단위·네이티브 공유, 원자적 핀/태그 저장·상세 이동. 새 SQL 3개와 함수 7개의 운영 반영은 별도 승인. 14장 실행 지시 포함 | 인증 복원·라이브러리 쓰기/복구·외부 ID·회차 캐시·추천 입력·공유·핀 저장을 고칠 때 |
 
 **규칙**
 
@@ -119,6 +122,8 @@ SceneNote는 애니메이션, 한국 드라마, 일본 드라마, 영화 감상 
 - `backend:deploy`, `smoke:edge`, `import:netflix`, DB/secret 명령은 일반 정적 검증이 아니다. 부작용과 필요한 환경은 [검증·작업 재개 가이드](docs/development_next_steps.md)를 확인한다.
 
 ## 테스트 명령어
+
+- 코드 작업의 중간·완료 로컬 검증에는 [scenenote-verify](.agents/skills/scenenote-verify/SKILL.md)를 읽고 적용한다. 문서·스킬·훅만 바꾼 작업은 해당 도구의 격리 검사와 문서 정합성을 확인한다. 이 경로 안내는 아래 검사·명세 요구사항을 줄이지 않는다.
 
 - `npm test` — `tsx --test`로 `src/**/*.test.ts`, `scripts/**/*.test.ts`, `supabase/functions/**/*.test.ts`, `supabase/functions/search-content/adapters/*.test.ts` 실행
 - `npm run typecheck`

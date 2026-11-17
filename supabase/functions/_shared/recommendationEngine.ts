@@ -634,14 +634,14 @@ export function getRecommendationBatch<T extends RecommendationCandidate>(
   for (const candidate of ranked) {
     const identities = createIdentitySet(candidate);
     if (
-      intersectsAny(identities, libraryIdentitySets) ||
+      libraryItems.some((libraryItem, index) => intersectsCompatibleWorkIdentities(candidate, identities, libraryItem, libraryIdentitySets[index]!)) ||
       libraryItems.some((libraryItem) => areSameWork(candidate, libraryItem))
     ) {
       continue;
     }
     if (intersects(identities, explicitExclusions)) continue;
     if (
-      intersectsAny(identities, acceptedIdentitySets) ||
+      deduped.some((accepted, index) => intersectsCompatibleWorkIdentities(candidate, identities, accepted, acceptedIdentitySets[index]!)) ||
       deduped.some((accepted) => areSameWork(candidate, accepted))
     ) {
       continue;
@@ -1028,6 +1028,28 @@ function createIdentitySet(item: RecommendationCandidate | RecommendationLibrary
   return identities;
 }
 
+/** Keep legacy feedback keys stable, but a shared TMDB number never proves cross-endpoint equality. */
+function intersectsCompatibleWorkIdentities(
+  left: RecommendationCandidate | RecommendationLibraryItem,
+  leftIds: ReadonlySet<string>,
+  right: RecommendationCandidate | RecommendationLibraryItem,
+  rightIds: ReadonlySet<string>
+): boolean {
+  const namespace = (item: RecommendationCandidate | RecommendationLibraryItem): "movie" | "tv" | null => {
+    if (item.content_type === "movie") return "movie";
+    if (item.content_type === "anime") return "has_seasons" in item && typeof item.has_seasons === "boolean" ? item.has_seasons ? "tv" : "movie" : null;
+    return item.content_type ? "tv" : null;
+  };
+  const leftNamespace = namespace(left);
+  const rightNamespace = namespace(right);
+  const crossNamespace = leftNamespace !== null && rightNamespace !== null && leftNamespace !== rightNamespace;
+  for (const identity of leftIds) {
+    if (crossNamespace && identity.startsWith("tmdb:")) continue;
+    if (rightIds.has(identity)) return true;
+  }
+  return false;
+}
+
 function createExternalIdKeys(
   value:
     | Readonly<Record<string, string | number | null | undefined>>
@@ -1211,10 +1233,6 @@ function getReleaseYear(item: SameWorkInput): number | null {
 
 function createNormalizedIdSet(values: readonly string[]): Set<string> {
   return new Set(values.map(normalizeIdentity).filter(Boolean));
-}
-
-function intersectsAny(target: Set<string>, sets: readonly Set<string>[]): boolean {
-  return sets.some((set) => intersects(target, set));
 }
 
 function intersects(left: Set<string>, right: Set<string>): boolean {

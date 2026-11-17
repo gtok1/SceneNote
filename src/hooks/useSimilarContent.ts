@@ -27,6 +27,8 @@ export function useSimilarContent(anchor:SearchResult|null,targetMediaType:Media
     initialPageParam: null as string | null,
     getNextPageParam: nextSimilarCursor,
     retry: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     staleTime: 10 * 60_000
   };
   const query = useInfiniteQuery({ ...queryOptions, enabled });

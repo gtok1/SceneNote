@@ -79,6 +79,8 @@
 
 2026-10-20 보완: `AppProviders`는 `authSessionSync`로 초기 세션 조회·시간 초과와 최신 인증 이벤트의 순서를 구분한다. 2초 뒤 로딩을 해제해도 늦게 도착한 초기 세션을 반영하며, 이후 인증 이벤트가 있으면 오래된 초기 응답을 무시한다. 계정 변경·자동 로그아웃도 Query 캐시를 비운다.
 
+2026-11-16 보완([73](73_project_integrity_fixes_spec.md)): `authStore`의 Zustand 저장소는 session·user·초기 loading을 영속화/복원하지 않는다. 예전 저장값도 병합에서 무시한다. 세션과 로딩은 SDK 초기 조회/이벤트가 결정하므로 늦은 기기 저장소 복원이 최신 계정을 덮지 않는다.
+
 검색·라이브러리의 목록 복귀 위치는 `src/stores/listScrollStore.ts`의 세션 전용 Zustand 상태가 소유한다. 계정·검색어·필터·정렬·보기/열 수별로 마지막 offset과 표시 개수를 최대 20개 문맥까지 보관한다. `useListScrollRestoration`은 화면 활성화·목록 레이아웃 준비 후 복원하고, 비활성 화면의 0 offset 이벤트와 복원 스크롤을 사용자 탐색으로 기록하지 않는다. 라이브러리는 저장된 표시 개수까지 먼저 펼치며 새 조건은 0부터 시작한다. 서버 응답·검색 페이지는 기존 Query 캐시를 사용하며 스크롤 상태를 디스크나 DB에 저장하지 않는다.
 
 | 상태 | 현재 소유 위치 | 변경 시 주의사항 |
@@ -95,6 +97,10 @@
 
 라이브러리 진행은 `src/services/library.ts`가 콘텐츠별 조회 결과를 `src/utils/libraryProgress.ts`의 `getLibraryProgressFields`로 매핑한다. 시즌 항목은 해당 시즌의 화수·체크·상대 진행, 작품 전체는 전체 범위를 사용한다. `episodeProgress.ts`의 공통 resolver와 수동 캐시 갱신 helper가 조회·상태 변경·직접 설정을 일치시키며, 수동 절대 회차는 보존한다. 상세 입력·에피소드 선택·방영 안내도 같은 범위를 따른다([17 §11](17_season_library_tracking_spec.md)).
 
+라이브러리 목록은 계정별 `library.byStatus(userId, "all")` 단일 캐시를 공유한다. `useLibrary(status)`는 `select`로 상태만 걸러 추가 조회 없이 전환하며 상태의 낙관적 변경은 해당 탭에 즉시 반영한다([72 D-4](72_library_row_limit_and_redundant_reads_fixes_spec.md#d-4-라이브러리-캐시는-전체-하나만-둔다-f-3)). 실패 복구는 [73 D-4](73_project_integrity_fixes_spec.md#d-4-캐시-복구는-실패한-항목필드의-소유권을-확인한다)에 따라 실패한 항목·필드만 비교하고 같은 항목의 최신 변경과 다른 성공을 보존한다. 오류가 난 계정의 대기 변경이 모두 끝나면 활성 DB 조회로 재조정하며 로그아웃으로 지운 캐시는 다시 만들지 않는다.
+
+회차/진행 목록은 `readAllRows`로 안정 정렬해 읽는다. 알려진 총 화수는 1..N 완전성을 검사하며, 미정 작품은 전체 동기화 시각과 `published_episode_numbers`를 함께 확인한다. 기존 episode ID는 보존하고 실제 공개 번호만 화면에 전달한다. 공유는 선택한 `library_item_ids`를 서버로 보내 시즌·순서를 보존한다. 웹은 현재 origin, 네이티브는 `app.config.ts.extra.publicWebOrigin`의 HTTPS 주소와 RN Share를 사용하며 주소 미설정/구서버 계약에는 명확한 오류를 표시한다.
+
 시청처 캐시는 출처·작품 ID뿐 아니라 선택 시즌·제목/원제·방영일/연도·계약 버전도 구분한다. 화면 포커스 복귀 때 1시간 TTL을 확인하며 같은 포커스 안에서는 요청별 자동 조회를 한 번만 시도한다. 구서버/요청 범위 불일치 응답은 TTL과 관계없이 다음 포커스에서 다시 조회하며 실제 데이터 미확인과 다른 안내를 표시한다. AniList TV의 원제에 명시된 기수는 DB의 가상 시즌 1보다 우선한다. 시즌 문맥의 구서버/시리즈 응답은 확정 제공처에서 제외하며, 실패 뒤에는 사용자가 재시도한다. AniList 극장판은 영화 매칭을 지원하기 전까지 기존 TV 캐시와 원격 조회를 사용하지 않는다. 범위 계약은 [54 §15~16](54_anime_sequel_watch_providers_fixes_spec.md#15-2026-10-20-후속-정정--선택한-시즌의-제공처만-표시)를 따른다.
 
 `src/lib/query.ts`의 기본값은 query `retry: 1`, `staleTime: 30_000`, `gcTime: 5 * 60_000`, mutation `retry: 0`이다. `networkMode` 및 영속 query cache는 이 파일에서 설정하지 않는다. 아래 §9.3의 `offlineFirst` 예제를 현재 오프라인 지원 증거로 사용하지 않는다.
@@ -102,9 +108,9 @@
 | 변경 | 현재 캐시 처리 | 회귀 범위 |
 |---|---|---|
 | 라이브러리 추가 | `useLibrary.ts`의 `useAddToLibrary`가 사용자 `library.all` prefix와 `profile.stats` 무효화. 검색 화면의 목록 재조회 디바운스는 유지 | 검색 카드·시즌 상세·라이브러리 목록·통계 |
-| 상태·횟수·수동 위치·삭제 | `useLibrary.ts`의 각 mutation이 목록 snapshot을 저장하고 낙관적 갱신, 오류 시 복구; 성공 시 주로 `refetchType: "inactive"`. 단건/다건 상태 변경과 삭제는 `profile.stats`도 무효화 | 필터별 목록 갱신·롤백 및 시즌별 항목 선택. 회차 체크는 `useToggleEpisodeProgress`의 별도 progress/library 무효화 확인 |
-| 핀 생성·수정 | `useTimelinePins.ts`가 사용자 `pins.all` 및 작품/회차/태그·`profile.stats`를 무효화하고 수정은 단건도 무효화 | `pins.all` prefix는 사용자 핀 하위 key를 포함한다. 새 핀 저장 후 프로필 핀 개수도 재조회 |
-| 핀 삭제 | `useDeletePin`이 `["pins"]` 전체 취소·snapshot 후 `src/utils/pinCache.ts`: `removePinFromCachedValue`로 낙관적 삭제, 실패 시 복구, 종료 시 핀·태그·통계·라이브러리 무효화 | 단건이 null이 되면 상세가 폼을 언마운트할 수 있다. [31 명세 U-4](31_usability_review_fixes_spec.md)의 삭제 후 이동 결함을 해결 완료로 간주하지 않는다. |
+| 상태·횟수·수동 위치·삭제 | `useLibrary.ts`가 낙관적 변경 전후와 항목별 작업 세대를 기록해 조건부 복구. 오류 후 계정의 대기 변경 종료 시 활성 조회로 재조정; 성공 시 주로 `refetchType: "inactive"`. 단건/다건 상태 변경과 삭제는 `profile.stats`도 무효화 | 최신 변경·다른 항목 성공·성공한 삭제 보존과 계정 격리. 회차 체크는 `useToggleEpisodeProgress`의 별도 progress/library 무효화 확인 |
+| 핀 생성·수정 | 본문·태그는 `save_timeline_pin` RPC 한 번으로 저장하고 생성은 안정 UUID로 재시도한다. `useTimelinePins.ts`의 핀·태그·통계 무효화 계약은 유지 | 같은 id·같은 입력은 한 핀, 다른 입력은 충돌. 편집 저장은 상세에 머문다. |
+| 핀 삭제 | `useDeletePin`의 낙관적 삭제·실패 복구·무효화를 유지하며 상세가 마지막 로드한 핀을 편집기에 보존한다 | 삭제 성공은 목록으로 이동하고 이미 없는 핀에도 목록 이동 행동을 제공한다([73 D-8](73_project_integrity_fixes_spec.md#d-8-핀-저장삭제-후-화면-이동을-분리한다)). 실제 플랫폼별 화면 확인은 별도다. |
 | 추천 제외·피드 | `useRecommendationPreferences.ts`가 선호 캐시와 `["recommendations", userId]`를 무효화; `usePersonalizedRecommendations.ts`가 취소·보충·피드 상태 관리 | [28 스크롤 추가 로딩](28_recommendation_scroll_pagination_fixes_spec.md), [30 보충·카드 행동](30_recommendation_fill_and_action_consistency_fixes_spec.md), query identity에 영향을 주는 필터·사용자 변경 |
 
 개인화 추천 Query key는 계정·작품 유형·정규화한 제외 설정과 포함 장르/제작 국가 signature를 포함한다. 화면 재진입·포커스·재연결은 최초 페이지를 자동 재조회하지 않으며, 재시도는 캐시의 유효 커서에서 이어간다. 명시적인 새 추천은 별도 동작이다. 추천 묶음의 표시 수는 등록·제외·중복을 뺀 후보와 현재 문맥의 추가/완료 보존 슬롯을 합쳐 센다. 스크롤 및 추가/완료 성공 그룹은 최신 표시 수 + 12를 목표로 하는 공통 묶음 로딩을 사용한다([47 §15](47_recommendation_batch_topup_spec.md#15-2026-10-05-후속-정정-추가완료-성공-후에도-다음-12개-묶음)). 성공 그룹은 800ms 예약으로 모으고, 진행 중 요청이 끝난 뒤 합친다. 표시할 때는 위 공개일 최신순을 적용한다. 부족분 이어 찾기는 같은 목표와 요청 6회·45초·무진전 3회 한도를 사용한다.

@@ -1,5 +1,190 @@
 # SceneNote Development Next Steps
 
+## 프로젝트 정합성 보완 (docs/73, 2026-11-16)
+
+- 상태: **결함 11건 코드 보완·자동 검사 완료. 사용자 승인 후 운영 migration 3개·함수 7개 반영 완료, 실제 웹/iOS/Android 화면 미확인.** 사용자의 “문제점 보완해줘”에 따라 [73](73_project_integrity_fixes_spec.md)을 구현했다. 브라우저·시청 앱·Expo 서버를 열거나 조작하지 않았고 실제 계정의 감상/핀/공유 기록도 검증용으로 쓰지 않았다. 기존 docs/71·72 변경을 보존했으며 커밋/푸시는 하지 않았다.
+- 시작 경로/root는 `/Users/youngilkim/SceneNote`. `git status`와 소스 snapshot을 `/tmp/scenenote-integrity-start-status.txt`, `scenenote-integrity-start.json`에 보관했다. 시작 전체 검사는 **1690개 중1689 통과·1 실패**로 기존 공급자 timeout 테스트의 20ms 경계가 병렬 부하에서 실패했다. 해당 기존 파일은 격리 **54/54** 통과했고 단언/시간 제한을 바꾸지 않았다. 최종 전체 검사는 **1769/1769, 신규79개**, 실패/skip0이다.
+
+| 결함 | 보완 |
+|------|------|
+| F-1 외부 ID 충돌 | TMDB movie/tv namespace를 DB unique·조회·upsert·일괄 등록 CLI/Edge에 적용. 종류 미상 숫자 ID만으로 기존 작품을 골라 상태를 바꾸지 않는다. 원시 ID·기존 UUID·감상 기록을 보존하고 반대 종류의 상세로 폴백하지 않는다. |
+| F-2 인증 복원 | Zustand의 예전 session/user/loading 저장값은 무시하고 SDK의 최신 인증 이벤트/초기 조회를 따른다. |
+| F-3 부분 회차 캐시 | 알려진 총 화수의 1..N 누락을 검사해 보충한다. 미정은 실제 공개 번호 배열+전체 동기화 시각을 30분 재사용한다. 기존 episode ID와 숨은 미래/레거시 행을 보존한다. |
+| F-4 저장 0행 | 상태·직접 진행·시청일과 구스키마 폴백이 적용 id를 반환받아 0행이면 실패 처리한다. |
+| F-5 동시 변경 복구 | 실패한 항목/필드와 작업 세대를 확인해 복구하고, 같은 항목의 더 최신 변경·다른 항목 성공·성공한 삭제를 보존한다. 오류 계정의 대기 쓰기가 끝난 뒤 활성 DB 조회로 재조정한다. |
+| F-6 회차/체크 잘림 | 안정 정렬 pagination으로 끝까지 읽고 중간 오류/안전 상한은 부분 성공으로 반환하지 않는다. |
+| F-7 추천 입력 잘림 | 서버의 라이브러리·피드백 입력을 페이지 단위로 끝까지 읽는다. |
+| F-8 시즌 공유 | 선택한 library_item_ids의 순서·시즌·상태·화수를 보존하며 타인 등록은 거절한다. 기존 링크도 결정적으로 해석하고 삭제된 선택을 다른 시즌으로 대체하지 않는다. |
+| F-9 네이티브 공유 | 공개 HTTPS origin+RN Share를 사용하고 취소는 정상 처리한다. 주소가 없으면 상대 URL 대신 안내 오류를 표시한다. |
+| F-10 핀 상세 이동 | 편집 저장은 상세에 머물고 낙관적 삭제 중 폼을 유지해 삭제 성공 후 목록으로 이동한다. 이미 없는 핀도 목록 이동을 제공한다. |
+| F-11 핀/태그 부분 저장 | SECURITY INVOKER RPC 한 트랜잭션으로 저장한다. 폼의 안정 UUID를 재사용해 중복 생성을 막고 같은 ID/다른 입력은 충돌로 거절한다. 실패 시 본문·태그 모두 rollback한다. |
+
+- 선행 실패: 인증/복구16개, 공유15개, 핀14개, 공용 서버/핸들러 회귀와 UPDATE0행4개를 실제 red로 확인했다. 대표 출력은 `delayed storage must not replace the latest SDK account`（actual `old-account` / expected `new-account`）, `Cannot find module '…/libraryRollback'`, `selectSharedLibraryRows is not a function`, `Cannot find module '…/libraryWrite'`이다. 최종 경계 검토에서 추가한 일괄 등록6개도 actual `movie-123` / expected `tv-123`로 전부 실패한 뒤 수정했으며, 실제 Edge의 media_hint=tv가 movie를 선택하는 재현도 red→green으로 확인했다. 로그는 `/tmp/scenenote-integrity-{auth-rollback,share,write,server,import-id,bulk-handler-id}-red.log`와 핀 전용 red 기록에 보관했다. helper 미존재로 실패한 순수 테스트와 실제 기존 코드에서 재현한 서비스/핸들러 오류는 구분한다.
+- 최종 검사: `npm test` **1769/1769**, `npm run typecheck`, `npm run lint` 모두 exit0. 웹 `npm run build` export 성공(exit0, 기존 Expo 종료 안내 있음). Edge 진입점 **16개 Deno strict/cached-only 검사 exit0**, 외부 네트워크 없이 확인했다. `/tmp/scenenote-integrity-final-{tests,typecheck,lint}.log`, `scenenote-integrity-build.log`, `scenenote-integrity-deno-all16.log`. 사용 Node24는 명령 PATH에만 지정했고 프로젝트 의존성/환경 파일은 바꾸지 않았다.
+- 실제 코드 격리 검증: 라이브러리 서비스(0행/구스키마/1500행/부분·완전·미정 회차/중간 오류/상한), 인증 hydration, 메타데이터/추천 핸들러를 테스트 러너에서 실행했다. 별도 fixture는 실제 useLibrary/QueryCore mutation **20개**, 공유 handler/service **55개**, 핀 service **23개**·detail **12개** 검증 통과. 모의 경계의 외부 요청은0이며 실제 운영 요청 감소량이나 실기기 동작 확인은 아니다. `/tmp/scenenote-integrity-{library-mutation,share}-report.json`, `scenenote-pin-{atomic-service,detail}-report.json`의 소스 해시와 최종 파일이 일치한다.
+- SQL: 프로젝트 의존성에 추가하지 않은 임시 **PGlite0.5.16 PostgreSQL**에서 기존 migration0001~0024+신규3개 **48개** 검증 통과. 읽기 전용 운영 목록 확인 결과는0001~0022라서 **0001~0022+신규3개** 조합도 별도로 **48개** 검증 통과했다. 0023·0024는 그 검증에서 명시적으로 제외했다. 기존 FK/UUID, 동번호 movie/tv 공존·변경 차단, RPC ACL/RLS·누락 로그인/타인·멱등성/충돌·태그 트리거 실패 원자 rollback, 새 공유 타인/빈 배열 거절·기존 링크 호환을 실제 SQL로 실행했다. 이는 hosted Supabase/PostgREST 검증을 대체하지 않는다. `/tmp/scenenote-integrity-sql/{report.json,report-base22.json,validate.mjs,validate-base22.mjs}`.
+- UI 정적 검사: 이번에 추가한 화면/컴포넌트 코드에는 새 `Alert.alert`·색상/간격 토큰 위반을 추가하지 않았다. 기존 파일 전체의 과거 위반을 이번에 해결한 것으로 보고하지 않는다. docs/71·72의 D-1~D-9/D-1~D-5 동작 변경 없음. 새73의 D-1~D-8도 유지한다.
+
+| 수동 확인 | 플랫폼 | 상태·이유 |
+|-----------|--------|-----------|
+| M-1 | 웹1440·375 | **미실행.** 사용자 시청을 방해하지 않도록 브라우저를 열지 않았다. 실제 로그인·동시 저장·시즌 공유·핀 이동은 미확인. |
+| M-2 | iOS 세로 | **미실행.** 실기기/시뮬레이터를 실행하지 않았다. 공개 웹 origin 설정과 OS 공유 시트·취소·저장/삭제 확인 필요. |
+| M-3 | Android | **미실행.** 에뮬레이터/기기를 실행하지 않았다. 공개 웹 origin 설정과 OS 공유 시트·취소·저장/삭제 확인 필요. |
+
+### 운영 반영 완료와 남은 설정
+
+사용자가 **“위 DB 3개·함수 7개 운영 반영”**을 승인한 뒤 2026-11-16 21:47~21:48 KST에 연결 프로젝트 `pstkeooflscvtaxxrwdf`에 반영했다. 적용 직전 후보 소스 해시·프로젝트·운영 함수 버전/번들 해시와 migration0001~0022를 다시 비교해 변경 없음을 확인했다. 승인된 DB→함수 순서로 실행했으며 secret·다른 함수·무관한 0023/0024는 변경하지 않았다.
+
+| DB migration | 운영 이력 버전 | 원본 준비 파일 버전 |
+|--------------|----------------|-------------------|
+| metadata_identity_scope | 20261116124736 | 20261116114112 |
+| atomic_pin_save | 20261116124742 | 20261116114134 |
+| season_scoped_library_shares | 20261116124751 | 20261116114158 |
+
+- Supabase 플러그인이 운영 적용 시 생성한 이력 버전에 맞춰 **이번에 새로 만든 로컬 SQL 3개의 파일명만 정렬**했다. 운영 `schema_migrations.statements`와 승인 SQL 전문이 일치하고 SHA256도 변하지 않았다. 향후 중복 적용을 막기 위한 정렬이며 기존0001~0024 파일은 고치지 않았다. 현재 로컬 파일은 `20261116124736_metadata_identity_scope.sql`, `20261116124742_atomic_pin_save.sql`, `20261116124751_season_scoped_library_shares.sql`이다.
+- 다음 **7개만** 배포했으며 전부 **ACTIVE·verify_jwt=true**다. 다른 함수8개의 버전/번들 해시/JWT는 불변이다. 내려받은 실행 소스 **80개(함수별 중복 포함)**가 후보 전문과 정확히 일치했다. 타입 전용 `types.ts` 및 그 타입 의존 `contentCrew.ts` 7개만 번들에서 제거됐다.
+
+| 함수 | 운영 버전 변경 |
+|------|----------------|
+| get-content-detail | 17 → 18 |
+| add-to-library | 20 → 21 |
+| fetch-episodes | 11 → 12 |
+| bulk-register-netflix | 5 → 6 |
+| personalized-recommendations | 25 → 26 |
+| create-library-share | 3 → 4 |
+| get-library-share | 3 → 4 |
+
+- 운영 catalog 읽기 전용 검증 **34/34 통과**: 새 컬럼5·unique2·CHECK4·함수2·트리거1·RLS5·정책15. RPC/트리거 본문 MD5·인수/반환 타입·SECURITY INVOKER·빈 search_path가 승인 SQL과 일치한다. `save_timeline_pin`은 PUBLIC/anon 실행 불가, authenticated 실행 가능이다. 실제 사용자 행을 읽거나 쓰지 않았다.
+- 최초 사후 probe는 trigger helper에도 anon 실행 불가를 요구해 **33/34**였다. 승인 SQL은 trigger helper의 PUBLIC 권한만 거두고, Supabase 기본 권한은 anon/authenticated에도 EXECUTE를 부여했다. 이 함수는 `RETURNS trigger`이고 직접 RPC로 호출하는 함수가 아니므로, 최종 probe는 SQL 계약에 맞춰 반환 타입·연결 트리거·INVOKER·본문·PUBLIC 권한을 검사하고 anon 금지 단언은 호출 가능한 핀 RPC에 유지했다. 구현·기존 회귀 단언을 바꾸거나 추가 운영 DDL을 실행하지 않았다. 최초/최종 결과를 모두 보관했다.
+- 보안 advisor는 적용 전후 **동일**했다. 기존 service-role 전용 캐시2개의 정책 없음은 [RLS 안내](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy), 기존3함수의 [search_path](https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable), `pg_trgm`의 [public 확장](https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public), `get_genre_stats`/`handle_new_user`의 [anon](https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable)·[authenticated](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable) DEFINER 실행, [유출 비밀번호 보호 미설정](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)이다. 이번 승인 범위의 새 finding은 없다. 기존 항목은 이번에 설정을 변경하지 않았다.
+- 증거: `/tmp/scenenote-integrity-deployment-report.json`(버전/소스/SQL 비교), `scenenote-integrity-{catalog-initial,catalog-final,migrations,functions-before,functions-after,advisors-before,advisors-after}.json`, `scenenote-integrity-postdeploy-readonly.sql`·`scenenote-integrity-postdeploy-readonly-meta.json`. 배포 전 원본7개는 `scenenote-integrity-backup-<name>.json`, 후보·의존성·SHA는 `scenenote-integrity-candidate-<name>.json`·`scenenote-integrity-candidates-manifest.json`에 보관했다.
+- 새 클라이언트는 준비된 DB/서버를 사용한다. 이번 승인에는 프런트엔드 호스팅 배포·네이티브 빌드가 포함되지 않아 수행하지 않았다. 브라우저/실기기·실제 로그인 HTTP와 사용자 기록 저장 검증도 하지 않았다. 위 수동 M-1~M-3은 그대로 남는다.
+- `app.config.ts.extra.publicWebOrigin`은 **null**이다. 정식 공개 웹 주소 답변 전까지 임의 도메인·localhost를 설정하지 않는다. 이 설정 전 네이티브 공유는 사용 불가 안내를 표시한다.
+- 과거 TMDB 충돌로 이미 잘못 저장됐을 가능성이 있는 데이터는 추정 복구하지 않았다. 별도 읽기 전용 진단과 사용자 확인이 필요하다.
+
+## 라이브러리 1000행 잘림·중복 조회 (docs/72, 2026-11-16)
+
+- 상태: **앱 구현·자동 검사 통과, 실제 화면 미확인.** [72](72_library_row_limit_and_redundant_reads_fixes_spec.md) 14장 순서대로 STEP 0→실패 테스트→구현→검사를 진행했다. 시작 `pwd`·git root는 `/Users/youngilkim/SceneNote`, 기준선 **1668/1668**. `git status`와 기존 작업 파일 SHA를 `/tmp/scenenote-72-start-{status.txt,sha.json}`에 보관해 docs/71과 사용자의 명세·문서 변경을 보존했다. 명세 허용 파일 외에는 사용자 추가 승인을 받은 `scripts/libraryProgressIntegration.test.ts`의 가짜 React export 한 줄만 고쳤다. 브라우저·앱·서버를 열지 않았고 실제 계정 기록·DB·RLS·Edge·전역 Query 설정·secret·배포·마이그레이션·커밋/푸시 변경 없음.
+- STEP 0: `normalizeWatchStatuses`는 `wishlist`, `watching`, `completed`, `recommended`, `not_recommended`, `dropped` 6종을 각각 그대로 보존한다(폐기 상태 배열 비어 있음, 실제 순수 함수 실행 확인). `0001_initial_schema.sql:353~359`의 연결 칼럼은 **`pin_id`**, 복합 PK `(pin_id, tag_id)`이며 후속 이름 변경은 없다. 전제 불일치 없음. `/tmp/scenenote-72-step0.log`.
+- 구현: `readAllRows`가 1000행씩 끝까지 읽고 원시 페이지 길이로 종료를 판정하며 첫 id를 보존한다. 오류·50쪽 안전 상한에서는 부분 목록을 성공으로 반환하지 않는다. 라이브러리는 `updated_at desc,id asc`, 전체 핀은 `created_at desc,id asc`, 태그 핀은 `pin_id asc`로 안정 정렬한다. 선택 칼럼이 없는 구 스키마는 본 조회의 행을 버리고 폴백을 0쪽부터 다시 읽는다. 저장7곳은 `getSessionUserId`를 공유해 로컬 세션을 읽고 기존 로그인 문구·조용한 인물 보정 반환·공유의 오류 우선·소유자 필드를 유지한다. 회차 방영일은 명세의 빈 날짜 조건에 해당하는 콘텐츠만 조회하며 docs/71의 AniList 종료일 null 보존을 유지했다.
+- D-1~D-5 변경 또는 변경 필요사항 없음. D-4의 즉시 빠짐은 명세에 명시된 의도된 변경이다. `useLibrary`만 계정별 전체 캐시+`useCallback` select로 바꾸었으며 mutation·snapshot·무효화 코드는 시작 SHA와 동일하다. 실제 QueryCore fixture로 즉시 빠짐·완료 탭 표시·실패 복구·계정 격리를 확인했다. 서버 필터를 쓰는 `getLibraryItems(status)` 및 공유의 `getLibraryItems("all")` 호출도 보존했다.
+- STEP 1 실제 red: **1690개 중1669 통과·21 실패**, 정확히 신규 **T-1~T-21 전부 실패**, **T-22만 처음부터 통과**했다. 실제 출력: `TypeError [Error]: batchedQuery.readAllRows is not a function`, `TypeError [Error]: libraryFilters.filterLibraryItemsByStatus is not a function`, `Cannot find module '…/src/utils/sessionUser'`, `Cannot find module '…/src/utils/libraryAirDates'`. `/tmp/scenenote-72-red.log`, `scenenote-72-red-coverage.json`. 원래 `batchedQuery.test.ts`·`libraryFilters.test.ts`의 모든 줄·단언을 보존했다.
+- 최종 검사: **1668/1668 →1690/1690**(신규22), 이어 `npm run typecheck`, `npm run lint` exit0. 기존 Node24.22.2를 명령에만 지정했으며 tsx 로컬 IPC가 sandbox에서 막히는 환경은 이전 작업과 같은 허용된 검사 권한으로 실행했다. 첫 구현 검사에서 기존 통합 테스트의 가짜 React에 `useCallback`이 없어 번들 실패했고, 사용자 승인 후 export 한 줄만 추가했다(기존 단언·시나리오·테스트 수 불변). 연결 select 문자열의 SDK 추론 타입은 서비스의 기존 raw-row 경계에서 명시해 타입 오류도 정정한 뒤 전체 검사를 순서대로 다시 실행했다. `/tmp/scenenote-72-{baseline,red,tests,typecheck,lint}.log`.
+- 추가 검사3줄: `auth.getUser` **0줄**, 훅의 `getLibraryItems("all")` **1줄**. 보호 경로 `git status --short supabase src/lib app src/components`는 시작부터 있던 docs/71의 화면·컴포넌트8파일을 그대로 출력하므로 빈 출력이라고 보고하지 않는다. **232개 보호 파일의 시작 SHA 대비 변경0·신규0**을 확인했다(`/tmp/scenenote-72-protected-check.json`). `git diff --check` 통과. `readBatchedRows`·`QueryPage` 및 범위 밖 핀 조회2종도 원형 유지.
+- 실제 코드 격리 실행: 라이브러리 서비스61개(0/1000/2500행·중복·구스키마 재시작·중간 오류·50쪽 상한·방영일 대상 및 표시·회차 저장), 실제 핀 서비스+설치 PostgREST builder33개, 실제 훅/QueryCore와 기존 mutation50개, 세션7caller+설치 AuthClient54개 검증 통과. 유효 세션은 fetch0, 만료 세션은 모의 refresh1·`/user`0, 상태6종 전환 추가 조회0, 실패 복구를 확인했다. SDK `.range`의 실제 요청은 Range 헤더 대신 **`offset`/`limit`**이며 0부터 양 끝 포함 범위다. 모든 fetch는 메모리 응답 또는 차단이며 외부 요청0, 실제 운영 감소량/저장 성공의 증거가 아니다. `/tmp/scenenote-72-library-service-report.json`, `/tmp/scenenote-72-pins-fixture/report.json`, `/tmp/scenenote-72-library-cache-report.json`, `/tmp/scenenote-72-sessions-GklNmB/report.json`.
+
+| 수동 ID | 플랫폼 | 확인 상태·사유 |
+|---------|--------|----------------|
+| M-1 | 웹1440 | **코드 검사 통과, 화면 미확인.** 사용자의 시청을 방해하지 않도록 브라우저를 열지 않았다. 실제 계정 목록 수·순서·Network는 미측정. 모의 서비스의2500행·페이지별 정렬/범위는 확인. |
+| M-2 | 웹1440 | **코드 검사 통과, 화면 미확인.** 실제 탭 조작 없음. QueryCore의 단일 캐시·6종 상태 전환 추가 조회0은 격리 확인. |
+| M-3 | 웹1440 | **코드 검사 통과, 화면 미확인.** 사용자 계정의 상태를 임의로 바꾸지 않았다. 실제 mutation callback의 즉시 빠짐·실패 snapshot 복구는 격리 확인. |
+| M-4 | 웹1440 | **코드 검사 통과, 화면 미확인.** 실제 회차/핀/감상/태그/인물을 저장하지 않았다. 서비스7곳의 소유자 필드·로그인 없음·로컬 세션/갱신은 격리 확인. |
+| M-5 | 웹1440 | **코드 검사 통과, 화면 미확인.** 실제 요청·응답 행 수 미측정. 빈 날짜 대상만 조회·대상0이면 episodes0·AniList 종료일 보존은 실제 서비스 fixture 확인. |
+| M-6 | 웹375 | **코드 검사 통과, 화면 미확인.** 전체·태그 핀 pagination과 null join은 실제 PostgREST/서비스 fixture 확인, 실제 계정·375화면은 미실행. |
+| M-7 | 앱iOS 세로 | **코드 검사 통과, 화면 미확인.** 실기기/시뮬레이터를 실행하지 않았으며 실제 저장·당김 동작 미확인. Android도 실제 화면 미확인. |
+| M-8 | 웹1440 | **코드 검사 통과, 화면 미확인.** 실제 로그아웃·다른 탭 저장을 실행하지 않았다. 세션 없음/빈 id/오류의 기존 한국어 안내 및 조용한 반환은 격리 확인. |
+
+- 후속 작업은 실제 계정에서 M-1~M-8의 목록·Network·저장·다중 탭·네이티브 동작 확인이다. **이번 작업의 배포는 없다.**
+
+<details>
+<summary>추가 테스트 ID와 실제 이름(22개)</summary>
+
+| ID | 파일 | 이름(`72 T-N:` 뒤) |
+|----|------|-------------------|
+| T-1 | batchedQuery | reads an empty result once using the default inclusive range |
+| T-2 | batchedQuery | reads an empty terminal page after exactly one thousand rows |
+| T-3 | batchedQuery | reads all two thousand five hundred rows in input order |
+| T-4 | batchedQuery | discards earlier rows when the second page fails |
+| T-5 | batchedQuery | keeps the first row per id while paginating by raw page size |
+| T-6 | batchedQuery | preserves every row whose key is null, undefined, or empty |
+| T-7 | batchedQuery | returns an error instead of a truncated list at the page ceiling |
+| T-8 | batchedQuery | rejects invalid page sizes and maximum page counts |
+| T-9 | sessionUser | missing sessions, users, or user ids do not identify a user |
+| T-10 | sessionUser | a stored session returns its nonempty user id |
+| T-11 | libraryFilters | all-status selection preserves the original array reference |
+| T-12 | libraryFilters | status selection includes an item with multiple matching statuses |
+| T-13 | libraryFilters | all six status filters preserve matching items and their original order |
+| T-14 | libraryFilters | status selection returns an empty array for empty or unmatched lists |
+| T-15 | libraryAirDates | a TMDB work without an air date needs episode air dates |
+| T-16 | libraryAirDates | a TMDB work without an end date needs episode air dates |
+| T-17 | libraryAirDates | a TMDB work with both dates skips episode air dates |
+| T-18 | libraryAirDates | an AniList work with an air date never infers its missing end date |
+| T-19 | libraryAirDates | an AniList work without an air date needs episode air dates |
+| T-20 | libraryAirDates | episode air-date targets deduplicate season registrations in first-seen order |
+| T-21 | libraryAirDates | complete-date and empty lists have no episode air-date targets |
+| T-22 | batchedQuery | preserves the empty-id batch fast path without making a query |
+
+</details>
+
+- docs/71 재검증(2026-11-16): `npm test` 1668/1668, `typecheck`, `lint` 통과, 변경분이 D-1~D-9와 일치. 로그인 뒤 화면은 확인하지 못했다(M-2~M-4, M-7·M-8 미확인 그대로).
+
+## 의미 없는 API 호출 차단·편의성 (docs/71, 2026-11-16)
+
+- 상태: **앱 구현·자동 검사 통과, 수동 확인 일부 남음.** [71](71_meaningless_api_calls_and_usability_fixes_spec.md) 14장 순서대로 테스트를 먼저 썼다. D-1~D-9는 변경하지 않았다. 최종 교차 점검에서 D-3의 데이터 전제 위반을 발견해 보고했고, 사용자가 `src/services/library.ts` 한 파일을 추가 허용한 뒤 보정했다. Edge·DB·전역 Query 기본값은 그대로이며 배포·마이그레이션·커밋/푸시 없음. 시작 시 `pwd`·git root는 `/Users/youngilkim/SceneNote`; 기존 변경은 `AGENTS.md`, `docs/README.md`, `docs/development_next_steps.md`와 미추적 명세71이었다. 해당 변경을 보존하고 명세 허용 파일과 추가 승인 파일만 수정했다.
+- 구현: `needsReleasedEpisodeLookup`에 1~200화 판정을 모아 상세의 불필요한 공개 회차 조회를 막는다. 카드 조회는 Kitsu 제외·완결 AniList만 앱 확정·나머지 서버 조회로 나누며, 총 화수 미정 작품은 30분 갱신을 유지한다. 전 회차 공개가 확인된 시즌만 주기 재조회를 멈춘다. 지정 7개 Edge 조회의 자동 재시도·창 복귀·재연결 재조회를 끄고 기존 `MANUAL_METADATA_QUERY_OPTIONS`를 보존했다. 홈·라이브러리·핀의 네이티브 당겨서 새로고침은 DB 조회만 실행하며 중복 당김·실패·언마운트를 처리한다. 라이브러리 최초 실패 시 오류와 빈 상태가 동시에 나타나지 않게 했다.
+- 화면: 지정된 개발 용어 5곳을 교체하고, 총 화수 미정 단일 시즌은 실제 공개 회차를 분모로 진행 막대를 표시한다. 저장9/공개7은 요약9·막대7, 다중 시즌은 누적 단위를 보존한다. 숫자 입력 중 공개 목록이 도착해도 NaN을 표시하지 않는다. RN-web이 `accessibilityValue`를 DOM으로 전달하지 않는 것을 실제 화면에서 확인해 표준 `aria-valuemin/max/now`도 함께 지정했다.
+- 추가 승인 보정: 기존 `enrichLibraryMetadata`는 종료일이 null이면 최근 회차의 방영일로 채웠다. 새 완결 판정에 이 값을 넣으면 총12화가 알려진 방영 중 AniList가 공개7화만 있어도 `local released12`로 고정된다. 실제 서비스→조회 계획 경로로 red를 먼저 재현한 뒤, AniList만 원본 종료일(null 포함)을 보존하도록 한 곳을 고쳤다. 진행 AniList는 remote, 실제 완결일이 있는 AniList는 local12, TMDB·TVmaze는 기존 날짜 보완 유지의4분기를 실제 변경 소스로 확인했다(외부 요청0). `/tmp/scenenote-docs71-anilist-enddate-{before-after,actual-after}.json`. 명세 D-2~D-4를 바꾼 것이 아니라 입력값의 출처 전제를 보장한 보정이다.
+- STEP 1 실제 red: 전체 1668개 중 1633 통과·35 실패. 신규 **T-1~T-33 전부 실패**, **T-34만 처음부터 통과**했고, 지정 문구를 바꾼 기존 테스트 2개도 실패했다(변경 단언 3개). 실제 출력은 `TypeError [Error]: choiceContract.needsReleasedEpisodeLookup is not a function`, `actual: 'API 공개 회차 3개 · 최근 3화 · 총 화수 미정' / expected: '공개된 회차 3개 · 최근 3화 · 총 화수 미정'`, T-33 `actual: undefined / expected: { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false }`. `/tmp/scenenote-71-{red,focused-red}.log`, `scenenote-71-red-coverage.json`에 기록했다.
+- 최종 검사: 시작 **1634/1634** → 최종 **1668/1668**(신규34, 기존 개수·보존 단언 유지), 이어서 `npm run typecheck`, `npm run lint`, `npm run build` 모두 exit0. 기본 Node의 dylib 문제를 피해 기존 Node24.22.2를 명령에만 지정했고, `npm test`의 tsx IPC가 sandbox EPERM으로 막힌 뒤 허용된 검사 권한으로 실제 명령을 실행했다. 웹 export는 `dist` 생성 후 Expo의 종료 지연 안내가 있었지만 exit0이었다. `/tmp/scenenote-71-{baseline,tests,typecheck,lint,build}.log`.
+- 추가 검사 4줄: `EDGE_LIST_QUERY_OPTIONS` 13줄(정의1+import6+사용6), 대상 3파일의 API는 기존 주석1줄만/사용자 문구0, 검색의 `외부 API` 0줄, `git status --short supabase` 빈 출력. `src/lib/query.ts` diff와 공백 오류도 없음. **수정한 UI 줄의 원문 색·숫자 폰트·Alert 호출은0**이다. 파일 전체 검사에는 HEAD부터 존재하던100줄(라이브러리25·핀2·검색37·진행카드16·공유20)이 남아 있어 전체0이라고 보고하지 않는다. 신규 일치0을 HEAD와 대조했으며, 이번 명세의 무관한 스타일/Alert 정리 금지에 따라 보존했다(`/tmp/scenenote-71-ui-token-check.json`).
+- 격리 실행: 실제 훅+QueryObserver 공개 회차49개, 실제 목록 훅+QueryCore/pull72개, 실제3탭 TSX/pull92개, 진행 카드 React82개와 실제 RN-web DOM18개 검증 통과. 알려진 화수 조회 비활성·미정 공개7→8 갱신 시 저장선택7 유지·자동 저장0·settled 주기 중단·검색3쪽 focus/reconnect0·수동 재조회·실패1회·스피너/동시잠금·DB만 갱신·오류 시 기존 목록 보존을 확인했다. 이 fixture는 원격 호출·실기기 제스처의 증거가 아니다. `/tmp/scenenote-docs71-airing-observer-FR06hB/report.json`, `/tmp/scenenote-docs71-{hooks,screens}-report.json`, `/tmp/scenenote-71-progress-qa/result.json`, `/tmp/scenenote-71-progress-rnweb-qa/result.json`.
+
+| 수동 ID | 플랫폼 | 실제 확인 / 미확인 사유 |
+|---------|--------|------------------------|
+| M-1 | 웹1440 | 기존 로그인 세션의 템빨(총12화) 상세 진입·새로고침 후 공개 회차 queryFn 추가 실행0, 1~12화 버튼·저장7 유지 확인. 임시 DEV 관측으로 호출 진입을 확인했으며 raw Network 건수는 별도 미수집. 관측 코드는 제거하고 원본 SHA 일치 확인. |
+| M-2 | 웹1440 | **코드 검사 통과, 화면 미확인.** 완결 AniList 조건을 확정한 계정 카드로 실측하지 않았다. local 경로·남은7 표시·서버/시즌 조회 비활성은 실제 훅 fixture로 확인. |
+| M-3 | 웹1440 | 검색 `사랑` 1·2·3쪽 호출까지 확인. **코드 검사 통과, 6분 후 창 복귀 화면 미확인.** 사용자가 넷플릭스 시청 중 검증 창 종료를 요청해 대기 검증을 중단하고 탭을 닫았다. 가상 시간 QueryCore의 stale3쪽 focus/reconnect 추가0·기존 데이터 보존은 별도 확인. |
+| M-4 | 웹1440 | **코드 검사 통과, 차단 후 실제 화면 미확인.** 브라우저 요청 차단은 실행하지 않았다. 실제 QueryObserver fixture의 실패1회·수동 재시도는 확인. |
+| M-5 | 웹375 | 전생 귀족3기: 실제 공개1~8화, `7 / 공개 8화`, `공개된 회차 8개 · 최근 8화 · 총 화수 미정`, 저장된7화 파란 선택·저장 비활성 유지. 막대88%, DOM ARIA min0/max8/now7. 문서폭375=화면폭375, API 문구 없음. `/tmp/scenenote-71-web-qa/progress-375.jpg`. |
+| M-6 | 웹375 | 검색 실제 부분 실패의 지정 안내 문구 확인. 인물 탭 부분 실패·에피소드 빈 상태는 **코드 검사 통과, 화면 미확인**(해당 상태를 실제 계정에서 만들지 않음). |
+| M-7 | 앱iOS 세로 | **코드 검사 통과, 화면 미확인.** `xcrun simctl` 실행 도구 없음. 네이티브 props·중복/실패/언마운트·태그 핀 분기·기존 데이터 유지는 React 격리 실행으로 확인했으며 실기기 당김 동작은 별도 확인 필요. Android도 실제 화면 미확인. |
+| M-8 | 앱iOS 세로 | **코드 검사 통과, 화면 미확인.** 실기기/시뮬레이터 환경 부재로 글자1.3배·안전 영역·실제 폰트 잘림을 확인하지 못함. |
+
+- 브라우저 QA는 대신 로그인하지 않고 기존 Chrome 세션을 사용했으며 감상·상태·등록·진행 저장 버튼은 누르지 않았다. 새 회차가 늘어도 저장된7화가 그대로임을 확인했다. viewport 복원 후 검증용3탭을 모두 닫았고, 이번 검증을 위해 시작한8081 Expo 프로세스(PID3369, 실행 명령 확인)만 종료했다. Safari·넷플릭스 탭은 직접 조작하지 않았지만 사용자가 시청 화면 꺼짐을 보고해 브라우저 검증을 종료했고 이후 재접속하지 않았다. Safari 실동작은 미확인이다. 원시 관측은 `/tmp/scenenote-71-web-qa/manual-results.json`이며 임시 관측 로그는 제품 코드에 남기지 않았다.
+- 후속 작업: M-2~M-4, M-6 남은 상태, 실제 iOS/Android M-7~M-8만 확인한다. 기존 UI 토큰/Alert100줄의 전체 정리는 별도 범위다. **이번 작업의 배포는 없다.**
+
+<details>
+<summary>추가한 테스트 ID와 실제 이름(34개)</summary>
+
+| ID | 파일 | 실제 테스트 이름 |
+|----|------|------------------|
+| T-1 | contentDetailView | known season and total counts do not need a released-episode lookup |
+| T-2 | contentDetailView | unknown season and total counts need a released-episode lookup |
+| T-3 | contentDetailView | counts above the choice limit still need released episodes |
+| T-4 | contentDetailView | zero, fractional and negative counts need released episodes |
+| T-5 | contentDetailView | the nullish fallback and the one-to-two-hundred boundaries avoid lookup |
+| T-6 | contentDetailView | the lookup predicate and count choice mode always use the same eligibility |
+| T-7 | contentDetailView | unknown-total released copy uses user-facing wording |
+| T-8 | contentDetailView | released copy with a known large total omits the unknown-total hint |
+| T-9 | contentDetailView | manual-entry copy explains the missing count without developer terminology |
+| T-10 | contentDetailView | a known total keeps the existing progress summary and denominator |
+| T-11 | contentDetailView | a single unknown-total season uses its latest published episode |
+| T-12 | contentDetailView | no watched episodes produces an empty published-episode bar |
+| T-13 | contentDetailView | multi-season cumulative progress does not use a season-local denominator |
+| T-14 | contentDetailView | manual mode without published episodes keeps its unbounded summary |
+| T-15 | contentDetailView | saved progress beyond the published frontier does not overflow the bar |
+| T-16 | airingAvailability | skips completed works, movies, and unset progress |
+| T-17 | airingAvailability | skips Kitsu availability requests |
+| T-18 | airingAvailability | resolves completed AniList seasons locally with all episodes released |
+| T-19 | airingAvailability | treats the AniList completion date as local on the same KST day |
+| T-20 | airingAvailability | remotely checks AniList seasons with a future completion date |
+| T-21 | airingAvailability | remotely checks ongoing AniList seasons without a completion date |
+| T-22 | airingAvailability | remotely checks completed AniList seasons whose episode count is unknown |
+| T-23 | airingAvailability | remotely checks AniList seasons with a malformed completion date |
+| T-24 | airingAvailability | never infers TMDB or TVmaze completion from a past end date |
+| T-25 | airingAvailability | remotely checks legacy items without a source API |
+| T-26 | airingAvailability | shows seven unwatched released episodes from the local completed-season result |
+| T-27 | airingAvailability | settles a known season when every episode is released and no next date remains |
+| T-28 | airingAvailability | keeps refreshing when a known season still has unreleased episodes |
+| T-29 | airingAvailability | never settles a season with an unknown final episode count |
+| T-30 | airingAvailability | keeps refreshing when a next airing date remains |
+| T-31 | airingAvailability | does not settle without an availability response or a released episode number |
+| T-32 | airingAvailability | uses the KST calendar date across the UTC midnight boundary |
+| T-33 | metadataQuery | Edge 목록 조회는 자동 재시도·창 복귀·재연결 재조회를 하지 않는다 |
+| T-34 | metadataQuery | 보존: 공개 메타데이터의 기존 수동 갱신 정책을 유지한다 |
+
+</details>
+
 ## 작품 상세 출연진 확인 후 등록 (2026-11-15)
 
 - 사용자 요청으로 `CastSection`은 모든 배우·성우를 누르면 인물 상세로만 이동한다. 작품 상세의 직접 등록 callback/mutation과 전체 카드 pending 잠금을 제거하고 안내·접근성 라벨을 수정했다. 인물 상세 이름 옆에 `좋아하는 인물에 등록` 버튼을 추가했다. 서버 상세의 분류·이름·한글 표기·출연작을 기존 등록 훅에 전달하며, 등록 여부 조회·실패·기등록·진행 중 차단과 동기 중복 잠금을 적용했다. 조회 실패 시 재확인, 등록 실패 시 한국어 토스트로 재시도 가능하다. 검색 칩·인물 탭 등록 동작은 유지한다.
@@ -94,7 +279,8 @@
 - 자동 갱신·선택 유지 후속 검증: 공식 일정 표본의 8화 시각 전 1ms에는 1~7화, 정각/후 1ms에는 1~8화(9화 이상 없음)를 실제 서버 순수 함수로 확인했다(3/3, `/tmp/scenenote185756-airing-boundary-20261115.json`). 미래 시각을 모사한 검사이며 실제 방영 후 API 응답 검증과 구분한다.
 - 실제 `useEpisodeAvailability` 옵션과 설치된 TanStack QueryObserver로 30분 타이머를 진행시켰다(36개 확인, 네트워크 0). 같은 observer에서 29:59.999까지 데이터 7개/조회 1회, 30:00에 재조회 2회/데이터 8개로 변경되고 query key/hash는 유지됐다. 정책은 활성 화면의 **30분 간격**이며 공개 시각에 맞춘 즉시 조회는 아니다. 신선한 캐시로 재진입하면 기존 7개를 잠시 유지할 수 있고, 백그라운드·비활성 상태에서는 지연될 수 있다. 이는 mock 포커스/시간·응답을 사용한 Query 실행 검증으로 네이티브 앱 수명 주기 확인은 아니다. 결과 `/tmp/scenenote-airing-refresh-aEtt4t/report.json`.
 - 실제 React 19.1.0/ReactDOM·`EpisodeProgressCard`·내부 회차 레일·순수 함수를 메모리 DOM에서 실행해 **7개→8개 갱신 뒤 7화 선택·저장 비활성·onSave 0회**를 확인했다(28/28, `/tmp/scenenote-episode-card-qa/result.json`). 합성 항목의 저장값 7은 변하지 않고 요약 7화·다음 회차 8화를 유지한다. RN host/layout과 Query/service/auth는 경계 fixture이며 실제 Expo UI·서버·개인 기록을 바꾸지 않았다. 로컬 HTML 브라우저 실행은 URL 정책이 막아 중단하고, 브라우저 없이 기존 jsdom을 사용하는 메모리 단위 실행으로 검증했다. 신규 설치 없음.
-- 사용자의 "8화 공개되면 확인" 요청에 따라 이 채팅의 **2026-11-15 23:35 KST 단발 후속 확인**을 설정했다(automation 8). 실제 공개 목록·7화 선택을 읽기 전용으로 확인하되, 새 탭/새로고침 검증과 자동 타이머 직접 관측은 구분한다. 기존 사용자 저장값을 변경하지 않으며 로그인 세션이 없으면 대신 로그인하지 않는다. 실제 공개 후 결과는 아직 남아 있다.
+- 사용자의 "8화 공개되면 확인" 요청에 따라 이 채팅의 **2026-11-15 23:35 KST 단발 후속 확인**을 설정했다(automation 8). 실제 공개 목록·7화 선택을 읽기 전용으로 확인하되, 새 탭/새로고침 검증과 자동 타이머 직접 관측은 구분한다. 기존 사용자 저장값을 변경하지 않으며 로그인 세션이 없으면 대신 로그인하지 않는다.
+- **공개 후 단발 확인(2026-11-15 23:36~23:40 KST)**: 공식 AniList를1회 조회했다(HTTP200). 원본 일정12행 중 조회 시각까지 방영 시각이 지난 회차는 **1~8화**, 8화는오늘23:30 KST, 총 화수는null·다음9화는11월22일23:30 KST다. 실제 `publishedAiringScheduleEpisodes`에 이 신규 응답/조회 시각을 넣어1~8화만 반환됨을 확인했다. 국내 OTT별 공개 확정이나 실제 Edge/30분 자동 타이머를 관측한 결과는 아니다. 지정 라이브러리 행을 읽기 전용 DB 조회해 **저장값7화 유지**, 진행 저장 시각2026-11-15 11:20:57 KST를 확인했다. 기존 로그인 브라우저의 라이브러리에도7화/다음8화가 표시됐으나 이 화면은 기존 렌더다. 별도 탭의 지정 상세 URL은 **localhost:8081 ERR_CONNECTION_REFUSED**였고8081 listen 프로세스도 없어, 실제1~8화 버튼·안내 문구·7화 선택 표시는 확인하지 못했다. 서버 시작/재시작·코드·배포·진행 저장·상태 변경·대신 로그인은 수행하지 않았다. 확인하려면 사용자가8081 웹 서버를 다시 실행해야 한다. QA 탭은 닫았고 기존 탭/필터·입력을 보존했으며 viewport는 바꾸지 않았다. 공식 원본 `/tmp/scenenote185756-postair-official-20261115.json`, 검증 범위 `/tmp/scenenote185756-postair-verification-20261115.json`. 문서 해당 항목만 갱신하고 경로·diff를 검사했다. 단발 후속 확인을 종료하고 automation8을 삭제했다.
 
 ## 로그인 전 사용성·오류 문구 정정 (docs/68, 2026-11-15)
 
@@ -372,6 +558,15 @@
 | 중간 | 설계 대조 필요 | `app/search.tsx`의 `mergeSearchResults`/`isSameWorkResult`가 서로 다른 출처의 결과 병합; `watchProvidersAtom`은 서버 응답 캐시 | 출처 선택 계약 및 TanStack Query 원칙과 차이를 [04](04_architecture.md)·[08](08_frontend_architecture.md)에서 검토. 이번에 이관하지 않음 |
 | 중간 | 실행 구성 불일치 | `.run/Backend Functions Deploy.run.xml`은 4개, `package.json`의 `backend:deploy`는 14개 함수 배포 | 별도 설정 변경 시 IDE 실행 구성 동기화. 문서 점검을 이유로 배포하지 않음 |
 | 출시 전 | 환경 미검증 | 인증 메일·딥링크, 두 사용자 RLS, 원격 DB/Edge·외부 API, 웹/iOS/Android E2E | 대상·테스트 계정·플랫폼을 정한 통합 QA 필요. 과거 성공 로그로 대체하지 않음 |
+
+### AI 로컬 검증 스킬·커밋 훅 (2026-11-16)
+
+- 범위: `.agents/skills/scenenote-verify/`, Claude 참조 진입점, `.githooks/`와 README/문서 목차. 후속 독립 검토에서 AGENTS/CLAUDE에 검증 스킬 경로도 연결했다. 기존 앱·서버·SQL 미커밋 변경은 보존했다. 기능별 선택 테스트는 작업 중 반복용이며 완료 시 AGENTS/명세가 요구하는 전체 검사를 줄이지 않는다.
+- 실행 도구: `--tests`로 정확한 파일 선택, `--only`로 검사 선택, `--plan`으로 실행 전 확인. `--node-bin DIR`은 선택한 Node/npm을 해당 실행과 자식 프로세스에만 적용한다. 기본 Node가 실패하는 이 Mac에서는 `/opt/homebrew/opt/node@24/bin`을 선택한다. 자동 런타임 재시도·전역 PATH 변경은 하지 않는다. 인수 없이 전체 검사를 시작하지 않으며 결과는 검사별 한 줄, 로그·요약은 권한 700 폴더/600 파일로 임시 저장한다. 요약에는 실제 명령·런타임 경로도 남긴다.
+- 격리 검증: 초기 CLI 13개·훅/설치기 18개를 후속 독립 검토에서 26개·24개로 확대했고, 런타임 선택 보완 후 최신은 **31개·24개 통과**다. 기존 신호/시간 제한·로그 실패·부분 staging 검사에 더해 정상 런타임을 명시해 고장 난 기본 Node를 피하는 실행, 공백 포함 경로·미리보기·npm 필요 여부·잘못된 실행 파일 차단·부모 PATH 보존을 확인했다. 회귀 입력은 수정 전 실패를 재현했다. 새 에이전트는 스킬 이름을 직접 지정하지 않은 요청에서도 AGENTS 경로를 따라 선택 검사 `--plan`을 실행했다. 이는 지침에 따른 선택 검증이며 앱의 자동 발견 검증과 구분한다.
+- 실제 확인: `python3 .githooks/install.py --check`는 기존 설치를 **active**로 확인했다. `verify.py --node-bin /opt/homebrew/opt/node@24/bin --tests src/utils/pinCache.test.ts` 한 실행에서 순수 테스트 1개·앱 typecheck·lint가 모두 통과했다. Node 24.22.2의 정확한 실행 경로와 결과는 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-tdw9etcf/summary.json`에 남겼다. 기본 Node의 simdjson 누락은 남아 있으며 전역 환경은 변경하지 않았다.
+- 실패 보고: 취소는 130/143과 `CANCELLED`, 로그/실행 환경 실패는 2를 반환한다. 검사 전 실패는 `NOT RUN`, 일부 실행 후 실패는 `INCOMPLETE`로 구분하며 이미 출력한 PASS/FAIL을 보존한다. 중도 실패·취소에는 `summary.json`이 없을 수 있다.
+- 한계: 훅은 파일명/경로 기준으로 내용의 비밀값을 전수검사하지 않으며 예제 환경 파일은 허용한다. 공백 검사는 Git whitespace·attributes 설정을 따른다. 공통 Git 훅이 적용되는 linked worktree에 guard 파일이 없으면 커밋이 실패한다. 현재 프로젝트의 실제 커밋·push·배포는 수행하지 않았다. 공식 Python 스킬 검증기는 PyYAML 부재로 실행되지 않아 기존 Node `yaml`로 두 진입점 메타데이터를 대체 검사했다. Python 구문·추가 링크/앵커·diff도 확인했다. 앱 기능을 수정하지 않아 전체 앱 테스트·빌드·웹/iOS/Android QA는 실행하지 않았다. POSIX 이외 자손 프로세스 정리·SIGKILL·실제 시간/토큰 절감률은 검증 범위 밖이다. Codex 앱의 스킬 자동 발견은 미확인이다. 앞선 읽기 전용 app-server 확인은 기본 SQLite 위치 쓰기 제한으로 시작에 실패했고, 임시 SQLite/log 경로를 사용한 재시도도 초기화 응답이 20초 내 오지 않았다(모델 호출·지속 설정 변경 없음). 증거: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-skill-discovery-ovwixkj6/report.json`.
 
 ### 변경 종류별 검증
 

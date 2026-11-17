@@ -51,6 +51,8 @@ export interface TimelinePin {
 }
 
 export interface PinInput {
+  /** One form's stable creation identity; retained after an uncertain network result. */
+  client_request_id?: string;
   content_id: string;
   episode_id?: string | null;
   timestamp_seconds: number | null;

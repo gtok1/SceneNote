@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
@@ -30,13 +30,18 @@ import {
 } from "@/utils/episodeProgress";
 import { createTrailingScheduler, LIBRARY_REFRESH_DEBOUNCE_MS } from "@/utils/recommendationAddFlow";
 import { filterUpcomingAiringItems } from "@/utils/upcomingAiring";
+import { EDGE_LIST_QUERY_OPTIONS } from "@/utils/metadataQuery";
+import { filterLibraryItemsByStatus } from "@/utils/libraryFilters";
+import { createLibraryMutationJournal, rollbackLibraryItem, type LibraryMutationOperation } from "@/utils/libraryRollback";
 
 export function useLibrary(status: LibraryStatusFilter = "all") {
   const user = useAuthStore((state) => state.user);
+  const select = useCallback((items: LibraryListItem[]) => filterLibraryItemsByStatus(items, status), [status]);
 
   return useQuery({
-    queryKey: queryKeys.library.byStatus(user?.id ?? "anonymous", status),
-    queryFn: () => getLibraryItems(status),
+    queryKey: queryKeys.library.byStatus(user?.id ?? "anonymous", "all"),
+    queryFn: () => getLibraryItems("all"),
+    select,
     enabled: Boolean(user),
     staleTime: 60_000
   });
@@ -66,6 +71,7 @@ export function useSeasons(contentId: string | undefined) {
 
 export function useEpisodes(contentId: string | undefined, seasonId: string | null) {
   return useQuery({
+    ...EDGE_LIST_QUERY_OPTIONS,
     queryKey: queryKeys.content.episodes(contentId ?? "", seasonId),
     queryFn: () => getEpisodes(contentId ?? "", seasonId ?? ""),
     enabled: Boolean(contentId && seasonId),
@@ -128,10 +134,13 @@ export function useUpdateLibraryStatus() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       updateLibraryItemStatusesInCache(queryClient, user.id, libraryItemId, [status]);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -161,10 +170,13 @@ export function useUpdateLibraryStatuses() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       updateLibraryItemStatusesInCache(queryClient, user.id, libraryItemId, statuses, watchCount);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -186,10 +198,13 @@ export function useDeleteLibraryItem() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       removeLibraryItemFromCache(queryClient, user.id, libraryItemId);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -264,10 +279,13 @@ export function useUpdateLibraryManualProgress() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       updateLibraryItemManualProgressInCache(queryClient, user.id, libraryItemId, progress);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -292,10 +310,13 @@ export function useUpdateLibraryWatchCount() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       updateLibraryItemWatchCountInCache(queryClient, user.id, libraryItemId, watchCount);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -324,10 +345,13 @@ export function useUpdateLibraryWatchDates() {
       await queryClient.cancelQueries({ queryKey: queryKeys.library.all(user.id) });
       const snapshots = snapshotLibraryQueries(queryClient, user.id);
       updateLibraryItemWatchDatesInCache(queryClient, user.id, libraryItemId, firstWatchedAt, lastWatchedAt);
-      return { snapshots };
+      return captureLibraryMutation(queryClient, user.id, libraryItemId, snapshots);
     },
     onError: (_error, _variables, context) => {
-      if (context?.snapshots) restoreLibraryQueries(queryClient, context.snapshots);
+      restoreLibraryQueries(queryClient, context);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      settleLibraryMutation(queryClient, context);
     },
     onSuccess: () => {
       if (user) {
@@ -353,13 +377,54 @@ function snapshotLibraryQueries(queryClient: QueryClient, userId: string) {
   return queryClient.getQueriesData<LibraryListItem[]>({ queryKey: queryKeys.library.all(userId) });
 }
 
-function restoreLibraryQueries(
+const libraryMutationJournals = new WeakMap<QueryClient, ReturnType<typeof createLibraryMutationJournal>>();
+
+function mutationJournal(queryClient: QueryClient) {
+  let journal = libraryMutationJournals.get(queryClient);
+  if (!journal) {
+    journal = createLibraryMutationJournal();
+    libraryMutationJournals.set(queryClient, journal);
+  }
+  return journal;
+}
+
+interface LibraryMutationContext {
+  snapshots: ReturnType<typeof snapshotLibraryQueries>;
+  optimistic: ReturnType<typeof snapshotLibraryQueries>;
+  operation: LibraryMutationOperation;
+}
+
+function captureLibraryMutation(
   queryClient: QueryClient,
+  userId: string,
+  libraryItemId: string,
   snapshots: ReturnType<typeof snapshotLibraryQueries>
-) {
-  snapshots.forEach(([queryKey, data]) => {
-    queryClient.setQueryData(queryKey, data);
+): LibraryMutationContext {
+  return {
+    snapshots,
+    optimistic: snapshotLibraryQueries(queryClient, userId),
+    operation: mutationJournal(queryClient).begin(userId, libraryItemId)
+  };
+}
+
+function restoreLibraryQueries(queryClient: QueryClient, context: LibraryMutationContext | undefined) {
+  if (!context) return;
+  const journal = mutationJournal(queryClient);
+  journal.failed(context.operation);
+  if (!journal.canRollback(context.operation)) return;
+  context.snapshots.forEach(([queryKey, before]) => {
+    const optimistic = context.optimistic.find(([key]) => key === queryKey)?.[1];
+    queryClient.setQueryData<LibraryListItem[]>(queryKey, current =>
+      rollbackLibraryItem(current, before, optimistic, context.operation.libraryItemId).items
+    );
   });
+}
+
+function settleLibraryMutation(queryClient: QueryClient, context: LibraryMutationContext | undefined) {
+  if (!context || !mutationJournal(queryClient).settle(context.operation)) return;
+  // Reconcile failures once all concurrent writes have settled; do not refetch over
+  // another pending optimistic change or restore an entire stale list (docs/73).
+  void queryClient.invalidateQueries({ queryKey: queryKeys.library.all(context.operation.userId), refetchType: "active" });
 }
 
 function updateLibraryItemStatusesInCache(

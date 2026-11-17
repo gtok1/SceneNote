@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getSessionUserId } from "@/services/sessionUser";
 import type {
   FavoritePerson,
   KoreanNameSource,
@@ -117,14 +118,12 @@ type DbError = { message: string; code?: string };
 const MISSING_COLUMN_ERROR_CODE = "PGRST204";
 
 export async function addFavoritePerson(person: PersonSearchResult): Promise<FavoritePerson> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const { userId } = await getSessionUserId();
 
-  if (!user) throw new Error("로그인이 필요합니다");
+  if (!userId) throw new Error("로그인이 필요합니다");
 
   const row: Record<string, unknown> = {
-    user_id: user.id,
+    user_id: userId,
     source: person.source,
     external_id: person.external_id,
     category: person.category,
@@ -269,11 +268,9 @@ async function updateFavoritePersonCategoryByExternalId(
   externalId: string,
   category: PersonCategory
 ): Promise<void> {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const { userId } = await getSessionUserId();
 
-  if (!user) return;
+  if (!userId) return;
 
   await ((supabase as never as { from: (table: string) => unknown }).from("favorite_people") as {
     update: (row: Record<string, unknown>) => {
@@ -285,7 +282,7 @@ async function updateFavoritePersonCategoryByExternalId(
     };
   })
     .update({ category })
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("source", source)
     .eq("external_id", externalId);
 }

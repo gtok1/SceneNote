@@ -167,6 +167,51 @@ test("marks ambiguous existing candidates for manual review", () => {
   assert.equal(match.status, "ambiguous");
 });
 
+function identityFixture(kind: "movie" | "tv", title = "같은 제목") {
+  return {
+    id: `${kind}-123`, content_type: kind === "movie" ? "movie" as const : "jdrama" as const,
+    source_api: "tmdb" as const, source_id: "123", title_primary: title, title_original: null,
+    air_year: 2026, air_date: null, end_date: null
+  };
+}
+
+function identityRow(overrides: Record<string, string> = {}) {
+  const [row] = normalizeWorkRows([{ import_selected: "TRUE", normalized_title: "같은 제목", tmdb_id: "123", ...overrides }]);
+  assert.ok(row);
+  return row;
+}
+
+test("integrity import ID-1 explicit TV namespace skips a movie with the same numeric id", () => {
+  const match = findExistingContentForRow(identityRow({ tmdb_media_type: "tv" }), [identityFixture("movie"), identityFixture("tv")]);
+  assert.equal(match.content?.id, "tv-123");
+});
+
+test("integrity import ID-2 media hint scopes an otherwise untyped TMDB id", () => {
+  const match = findExistingContentForRow(identityRow({ media_hint: "tv" }), [identityFixture("movie"), identityFixture("tv")]);
+  assert.equal(match.content?.id, "tv-123");
+});
+
+test("integrity import ID-3 untyped numeric id cannot bypass title confirmation", () => {
+  const match = findExistingContentForRow(identityRow({ normalized_title: "다른 작품" }), [identityFixture("movie")]);
+  assert.equal(match.status, "none");
+});
+
+test("integrity import ID-4 untyped same-title movie and TV stay ambiguous", () => {
+  const match = findExistingContentForRow(identityRow(), [identityFixture("movie"), identityFixture("tv")]);
+  assert.equal(match.status, "ambiguous");
+  assert.equal(match.content, undefined);
+});
+
+test("integrity import ID-5 explicit TV does not fall back to an opposite-kind exact title", () => {
+  const match = findExistingContentForRow(identityRow({ tmdb_media_type: "tv", tmdb_id: "456" }), [identityFixture("movie")]);
+  assert.equal(match.status, "none");
+});
+
+test("integrity import ID-6 explicit TMDB type takes precedence over a broader media hint", () => {
+  const match = findExistingContentForRow(identityRow({ tmdb_media_type: "tv", media_hint: "movie" }), [identityFixture("movie"), identityFixture("tv")]);
+  assert.equal(match.content?.id, "tv-123");
+});
+
 test("scores and selects confident TMDB candidate", () => {
   const [row] = normalizeWorkRows([
     {

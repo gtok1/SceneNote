@@ -20,6 +20,7 @@ import { createReviewLabel } from "@/utils/reviewDisplay";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { ERROR_COPY } from "@/utils/errorCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { EDGE_LIST_QUERY_OPTIONS } from "@/utils/metadataQuery";
 
 interface LibraryShareScreenContentProps {
   shareId?: string;
@@ -36,6 +37,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
   const hasShareId = Boolean(normalizedShareId);
   const receivedShareId = shareId?.trim() ?? "";
   const share = useQuery({
+    ...EDGE_LIST_QUERY_OPTIONS,
     queryKey: ["library-share", normalizedShareId],
     queryFn: () => getLibraryShare(normalizedShareId ?? ""),
     enabled: hasShareId,

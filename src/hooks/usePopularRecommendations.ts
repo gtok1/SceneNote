@@ -4,6 +4,7 @@ import { queryKeys } from "@/lib/query";
 import { getPopularRecommendations } from "@/services/popularRecommendations";
 import { useAuthStore } from "@/stores/authStore";
 import { useRecommendationPreferences } from "@/hooks/useRecommendationPreferences";
+import { EDGE_LIST_QUERY_OPTIONS } from "@/utils/metadataQuery";
 
 export function usePopularRecommendations() {
   const user = useAuthStore((state) => state.user);
@@ -18,6 +19,7 @@ export function usePopularRecommendations() {
   ]);
 
   return useQuery({
+    ...EDGE_LIST_QUERY_OPTIONS,
     queryKey: [...queryKeys.recommendations.popular(user?.id ?? "anonymous"), filterIdentity],
     queryFn: () => getPopularRecommendations(user?.id ?? "anonymous", exclusions),
     enabled: Boolean(user && preferences.isReady),

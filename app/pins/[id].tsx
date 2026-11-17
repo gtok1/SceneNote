@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -19,6 +19,8 @@ import { usePin } from "@/hooks/useTimelinePins";
 import { getHomeLayout } from "@/utils/homeLayout";
 import { ERROR_COPY } from "@/utils/errorCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { pinForDetail } from "@/utils/pinDetailState";
+import type { TimelinePin } from "@/types/pins";
 
 export default function PinDetailScreen() {
   const { id } = useLocalSearchParams<{
@@ -32,13 +34,18 @@ export default function PinDetailScreen() {
   const { gutter } = getHomeLayout(width);
   const [isSpoilerRevealed, setSpoilerRevealed] = useState(false);
   const [isEditing, setEditing] = useState(false);
+  const lastLoaded = useRef<TimelinePin | null>(null);
+  useEffect(() => {
+    if (pin.data?.id === id) lastLoaded.current = pin.data;
+  }, [id, pin.data]);
+  useEffect(() => { setEditing(false); }, [id]);
+  const currentPin = pinForDetail(pin.data, lastLoaded.current, id, isEditing);
 
   useFocusEffect(useCallback(() => { setSpoilerRevealed(false); return () => setSpoilerRevealed(false); }, []));
 
-  if (pin.isLoading) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><LoadingSkeleton variant="pin-item" /></ScreenStateFrame>;
-  if (pin.isError) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><ErrorState message={userFacingErrorMessage(pin.error, ERROR_COPY.pinLoad)} onRetry={() => pin.refetch()} /></ScreenStateFrame>;
-  if (!pin.data) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><EmptyState title="핀을 찾을 수 없습니다" /></ScreenStateFrame>;
-  const currentPin = pin.data;
+  if (pin.isLoading && !currentPin) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><LoadingSkeleton variant="pin-item" /></ScreenStateFrame>;
+  if (pin.isError && !currentPin) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><ErrorState message={userFacingErrorMessage(pin.error, ERROR_COPY.pinLoad)} onRetry={() => pin.refetch()} /></ScreenStateFrame>;
+  if (!currentPin) return <ScreenStateFrame maxWidth={FORM_CONTENT_MAX_WIDTH}><EmptyState title="핀을 찾을 수 없습니다" actionLabel="핀 목록으로" onAction={() => router.replace("/pins")} /></ScreenStateFrame>;
 
   return (
     <View style={styles.container}>
@@ -50,10 +57,8 @@ export default function PinDetailScreen() {
           episodeId={currentPin.episode_id}
           mode="edit"
           onCancel={() => setEditing(false)}
-          onSuccess={(updated) => {
-            setEditing(false);
-            router.dismissTo({ pathname: "/content/[id]/pins", params: { id: updated.content_id, ...(updated.episode_id ? { episodeId: updated.episode_id } : {}) } });
-          }}
+          onSuccess={() => setEditing(false)}
+          onDeleted={() => router.canGoBack() ? router.back() : router.replace("/pins")}
         />
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.detailBody, { paddingLeft: Math.max(gutter, insets.left), paddingRight: Math.max(gutter, insets.right), paddingBottom: insets.bottom + spacing.xl }]}>

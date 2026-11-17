@@ -164,7 +164,7 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
   const apiKey = Deno.env.get("TMDB_API_KEY");
   if (!apiKey) throw new Error("TMDB_API_KEY is not configured");
 
-  const mediaAttempts = preferredMediaType === "movie" ? ["movie", "tv"] : ["tv", "movie"];
+  const mediaAttempts = preferredMediaType === "movie" ? ["movie"] : preferredMediaType === "tv" ? ["tv"] : ["tv", "movie"];
   let detail: TmdbDetail | null = null;
   let resolvedMediaType: "tv" | "movie" | null = null;
 
@@ -180,7 +180,7 @@ export async function fetchTmdbDetail(externalId: string, preferredMediaType?: s
       resolvedMediaType = mediaType as "tv" | "movie";
       break;
     } catch {
-      // Try the next TMDB media endpoint. Search results should eventually pass media_type.
+      // Only legacy untyped callers may probe another endpoint. Explicit namespaces never cross.
     }
   }
 
@@ -870,6 +870,16 @@ export async function fetchEpisodesForSeason(params: {
     case "tvmaze":
       return fetchTvmazeEpisodes(params.externalId, params.seasonNumber);
     case "anilist":
+      if (!Number.isInteger(params.episodeCount) || !params.episodeCount || params.episodeCount < 1) {
+        const availability = await fetchEpisodeAvailability(params);
+        return availability.releasedEpisodes.map(episode => ({
+          episode_number: episode.episode_number,
+          title: episode.title,
+          air_date: episode.air_date,
+          duration_seconds: null
+        }));
+      }
+      return generateNumberedEpisodes(params.episodeCount);
     case "kitsu":
       return generateNumberedEpisodes(params.episodeCount);
   }
@@ -938,7 +948,7 @@ async function fetchTvmazeEpisodes(externalId: string, seasonNumber: number): Pr
 }
 
 function generateNumberedEpisodes(episodeCount?: number | null): EpisodeMeta[] {
-  if (!episodeCount || episodeCount <= 0) {
+  if (!episodeCount || !Number.isInteger(episodeCount) || episodeCount <= 0 || episodeCount > 50_000) {
     // TODO: AniList/Kitsu often provide total episode count but not full episode metadata.
     return [];
   }

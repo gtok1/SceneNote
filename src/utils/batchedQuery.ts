@@ -27,3 +27,33 @@ export async function readBatchedRows<T>(
   }
   return { data, error: null };
 }
+
+/** Read one query to completion; never return a truncated success at the safety limit (docs/72 D-1). */
+export async function readAllRows<T>(
+  readPage: (from: number, to: number) => PromiseLike<QueryPage<T>>,
+  options: { pageSize?: number; maxPages?: number; rowKey?: (row: T) => string | null | undefined } = {}
+): Promise<QueryPage<T>> {
+  const { pageSize = 1000, maxPages = 50, rowKey } = options;
+  if (!Number.isInteger(pageSize) || pageSize < 1 || !Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error("Invalid query page size");
+  }
+
+  const data: T[] = [];
+  const seen = new Set<string>();
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const from = pageIndex * pageSize;
+    const page = await readPage(from, from + pageSize - 1);
+    if (page.error) return { data: null, error: page.error };
+    const rows = page.data ?? [];
+    for (const row of rows) {
+      const key = rowKey?.(row);
+      if (key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      data.push(row);
+    }
+    if (rows.length < pageSize) return { data, error: null };
+  }
+  return { data: null, error: { message: "ROW_LIMIT_EXCEEDED" } };
+}

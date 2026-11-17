@@ -20,6 +20,7 @@ export type Database = {
           content_id: string
           created_at: string
           external_id: string
+          media_type: string
           id: string
           updated_at: string
         }
@@ -28,6 +29,7 @@ export type Database = {
           content_id: string
           created_at?: string
           external_id: string
+          media_type?: string
           id?: string
           updated_at?: string
         }
@@ -36,6 +38,7 @@ export type Database = {
           content_id?: string
           created_at?: string
           external_id?: string
+          media_type?: string
           id?: string
           updated_at?: string
         }
@@ -175,6 +178,7 @@ export type Database = {
           poster_url: string | null
           source_api: Database["public"]["Enums"]["external_source"]
           source_id: string
+          source_media_type: string
           title_original: string | null
           title_primary: string
           updated_at: string
@@ -192,6 +196,7 @@ export type Database = {
           poster_url?: string | null
           source_api: Database["public"]["Enums"]["external_source"]
           source_id: string
+          source_media_type?: string
           title_original?: string | null
           title_primary: string
           updated_at?: string
@@ -209,6 +214,7 @@ export type Database = {
           poster_url?: string | null
           source_api?: Database["public"]["Enums"]["external_source"]
           source_id?: string
+          source_media_type?: string
           title_original?: string | null
           title_primary?: string
           updated_at?: string
@@ -370,6 +376,7 @@ export type Database = {
       library_shares: {
         Row: {
           content_ids: string[]
+          library_item_ids: string[] | null
           created_at: string
           expires_at: string | null
           filters: Json
@@ -381,6 +388,7 @@ export type Database = {
         }
         Insert: {
           content_ids?: string[]
+          library_item_ids?: string[] | null
           created_at?: string
           expires_at?: string | null
           filters?: Json
@@ -392,6 +400,7 @@ export type Database = {
         }
         Update: {
           content_ids?: string[]
+          library_item_ids?: string[] | null
           created_at?: string
           expires_at?: string | null
           filters?: Json
@@ -488,6 +497,8 @@ export type Database = {
           content_id: string
           created_at: string
           episode_count: number | null
+          episodes_synced_at: string | null
+          published_episode_numbers: number[] | null
           id: string
           season_number: number
           title: string | null
@@ -498,6 +509,8 @@ export type Database = {
           content_id: string
           created_at?: string
           episode_count?: number | null
+          episodes_synced_at?: string | null
+          published_episode_numbers?: number[] | null
           id?: string
           season_number: number
           title?: string | null
@@ -508,6 +521,8 @@ export type Database = {
           content_id?: string
           created_at?: string
           episode_count?: number | null
+          episodes_synced_at?: string | null
+          published_episode_numbers?: number[] | null
           id?: string
           season_number?: number
           title?: string | null
@@ -809,6 +824,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      save_timeline_pin: {
+        Args: {
+          p_pin_id: string
+          p_is_create: boolean
+          p_content_id: string | null
+          p_episode_id: string | null
+          p_timestamp_seconds: number | null
+          p_memo: string | null
+          p_emotion: Database["public"]["Enums"]["emotion_type"] | null
+          p_is_spoiler: boolean
+          p_tag_names: string[]
+        }
+        Returns: Json
+      }
       get_genre_stats: {
         Args: never
         Returns: {

@@ -721,3 +721,14 @@ describe("prepared recommendation scoring", () => {
     assert.deepEqual(rankCandidates(profile, tied, { ordering: "latest" }), rankCandidates(profile, tied));
   });
 });
+
+it("integrity REC-ID-1 does not hide a different TV work merely because its TMDB number equals a registered movie", () => {
+  const movie: RecommendationLibraryItem = { source_api: "tmdb", source_id: "123", content_type: "movie", title_primary: "Different Movie", air_year: 2020, status_flags: ["completed"] };
+  const tv = candidate("123", { external_source: "tmdb", content_type: "jdrama", title_primary: "Different Series", air_year: 2026, has_seasons: true });
+  assert.equal(getRecommendationBatch([movie], [tv], { limit: 1, now: NOW }).items.length, 1);
+});
+it("integrity REC-ID-2 keeps different movie and TV candidates with the same TMDB number", () => {
+  const movie = candidate("123", { external_source: "tmdb", content_type: "movie", title_primary: "Different Movie", air_year: 2020, has_seasons: false });
+  const tv = candidate("123", { external_source: "tmdb", content_type: "jdrama", title_primary: "Different Series", air_year: 2026, has_seasons: true });
+  assert.equal(getRecommendationBatch([], [movie, tv], { limit: 2, now: NOW }).items.length, 2);
+});

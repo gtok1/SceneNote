@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import * as airingAvailability from "./airingAvailability";
 import {
   formatUpcomingEpisodeDate,
   releasedEpisodeFromKnownDates,
@@ -137,4 +138,104 @@ it("AniList third-season registration checks its standalone actual season one", 
 
 it("a missing registered TMDB season does not borrow another season's availability", () => {
   assert.equal(seasonToCheck({ ...base, source_api: "tmdb", season_number: 3 }), null);
+});
+
+describe("docs/71 airing availability lookup plan", () => {
+  const todayKst = "2026-11-16";
+  const watching = {
+    ...base,
+    source_api: "anilist" as const,
+    end_date: "2026-11-15",
+    season_episode_counts: [{ season_number: 1, episode_count: 12 }],
+    effective_watched_through: 5,
+    next_episode_number: 6
+  };
+
+  it("T-16 skips completed works, movies, and unset progress", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, statuses: ["completed"] }, todayKst), { kind: "none" });
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, content_type: "movie" }, todayKst), { kind: "none" });
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, progress_source: "none" }, todayKst), { kind: "none" });
+  });
+
+  it("T-17 skips Kitsu availability requests", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, source_api: "kitsu" }, todayKst), { kind: "none" });
+  });
+
+  it("T-18 resolves completed AniList seasons locally with all episodes released", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability(watching, todayKst), {
+      kind: "local",
+      seasonNumber: 1,
+      availability: { releasedEpisodeNumber: 12, upcomingEpisodeNumber: null, nextAirDate: null }
+    });
+  });
+
+  it("T-19 treats the AniList completion date as local on the same KST day", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, end_date: todayKst }, todayKst), {
+      kind: "local",
+      seasonNumber: 1,
+      availability: { releasedEpisodeNumber: 12, upcomingEpisodeNumber: null, nextAirDate: null }
+    });
+  });
+
+  it("T-20 remotely checks AniList seasons with a future completion date", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, end_date: "2026-11-17" }, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-21 remotely checks ongoing AniList seasons without a completion date", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, end_date: null }, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-22 remotely checks completed AniList seasons whose episode count is unknown", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({
+      ...watching,
+      season_episode_counts: [{ season_number: 1, episode_count: null }]
+    }, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-23 remotely checks AniList seasons with a malformed completion date", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, end_date: "2026" }, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-24 never infers TMDB or TVmaze completion from a past end date", () => {
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, source_api: "tmdb" }, todayKst), { kind: "remote", seasonNumber: 1 });
+    assert.deepEqual(airingAvailability.planAiringAvailability({ ...watching, source_api: "tvmaze" }, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-25 remotely checks legacy items without a source API", () => {
+    const { source_api: _sourceApi, ...legacyItem } = watching;
+    assert.deepEqual(airingAvailability.planAiringAvailability(legacyItem, todayKst), { kind: "remote", seasonNumber: 1 });
+  });
+
+  it("T-26 shows seven unwatched released episodes from the local completed-season result", () => {
+    const plan = airingAvailability.planAiringAvailability(watching, todayKst);
+    assert.equal(plan.kind, "local");
+    assert.equal(plan.kind === "local" ? releasedUnwatchedCount(watching, plan.seasonNumber, plan.availability.releasedEpisodeNumber) : null, 7);
+  });
+
+  it("T-27 settles a known season when every episode is released and no next date remains", () => {
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: 12, nextAirDate: null }, 12), true);
+  });
+
+  it("T-28 keeps refreshing when a known season still has unreleased episodes", () => {
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: 7, nextAirDate: null }, 12), false);
+  });
+
+  it("T-29 never settles a season with an unknown final episode count", () => {
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: 7, nextAirDate: null }, null), false);
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: 7, nextAirDate: null }, undefined), false);
+  });
+
+  it("T-30 keeps refreshing when a next airing date remains", () => {
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: 12, nextAirDate: "2026-11-22" }, 12), false);
+  });
+
+  it("T-31 does not settle without an availability response or a released episode number", () => {
+    assert.equal(airingAvailability.isAvailabilitySettled(undefined, 12), false);
+    assert.equal(airingAvailability.isAvailabilitySettled({ releasedEpisodeNumber: null, nextAirDate: null }, 12), false);
+  });
+
+  it("T-32 uses the KST calendar date across the UTC midnight boundary", () => {
+    assert.equal(airingAvailability.koreaToday(new Date("2026-11-15T15:00:00Z")), "2026-11-16");
+    assert.equal(airingAvailability.koreaToday(new Date("2026-11-15T14:59:59Z")), "2026-11-15");
+  });
 });

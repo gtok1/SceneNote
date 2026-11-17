@@ -1,5 +1,6 @@
 import { useAppUIStore } from "@/stores/appUIStore";
 import { isPinDraftDirty } from "@/utils/pinDraft";
+import { createPinSaveIdentity } from "@/utils/pinSave";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useNavigation, usePreventRemove } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -34,6 +35,7 @@ interface PinComposerProps {
   mode: "create" | "edit";
   onSuccess: (pin: TimelinePin) => void;
   onCancel: () => void;
+  onDeleted?: () => void;
 }
 
 export function PinComposer({
@@ -42,7 +44,8 @@ export function PinComposer({
   defaultValues,
   mode,
   onSuccess,
-  onCancel
+  onCancel,
+  onDeleted
 }: PinComposerProps) {
   const addToast = useAppUIStore(state => state.addToast);
   const [draft, setDraft] = useAtom(pinFormDraftAtom);
@@ -57,6 +60,7 @@ export function PinComposer({
   const navigation = useNavigation();
   const network = useNetworkState();
   const saveLock = useRef(false);
+  const [createIdentity] = useState(() => createPinSaveIdentity());
   const timeRef = useRef<TextInput>(null);
   const memoRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -181,7 +185,7 @@ export function PinComposer({
 
       const pin =
         mode === "create"
-          ? await createMutation.mutateAsync({ ...payload, content_id: contentId, episode_id: episodeId })
+          ? await createMutation.mutateAsync({ ...payload, content_id: contentId, episode_id: episodeId, client_request_id: createIdentity.getId() })
           : await updateMutation.mutateAsync(payload);
 
       addToast("핀을 저장했어요.", "success");
@@ -192,16 +196,21 @@ export function PinComposer({
   };
 
   const remove = () => {
-    if (!defaultValues?.id || isSaving) return;
+    if (!defaultValues?.id || isSaving || saveLock.current) return;
     const pinId = defaultValues.id;
     confirmDestructive({
       title: "핀 삭제",
       message: "이 핀을 삭제할까요? 삭제한 핀은 되돌릴 수 없어요.",
       confirmLabel: "삭제",
-      onConfirm: () => deleteMutation.mutate(pinId, {
-        onSuccess: () => { addToast("핀을 삭제했어요.", "success"); leave(onCancel); },
-        onError: (caught) => setError(userFacingErrorMessage(caught, "핀을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요."))
-      })
+      onConfirm: () => {
+        if (saveLock.current) return;
+        saveLock.current = true;
+        deleteMutation.mutate(pinId, {
+          onSuccess: () => { addToast("핀을 삭제했어요.", "success"); leave(onDeleted ?? onCancel); },
+          onError: (caught) => setError(userFacingErrorMessage(caught, "핀을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.")),
+          onSettled: () => { saveLock.current = false; }
+        });
+      }
     });
   };
 

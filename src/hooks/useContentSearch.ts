@@ -4,7 +4,7 @@ import { queryKeys } from "@/lib/query";
 import { externalContentDetailQueryKey, fetchExternalContentDetail, getExternalContentDetail, searchContent } from "@/services/contentSearch";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { mergeSearchPages } from "@/utils/searchPagination";
-import { MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
+import { EDGE_LIST_QUERY_OPTIONS, MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
 import { discoveryFilterKey, normalizeDiscoveryFilters, type DiscoveryFilterInput } from "../../supabase/functions/_shared/discoveryFilters";
 
 export function useContentSearch(
@@ -17,6 +17,7 @@ export function useContentSearch(
   const filters = normalizeDiscoveryFilters({ ...options, ...(typeof countries === "string" ? { country: countries } : { countries }) });
   const browsing = normalizedQuery.length === 0 && filters.countries.length > 0;
   const searchQuery = useInfiniteQuery({
+    ...EDGE_LIST_QUERY_OPTIONS,
     queryKey: queryKeys.search.results(normalizedQuery, mediaType, 1, discoveryFilterKey(filters)),
     queryFn: ({ pageParam, signal }) =>
       searchContent({ query: normalizedQuery, mediaType, page: pageParam, ...filters, signal }),

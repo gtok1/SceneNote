@@ -19,6 +19,14 @@ export interface LibraryShareSummary {
   createdAt: string;
 }
 
+export interface CreateLibraryShareInput {
+  title: string;
+  filters: LibraryShareFilters;
+  libraryItemIds?: string[];
+  /** Compatibility for callers creating legacy whole-content shares. */
+  contentIds?: string[];
+}
+
 export interface LibraryShareDetail extends LibraryShareSummary {
   ownerDisplayName: string;
   filters: LibraryShareFilters;

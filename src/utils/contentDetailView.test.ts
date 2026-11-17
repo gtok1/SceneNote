@@ -97,12 +97,12 @@ it("EI-1 hides list status in count mode even while fetching or failed", () => {
   assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "count", numbers: [1] }, totalEpisodes: 26, isFetching: true, isError: true }), null);
 });
 it("EI-2 describes released rows and unknown total separately", () => {
-  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2, 3] }, totalEpisodes: null, isFetching: false, isError: false }), "API 공개 회차 3개 · 최근 3화 · 총 화수 미정");
-  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2] }, totalEpisodes: 1100, isFetching: false, isError: false }), "API 공개 회차 2개 · 최근 2화");
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2, 3] }, totalEpisodes: null, isFetching: false, isError: false }), "공개된 회차 3개 · 최근 3화 · 총 화수 미정");
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2] }, totalEpisodes: 1100, isFetching: false, isError: false }), "공개된 회차 2개 · 최근 2화");
 });
 it("EI-3 explains manual input when no API count is available", () => {
   assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: false, isError: false }), choiceContract.EPISODE_CHOICE_MANUAL_COPY);
-  assert.equal(choiceContract.EPISODE_CHOICE_MANUAL_COPY, "API에서 이 작품의 화수를 알려 주지 않아요. 본 회차를 직접 입력해 주세요.");
+  assert.equal(choiceContract.EPISODE_CHOICE_MANUAL_COPY, "아직 화수 정보가 없어요. 본 회차를 직접 입력해 주세요.");
 });
 it("EI-4 shows error before loading in manual mode", () => {
   assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "manual" }, totalEpisodes: null, isFetching: false, isError: true }), "공개 회차를 불러오지 못했어요.");
@@ -166,4 +166,92 @@ it("completion suggestions use local season progress and cumulative whole-work p
   assert.equal(suggest(seasonProgressItem, 10), "mark_completed");
   assert.equal(suggest({ ...seasonProgressItem, season_number: null, episode_count: 20 }, 3), null);
   assert.equal(suggest({ ...seasonProgressItem, season_number: null, episode_count: 20 }, 10), "mark_completed");
+});
+
+it("71 T-1: known season and total counts do not need a released-episode lookup", () => {
+  assert.equal(choiceContract.needsReleasedEpisodeLookup({ seasonEpisodeCount: 12, totalEpisodes: 12 }), false);
+});
+
+it("71 T-2: unknown season and total counts need a released-episode lookup", () => {
+  for (const seasonEpisodeCount of [null, undefined]) {
+    assert.equal(choiceContract.needsReleasedEpisodeLookup({ seasonEpisodeCount, totalEpisodes: null }), true);
+  }
+});
+
+it("71 T-3: counts above the choice limit still need released episodes", () => {
+  for (const input of [{ seasonEpisodeCount: null, totalEpisodes: 1100 }, { seasonEpisodeCount: 201, totalEpisodes: null }]) {
+    assert.equal(choiceContract.needsReleasedEpisodeLookup(input), true);
+  }
+});
+
+it("71 T-4: zero, fractional and negative counts need released episodes", () => {
+  for (const seasonEpisodeCount of [0, 1.5, -1]) {
+    assert.equal(choiceContract.needsReleasedEpisodeLookup({ seasonEpisodeCount, totalEpisodes: null }), true);
+  }
+});
+
+it("71 T-5: the nullish fallback and the one-to-two-hundred boundaries avoid lookup", () => {
+  for (const input of [{ seasonEpisodeCount: null, totalEpisodes: 24 }, { seasonEpisodeCount: 200, totalEpisodes: null }, { seasonEpisodeCount: 1, totalEpisodes: null }]) {
+    assert.equal(choiceContract.needsReleasedEpisodeLookup(input), false);
+  }
+});
+
+it("71 T-6: the lookup predicate and count choice mode always use the same eligibility", () => {
+  const cases = [
+    { seasonEpisodeCount: 12, totalEpisodes: 12 },
+    { seasonEpisodeCount: null, totalEpisodes: null },
+    { seasonEpisodeCount: undefined, totalEpisodes: null },
+    { seasonEpisodeCount: null, totalEpisodes: 1100 },
+    { seasonEpisodeCount: 201, totalEpisodes: null },
+    { seasonEpisodeCount: 0, totalEpisodes: null },
+    { seasonEpisodeCount: 1.5, totalEpisodes: null },
+    { seasonEpisodeCount: -1, totalEpisodes: null },
+    { seasonEpisodeCount: null, totalEpisodes: 24 },
+    { seasonEpisodeCount: 200, totalEpisodes: null },
+    { seasonEpisodeCount: 1, totalEpisodes: null }
+  ];
+  for (const input of cases) {
+    assert.equal(
+      choiceContract.resolveEpisodeChoiceMode({ ...input, releasedEpisodes: [] }).kind === "count",
+      choiceContract.needsReleasedEpisodeLookup(input) === false
+    );
+  }
+});
+
+it("71 T-7: unknown-total released copy uses user-facing wording", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2, 3] }, totalEpisodes: null, isFetching: false, isError: false }), "공개된 회차 3개 · 최근 3화 · 총 화수 미정");
+});
+
+it("71 T-8: released copy with a known large total omits the unknown-total hint", () => {
+  assert.equal(choiceContract.episodeChoiceInfoText({ mode: { kind: "released", numbers: [1, 2] }, totalEpisodes: 1100, isFetching: false, isError: false }), "공개된 회차 2개 · 최근 2화");
+});
+
+it("71 T-9: manual-entry copy explains the missing count without developer terminology", () => {
+  assert.equal(choiceContract.EPISODE_CHOICE_MANUAL_COPY, "아직 화수 정보가 없어요. 본 회차를 직접 입력해 주세요.");
+});
+
+const spec71ReleasedMode = { kind: "released" as const, numbers: [1, 2, 3, 4, 5, 6, 7] };
+
+it("71 T-10: a known total keeps the existing progress summary and denominator", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 4, draftEpisodeNumber: 4, totalEpisodes: 8, mode: { kind: "count", numbers: [1, 2, 3, 4, 5, 6, 7, 8] }, hasSeasonSelector: false }), { summary: "4 / 8화", barMax: 8, barNow: 4 });
+});
+
+it("71 T-11: a single unknown-total season uses its latest published episode", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 7, draftEpisodeNumber: 7, totalEpisodes: null, mode: spec71ReleasedMode, hasSeasonSelector: false }), { summary: "7 / 공개 7화", barMax: 7, barNow: 7 });
+});
+
+it("71 T-12: no watched episodes produces an empty published-episode bar", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 0, draftEpisodeNumber: 0, totalEpisodes: null, mode: spec71ReleasedMode, hasSeasonSelector: false }), { summary: "0 / 공개 7화", barMax: 7, barNow: 0 });
+});
+
+it("71 T-13: multi-season cumulative progress does not use a season-local denominator", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 15, draftEpisodeNumber: 5, totalEpisodes: null, mode: spec71ReleasedMode, hasSeasonSelector: true }), { summary: "15화까지 시청", barMax: null, barNow: 15 });
+});
+
+it("71 T-14: manual mode without published episodes keeps its unbounded summary", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 3, draftEpisodeNumber: 3, totalEpisodes: null, mode: { kind: "manual" }, hasSeasonSelector: false }), { summary: "3화까지 시청", barMax: null, barNow: 3 });
+});
+
+it("71 T-15: saved progress beyond the published frontier does not overflow the bar", () => {
+  assert.deepEqual(choiceContract.episodeProgressHeader({ watchedThrough: 9, draftEpisodeNumber: 9, totalEpisodes: null, mode: spec71ReleasedMode, hasSeasonSelector: false }), { summary: "9 / 공개 7화", barMax: 7, barNow: 7 });
 });

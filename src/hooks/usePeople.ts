@@ -18,11 +18,12 @@ import { useAuthStore } from "@/stores/authStore";
 import type { FavoritePerson, PersonCategory, PersonSearchResult, PersonSource } from "@/types/people";
 import { createCategorySyncBatches, personKey, planFavoriteCategorySync, selectFavoritesForCategorySync } from "@/utils/peopleScreen";
 import { selectFavoritesNeedingKoreanName } from "@/utils/personKoreanName";
-import { MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
+import { EDGE_LIST_QUERY_OPTIONS, MANUAL_METADATA_QUERY_OPTIONS } from "@/utils/metadataQuery";
 import { calculateStoredPersonAge } from "../../supabase/functions/_shared/personMetadataCache";
 
 export function usePersonContentSearch(query: string, category: PersonCategory | "all" = "all") {
   return useQuery({
+    ...EDGE_LIST_QUERY_OPTIONS,
     queryKey: ["person-content-search", query.trim(), category],
     queryFn: () => searchPersonContent(query, category),
     enabled: PEOPLE_FEATURES_ENABLED && query.trim().length >= 2,

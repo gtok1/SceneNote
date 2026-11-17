@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -17,6 +17,7 @@ import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useLibrary, useUpcomingAiring } from "@/hooks/useLibrary";
 import { useAllPins } from "@/hooks/useTimelinePins";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import type { LibraryListItem, WatchStatus } from "@/types/library";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH, type HomeLayout } from "@/utils/homeLayout";
 import { formatUpcomingAiringLabel, isAiringToday } from "@/utils/upcomingAiring";
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const library = useLibrary("all");
   const pins = useAllPins();
+  const pullToRefresh = usePullToRefresh([library.refetch, pins.refetch]);
   const [revealedSpoilers, setRevealedSpoilers] = useAtom(revealedSpoilerPinIdsAtom);
   const { width } = useWindowDimensions();
   const layout = getHomeLayout(width);
@@ -39,6 +41,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView
+      refreshControl={Platform.OS !== "web" ? <RefreshControl refreshing={pullToRefresh.refreshing} onRefresh={pullToRefresh.onRefresh} tintColor={colors.primary} /> : undefined}
       style={styles.scroll}
       contentContainerStyle={styles.container}
       showsVerticalScrollIndicator={false}

@@ -8,6 +8,7 @@ import { corsHeaders, json, jsonError, parseJson } from "../_shared/http.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 import type { ContentMeta, ExternalSource, SeasonMeta, WatchStatus } from "../_shared/types.ts";
 import { normalizeContentThemes } from "../_shared/recommendationThemes.ts";
+import { contentMediaType, matchesStoredMediaType, requestMediaType } from "../_shared/contentIdentity.ts";
 
 interface AddToLibraryRequest {
   api_source?: ExternalSource;
@@ -72,6 +73,9 @@ Deno.serve(async (req: Request) => {
     return jsonError(400, "INVALID_REQUEST", "external_id is required");
   }
 
+  const mediaType = requestMediaType(source, body.value.media_type);
+  if (mediaType === null) return jsonError(400, "INVALID_REQUEST", "TMDB media_type must be movie or tv");
+
   const rawSeasonNumber = body.value.season_number;
   if (
     rawSeasonNumber !== undefined &&
@@ -95,13 +99,17 @@ Deno.serve(async (req: Request) => {
 
   const { data: existingExternalId, error: externalLookupError } = await adminClient
     .from("content_external_ids")
-    .select("content_id")
+    .select("content_id,contents(content_type,source_api,source_media_type)")
     .eq("api_source", source)
     .eq("external_id", externalId)
+    .eq("media_type", mediaType)
     .maybeSingle();
 
   if (externalLookupError) {
     return jsonError(500, "DB_ERROR", externalLookupError.message);
+  }
+  if (existingExternalId && !matchesStoredMediaType(existingExternalId.contents, source, mediaType)) {
+    return jsonError(409, "CONTENT_IDENTITY_MISMATCH", "저장된 작품 종류가 요청과 달라 등록하지 않았어요.");
   }
 
   let existingLibraryItem: { id: string; status: WatchStatus; status_flags: WatchStatus[] | null } | null = null;
@@ -212,8 +220,8 @@ Deno.serve(async (req: Request) => {
       { onConflict: "content_id,family,key" }
     ) : Promise.resolve({ error: null }),
     adminClient.from("content_external_ids").upsert(
-      { content_id: contentId, api_source: source, external_id: externalId },
-      { onConflict: "api_source,external_id", ignoreDuplicates: true }
+      { content_id: contentId, api_source: source, external_id: externalId, media_type: contentMediaType(source, contentMeta.content_type) },
+      { onConflict: "api_source,external_id,media_type", ignoreDuplicates: true }
     ),
     contentMeta.seasons.length > 0 ? adminClient.from("seasons").upsert(
       contentMeta.seasons.map((season) => ({
@@ -329,6 +337,7 @@ function buildContentPayload(
     content_type: contentMeta.content_type,
     source_api: source,
     source_id: externalId,
+    source_media_type: contentMediaType(source, contentMeta.content_type),
     title_primary: contentMeta.title_primary,
     title_original: contentMeta.title_original,
     poster_url: contentMeta.poster_url,
@@ -352,14 +361,14 @@ async function upsertContent(
 ) {
   let result = await adminClient
     .from("contents")
-    .upsert(buildContentPayload(contentMeta, source, externalId, true), { onConflict: "source_api,source_id" })
+    .upsert(buildContentPayload(contentMeta, source, externalId, true), { onConflict: "source_api,source_id,source_media_type" })
     .select("id")
     .single();
 
   if (result.error && isMissingDateColumnError(result.error)) {
     result = await adminClient
       .from("contents")
-      .upsert(buildContentPayload(contentMeta, source, externalId, false), { onConflict: "source_api,source_id" })
+      .upsert(buildContentPayload(contentMeta, source, externalId, false), { onConflict: "source_api,source_id,source_media_type" })
       .select("id")
       .single();
   }

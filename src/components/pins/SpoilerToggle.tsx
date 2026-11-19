@@ -12,7 +12,7 @@ export function SpoilerToggle({ isSpoiler, onToggle }: SpoilerToggleProps) {
     <Pressable
       accessibilityLabel="스포일러 포함"
       accessibilityRole="switch"
-      accessibilityState={{ checked: isSpoiler }}
+      aria-checked={isSpoiler}
       onPress={() => onToggle(!isSpoiler)}
       style={styles.row}
     >

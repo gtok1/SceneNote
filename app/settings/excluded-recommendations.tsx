@@ -1,6 +1,6 @@
 import { Redirect } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { confirmDestructive } from "@/utils/confirmDestructive";
 
 function ExcludedRecommendationsScreen() {
   const { width } = useWindowDimensions();
@@ -25,14 +26,12 @@ function ExcludedRecommendationsScreen() {
   const confirmClear = () => {
     if (!hasItems) return;
 
-    Alert.alert("전체 해제", "추천 제외 목록을 모두 비울까요?", [
-      { text: "취소", style: "cancel" },
-      {
-        text: "해제",
-        style: "destructive",
-        onPress: clearExclusions
-      }
-    ]);
+    confirmDestructive({
+      title: "전체 해제",
+      message: "추천 제외 목록을 모두 비울까요?",
+      confirmLabel: "해제",
+      onConfirm: clearExclusions
+    });
   };
 
   return (
@@ -65,6 +64,7 @@ function ExcludedRecommendationsScreen() {
                 </Text>
               </View>
               <Pressable
+                accessibilityLabel={`${item.title} 제외 해제`}
                 accessibilityRole="button"
                 onPress={() => removeExclusion(item.key)}
                 style={styles.removeButton}

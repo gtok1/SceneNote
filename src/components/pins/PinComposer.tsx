@@ -24,6 +24,7 @@ import type { TimelinePin } from "@/types/pins";
 import { createPinSchema } from "@/utils/validation";
 import { resolveTimecodeInput, formatSecondsToTimecode } from "@/utils/timecode";
 import { getHomeLayout } from "@/utils/homeLayout";
+import { selectionAriaProps } from "@/utils/selectionAria";
 import { SpoilerToggle } from "./SpoilerToggle";
 import { TagChip } from "./TagChip";
 import { TimecodeInput } from "./TimecodeInput";
@@ -271,7 +272,7 @@ export function PinComposer({
             style={[styles.input, styles.tagInput]}
             value={tagInput}
           />
-          <Pressable accessibilityRole="button" accessibilityState={{ disabled: isSaving }} disabled={isSaving} onPress={addTag} style={[styles.smallButton, isSaving && styles.disabled]}>
+          <Pressable accessibilityRole="button" aria-disabled={isSaving} disabled={isSaving} onPress={addTag} style={[styles.smallButton, isSaving && styles.disabled]}>
             <Text style={styles.smallButtonText}>추가</Text>
           </Pressable>
         </View>
@@ -301,7 +302,8 @@ export function PinComposer({
               <Pressable
                 accessibilityRole="button"
                 disabled={isSaving}
-                accessibilityState={{ selected, disabled: isSaving }}
+                {...selectionAriaProps("button", selected, Platform.OS)}
+                aria-disabled={isSaving}
                 key={option}
                 onPress={() =>
                   setDraft((current) => ({ ...current, emotion: selected ? "none" : option }))
@@ -336,7 +338,7 @@ export function PinComposer({
       <Pressable
         accessibilityRole="button"
         disabled={isSaving || context.isPending || context.isError}
-        accessibilityState={{ disabled: isSaving || context.isPending || context.isError, busy: isSaving }}
+        aria-disabled={isSaving || context.isPending || context.isError} aria-busy={isSaving}
         onPress={save}
         style={[styles.saveButton, isSaving && styles.disabled]}
       >

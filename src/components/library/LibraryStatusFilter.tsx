@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   type LayoutChangeEvent,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import { WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing } from "@/constants/theme";
 import type { LibraryStatusFilter as LibraryStatusFilterValue } from "@/types/library";
 import { STATUS_FILTERS } from "@/utils/libraryFilters";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface LibraryStatusFilterProps {
   value: LibraryStatusFilterValue;
@@ -58,8 +60,7 @@ export function LibraryStatusFilter({ value, onChange, compact = false }: Librar
         return (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ selected }}
-            aria-pressed={selected}
+            {...selectionAriaProps("button", selected, Platform.OS)}
             key={item}
             onLayout={(event) => rememberOffset(item, event)}
             onPress={() => onChange(item)}

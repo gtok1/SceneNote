@@ -75,6 +75,16 @@
 | `docs/71_meaningless_api_calls_and_usability_fixes_spec.md` | 의미 없는 API 호출 차단(앱만, 배포 없음): 화수를 아는 작품 상세의 공개 회차 조회 중단(`needsReleasedEpisodeLookup`), 카드 조회 계획(`planAiringAvailability` — Kitsu 제외·AniList 완결작 앱 확정·전 회차 공개 시 30분 재조회 중단), Edge 목록 조회의 자동 재시도·창 복귀 재조회 끄기(`EDGE_LIST_QUERY_OPTIONS`). 사용자 문구의 "API" 제거, 총 화수 미정 작품 진행 막대(`episodeProgressHeader`), 앱 당겨서 새로고침. 14장 실행 지시 포함 | 공개 회차·검색 호출 정책, 시청 진행 카드, 라이브러리·핀·홈 새로고침을 고칠 때 |
 | `docs/72_library_row_limit_and_redundant_reads_fixes_spec.md` | 라이브러리·핀 목록이 1000행(`max_rows`)에서 조용히 잘리는 구멍 정정(`readAllRows`, 동률 기준 `id`, 상한 초과는 오류), 저장 전 `auth.getUser()` 왕복 7곳을 세션으로(`getSessionUserId`), 라이브러리 단일 캐시 + `select` 상태 필터(`filterLibraryItemsByStatus`), 회차 방영일 조회 대상 축소(`contentIdsNeedingEpisodeAirDates`). 앱만, 배포 없음. 14장 실행 지시 포함 | 라이브러리·핀 목록 조회, 저장 서비스의 본인 확인, 라이브러리 캐시 키를 고칠 때 |
 | `docs/73_project_integrity_fixes_spec.md` | 정합성 결함 11건: TMDB movie/tv 식별자 분리, SDK 인증 복원, UPDATE 0행 실패, 항목별 rollback, 회차 캐시 완전성·목록/추천 입력 pagination, 등록 단위·네이티브 공유, 원자적 핀/태그 저장·상세 이동. 새 SQL 3개와 함수 7개의 운영 반영은 별도 승인. 14장 실행 지시 포함 | 인증 복원·라이브러리 쓰기/복구·외부 ID·회차 캐시·추천 입력·공유·핀 저장을 고칠 때 |
+| `docs/74_subscribed_ott_spec.md` | 내 구독 OTT로 바로 보러 가기: `profiles.subscribed_otts`(마이그레이션 작성만), 프로필 설정 화면(선택 즉시 직렬 저장), 보러가기 내 OTT 우선·표시·초기 탭·없음 안내, 작품 상세 히어로 "○○에서 보기"·라프텔 "찾기" 버튼. 구독을 못 읽으면 미설정으로 동작(D-5). 키노라이츠와 사용자 작업 단계를 비교해 편의성 기준(1.1)을 넘는 것만 채택, 검색·추천·홈은 변경 없음. Edge 변경·배포 없음. 14장 실행 지시 포함 | 구독 OTT·보러가기 표시·작품 상세 시청 버튼·프로필 계정 행을 고칠 때 |
+| `docs/75_web_aria_state_fixes_spec.md` | 웹 접근성 상태 정정: react-native-web 0.21이 `accessibilityState={{…}}`를 읽지 않아 웹 낭독기에 선택·체크·펼침 상태가 안 나오는 결함. app/·src/ 100곳을 `aria-*`로 1:1 이동(앱 동일, D-2), 선택형 button에 `aria-pressed`·radio에 `aria-checked` 보충(D-3), `scripts/a11yAriaStateGuard` 정적 검사, UI-4.4·4.7·13.2·15 개정. 14장 실행 지시 포함 | 접근성 속성(`aria-*`)을 쓰거나 칩·탭·토글 상태를 만들 때 |
+| `docs/76_web_aria_selection_followup_spec.md` | docs/75 후속: 웹에 허용되지 않는 `aria-selected`(button·radio·plain 34곳)를 `selectionAriaProps(role, selected, Platform.OS)`로 플랫폼별 출력(웹 button `aria-pressed`·radio `aria-checked`, 앱 `aria-selected` 유지), `a11yAriaStateGuard`가 중첩 JSX를 개별 태그로 검사(`ownText`, 규칙 R-1·R-2), `TagChip` 동적 role, UI-4.4 문장 교체. 14장 실행 지시 포함 | 선택 상태 접근성 속성을 쓰거나 `a11yAriaStateGuard`를 고칠 때 |
+| `docs/77_cast_card_selection_state_fix_spec.md` | docs/76 후속: 작품 상세 출연진 카드(이동 버튼)에서 `selectionAriaProps` 스프레드 삭제(웹 `aria-pressed`·앱 `aria-selected` 모두 제거, 라벨 ", 등록됨" 유지), `scripts/castSectionA11y.test.ts`, UI-4.4 이동 버튼 문장. 14장 실행 지시 포함 | 이동만 하는 버튼에 상태 속성을 줄지 정할 때, `CastSection`을 고칠 때 |
+| `docs/78_web_alert_and_dead_code_cleanup_spec.md` | docs/74~77 후속 보완 묶음: 웹에서 무동작인 `Alert.alert`를 UI-6.1(토스트·`confirmDestructive`)로 교체, `scripts/alertUsageGuard.test.ts` 허용 목록(confirmDestructive·confirmDiscard·pins 스포일러 3지선다), 미사용 `PopularRecommendationSection`·`usePopularRecommendations` 삭제. 14장 실행 지시 포함 | `Alert`·확인 창·결과 안내를 쓰거나 확장 화면(엑셀·사진 가져오기, 추천 제외)을 고칠 때 |
+| `docs/79_recommendation_exclusion_clear_fix_spec.md` | docs/78 확인 중 발견: `recommendationUiStore`의 `clearExclusions`가 `set` 없이 객체만 반환해 "전체 해제" 무동작. 액션 3개를 `src/utils/recommendationExclusionActions.ts`(RN·zustand 없음)로 옮겨 가짜 `set` 테스트, 저장 키·버전 유지. 14장 실행 지시 포함 | 추천 제외 로컬 목록·`recommendationUiStore`를 고칠 때, 스토어 액션을 테스트 가능하게 분리할 때 |
+| `docs/80_popular_recommendation_leftovers_and_exclusion_label_spec.md` | docs/78 뒤 남은 인기 추천 클라이언트 코드(`services/popularRecommendations`, 클라이언트 `popularRanking` 복사본, `recommendations.popular` 키) 삭제, smoke 타입은 `src/types/popularRecommendations.ts`로 이동(docs/78 D-7 대체, Edge Function 유지). 제외 목록 해제 버튼 이름 `<제목> 제외 해제`. 14장 실행 지시 포함 | 인기 추천 잔여 코드·smoke 타입을 다룰 때, 제외 목록 화면 접근성을 고칠 때 |
+| `docs/81_library_content_type_filter_fixes_spec.md` | 라이브러리 한국 드라마 필터의 예능·일본어 원제 작품 혼입 정정: 공통 표시 분류에서 명시 비드라마 장르→기타, TMDB kdrama+가나 원제/한글 없음→일본 드라마. 영화·애니·전체 보존, 카드 라벨·프로필 통계 일치. 앱만, 요청·DB·배포 없음. 14장 실행 지시 포함 | 라이브러리 작품 유형 필터·라벨·프로필 유형 집계를 고칠 때 |
+| `docs/82_search_drama_filter_fixes_spec.md` | 검색·추천의 드라마+한국 필터 혼입 정정: 명시 비드라마 장르 배제, TMDB 원어/단일 언어·가나 원제와 국가 증거 교집합. 영화·애니·국가만 탐색·장르 OR·모두 보기·81 보존, 추가 호출·DB·운영 배포 없음. 14장 실행 지시 포함 | 검색·추천 드라마/국가 필터·공통 분류·원어 전달을 고칠 때 |
+| `docs/83_unused_state_files_cleanup_spec.md` | 첫 커밋부터 있던, 아무도 불러오지 않는 Zustand store 2개·Jotai atom 2개 삭제와 현재 안내 문서(08·04·AGENTS)의 미사용 경고 정리. 과거 프롬프트 문서는 보존. 14장 실행 지시 포함 | `src/stores`·`src/atoms` 상태 파일을 정리하거나 상태 원천을 찾을 때 |
 
 **규칙**
 
@@ -149,7 +159,7 @@ SceneNote는 애니메이션, 한국 드라마, 일본 드라마, 영화 감상 
 
 - TypeScript 타입을 명확히 작성한다.
 - 서버 데이터는 TanStack Query, UI 상태는 Zustand로 관리한다.
-- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. `watchProvidersAtom`은 이전 구현의 미사용 파일이며, 보러가기 서버 응답은 docs/69의 TanStack Query·DB 저장 경로를 쓴다. Jotai로 새 서버 캐시를 만들지 않는다.
+- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. 보러가기 서버 응답은 docs/69의 TanStack Query·DB 저장 경로를 쓴다. Jotai로 새 서버 캐시를 만들지 않는다.
 - 기존 구조·명명·UI 동작을 우선하고 무관한 리팩터링이나 중복 유틸을 섞지 않는다. 오류를 숨기는 임시 우회로 완료 처리하지 않는다.
 - 불확실한 외부 API 동작은 TODO와 문서에 남긴다.
 - 큰 리팩터링보다 설계 문서에 맞는 작은 구현 단위를 선호한다.

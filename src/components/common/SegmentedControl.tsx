@@ -1,6 +1,7 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface SegmentedControlProps<T extends string> {
   options: readonly { label: string; value: T }[];
@@ -24,7 +25,7 @@ export function SegmentedControl<T extends string>({
         return (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ selected }}
+            {...selectionAriaProps("button", selected, Platform.OS)}
             key={option.value}
             onPress={() => onChange(option.value)}
             style={[styles.item, stretch && styles.stretch, selected && styles.itemSelected]}

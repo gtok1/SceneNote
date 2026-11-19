@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -41,6 +42,7 @@ import { personKey, toPersonSearchResult } from "@/utils/peopleScreen";
 import { pickKoreanName } from "@/utils/personKoreanName";
 import { ERROR_COPY } from "@/utils/errorCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { selectionAriaProps } from "@/utils/selectionAria";
 import {
   createPersonCreditKey,
   dedupeValidPersonCredits,
@@ -372,7 +374,8 @@ function PersonDetailScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="인물 정보 다시 불러오기"
-              accessibilityState={{ disabled: detail.isFetching, busy: detail.isFetching }}
+              aria-disabled={detail.isFetching}
+              aria-busy={detail.isFetching}
               disabled={detail.isFetching}
               onPress={refreshPersonInformation}
               style={({ pressed }) => [styles.metadataRefreshButton, pressed ? styles.pressed : null]}
@@ -403,7 +406,8 @@ function PersonDetailScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={favorite ? "좋아하는 인물에 등록됨" : "좋아하는 인물에 등록"}
-                    accessibilityState={{ disabled: favoriteDisabled, busy: favoriteBusy }}
+                    aria-disabled={favoriteDisabled}
+                    aria-busy={favoriteBusy}
                     disabled={favoriteDisabled}
                     onPress={registerFavorite}
                     style={({ pressed }) => [styles.favoriteButton, favoriteDisabled ? styles.buttonDisabled : null, pressed ? styles.pressed : null]}
@@ -528,7 +532,7 @@ function PersonDetailScreen() {
                 return (
                   <Pressable
                     accessibilityRole="tab"
-                    accessibilityState={{ selected }}
+                    aria-selected={selected}
                     key={option.value}
                     onPress={() => setFilter(option.value)}
                     style={[styles.filter, selected ? styles.filterSelected : null]}
@@ -789,7 +793,8 @@ function StatusMenu({
               return (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: isPending, selected }}
+                  aria-disabled={isPending}
+                  {...selectionAriaProps("button", selected, Platform.OS)}
                   disabled={isPending}
                   key={option.value}
                   onPress={() => onSelect(credit, option.value)}

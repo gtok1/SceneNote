@@ -24,6 +24,7 @@ import { useTags } from "@/hooks/useTags";
 import { useAllPins, usePinsByTag } from "@/hooks/useTimelinePins";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { usePinsUiStore } from "@/stores/pinsUiStore";
+import { useAppUIStore } from "@/stores/appUIStore";
 import type { EmotionType, PinSortMode, TimelinePin } from "@/types/pins";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
@@ -34,8 +35,10 @@ import {
 } from "@/utils/pinListUi";
 import { sharePinCardImage } from "@/utils/pinShare";
 import { sortPins } from "@/utils/pinSort";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 export default function PinsScreen() {
+  const addToast = useAppUIStore((state) => state.addToast);
   const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
   const layout = getPinsLayout(width);
@@ -134,7 +137,7 @@ export default function PinsScreen() {
         await sharePinCardImage(maskMemo ? maskedShareRef : plainShareRef);
       } catch (error) {
         console.error("Pin share failed:", error);
-        Alert.alert("공유 실패", error instanceof Error ? error.message : "핀 이미지를 공유하지 못했습니다.");
+        addToast(userFacingErrorMessage(error, "핀 이미지를 공유하지 못했어요. 잠시 후 다시 시도해 주세요."), "error");
       }
     };
 
@@ -155,7 +158,7 @@ export default function PinsScreen() {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={filterSummary.buttonAccessibilityLabel}
-      accessibilityState={{ expanded: filtersOpen }}
+      aria-expanded={filtersOpen}
       onPress={() => setFiltersOpen((open) => !open)}
       style={({ pressed }) => [
         styles.filterButton, (filtersOpen || filterSummary.panelCount > 0) && styles.filterActive,

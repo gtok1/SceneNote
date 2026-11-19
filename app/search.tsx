@@ -67,6 +67,7 @@ import { parseSearchIntent, SIMILAR_SEARCH_EXAMPLES, type ParsedSearchIntent, ty
 import { normalizeSimilaritySecondarySort, similarResultsStatus, similaritySortLabel, shouldLoadMoreSimilarOnScroll } from "@/utils/similarContentPagination";
 import { ERROR_COPY } from "@/utils/errorCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 const PERSONALIZED_RECOMMENDATION_LIMIT = 12;
 
@@ -670,7 +671,7 @@ export default function SearchScreen() {
     <View style={styles.inlineError}>
       <Text style={styles.inlineErrorText}>{message}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="최신 추천 처음부터 다시 찾기"
-        accessibilityState={{ disabled: recommendationActionsDisabled }} disabled={recommendationActionsDisabled}
+        aria-disabled={recommendationActionsDisabled} disabled={recommendationActionsDisabled}
         onPress={() => void refreshRecommendations(true)} style={styles.inlineRetryButton}>
         <Text style={styles.inlineRetryText}>처음부터 다시 찾기</Text>
       </Pressable>
@@ -691,7 +692,7 @@ export default function SearchScreen() {
           return (
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ selected }}
+              {...selectionAriaProps("button", selected, Platform.OS)}
               key={item.value}
               onPress={() => setViewMode(item.value)}
               style={[styles.viewButton, selected ? styles.viewButtonSelected : null]}
@@ -709,7 +710,7 @@ export default function SearchScreen() {
         })}
         {displayedAsGallery && !hasSearchQuery && !isSimilarityMode ? (
           <Pressable accessibilityRole="button" accessibilityLabel="최근 검색어와 예시 검색"
-            accessibilityState={{ expanded: searchShortcutsExpanded }}
+            aria-expanded={searchShortcutsExpanded}
             onPress={() => setSearchShortcutsExpanded(value => !value)}
             style={({ pressed }) => [styles.shortcutToggle, pressed && styles.similarPressed]}>
             <Ionicons name={searchShortcutsExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={16} color={colors.textMuted} />
@@ -758,7 +759,8 @@ export default function SearchScreen() {
           <Pressable
             accessibilityLabel="검색 필터 모두 해제 후 저장"
             accessibilityRole="button"
-            accessibilityState={{ busy: searchFilterPreferences.isSaving, disabled: searchFilterPreferences.isSaving }}
+            aria-busy={searchFilterPreferences.isSaving}
+            aria-disabled={searchFilterPreferences.isSaving}
             disabled={searchFilterPreferences.isSaving}
             onPress={() => void clearDiscoveryFilters()}
             style={[styles.discoveryClearButton, searchFilterPreferences.isSaving && styles.refreshButtonDisabled]}
@@ -861,7 +863,8 @@ export default function SearchScreen() {
           <Pressable
             accessibilityLabel="검색어와 필터를 유지하고 작품 정보 다시 조회"
             accessibilityRole="button"
-            accessibilityState={{ busy: search.isFetching, disabled: search.isFetching || !online || !focused }}
+            aria-busy={search.isFetching}
+            aria-disabled={search.isFetching || !online || !focused}
             disabled={search.isFetching || !online || !focused}
             onPress={() => void search.refetch()}
             style={[styles.recommendationFilterButton, { alignSelf: "flex-start", marginBottom: spacing.sm }, (search.isFetching || !online || !focused) && styles.refreshButtonDisabled]}
@@ -890,8 +893,7 @@ export default function SearchScreen() {
                   <Pressable
                     accessibilityLabel={`같은 유사도 안에서 ${similaritySortLabel(value)}`}
                     accessibilityRole="button"
-                    aria-pressed={selected}
-                    accessibilityState={{ selected }}
+                    {...selectionAriaProps("button", selected, Platform.OS)}
                     key={value}
                     onPress={() => {
                       setSimilarIntent((current) => current ? { ...current, sort: value } : current);
@@ -911,8 +913,7 @@ export default function SearchScreen() {
               {(["balanced", "mood", "story", "genre"] as const).map((value) => (
                 <Pressable
                   accessibilityRole="button"
-                  aria-pressed={similarIntent.focus === value}
-                  accessibilityState={{ selected: similarIntent.focus === value }}
+                  {...selectionAriaProps("button", similarIntent.focus === value, Platform.OS)}
                   key={value}
                   onPress={() => {
                     setSimilarIntent((current) => current ? { ...current, focus: value } : current);
@@ -963,10 +964,8 @@ export default function SearchScreen() {
             <Pressable
               accessibilityLabel="새 추천 12개 불러오기"
               accessibilityRole="button"
-              accessibilityState={{
-                busy: personalizedRecommendations.isRefreshing,
-                disabled: recommendationActionsDisabled
-              }}
+              aria-busy={personalizedRecommendations.isRefreshing}
+              aria-disabled={recommendationActionsDisabled}
               disabled={recommendationActionsDisabled}
               onPress={() => void refreshRecommendations()}
               style={({ pressed }) => [
@@ -1045,7 +1044,7 @@ export default function SearchScreen() {
         <View
           accessibilityLabel={recommendationLoadingMessage}
           accessibilityRole="progressbar"
-          accessibilityState={{ busy: true }}
+          aria-busy={true}
           style={styles.recommendationLoadingBanner}
         >
           <ActivityIndicator color={colors.primary} size="small" />
@@ -1266,33 +1265,33 @@ export default function SearchScreen() {
             similarAnchor && library.isSuccess && similarSearch.data ? (
               <View style={styles.similarFooter}>
                 {similarSearch.isFetching ? (
-                  <View accessibilityLabel="비슷한 작품을 불러오는 중이에요." accessibilityRole="progressbar" accessibilityState={{busy:true}} style={styles.similarFooterBusy}>
+                  <View accessibilityLabel="비슷한 작품을 불러오는 중이에요." accessibilityRole="progressbar" aria-busy={true} style={styles.similarFooterBusy}>
                     <ActivityIndicator color={colors.primary} size="small" />
                     <Text accessibilityLiveRegion="polite" style={styles.similarHint}>{similarSearch.isFetchingNextPage ? "비슷한 작품 12개를 더 불러오는 중이에요." : "비슷한 작품을 새로 찾고 있어요."}</Text>
                   </View>
                 ) : similarSearch.restartRequired || similarSearch.paginationUnavailable ? (
                   <>
                     <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>{similarSearch.restartRequired ? "결과를 새로 불러와 주세요." : "추가 결과를 불러올 수 없어요."}</Text>
-                    <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                    <Pressable accessibilityRole="button" aria-disabled={!focused||!online||!user} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
                       <Text style={styles.similarFooterButtonText}>{similarSearch.restartRequired ? "처음부터 다시 찾기" : "다시 찾기"}</Text>
                     </Pressable>
                   </>
                 ) : similarSearch.isRefetchError ? (
                   <>
                     <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>비슷한 작품을 새로 찾지 못했어요. 기존 결과를 유지하고 있어요.</Text>
-                    <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                    <Pressable accessibilityRole="button" aria-disabled={!focused||!online||!user} disabled={!focused||!online||!user} onPress={refetch} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
                       <Text style={styles.similarFooterButtonText}>다시 찾기</Text>
                     </Pressable>
                   </>
                 ) : similarSearch.isFetchNextPageError ? (
                   <>
                     <Text accessibilityLiveRegion="polite" style={styles.similarFooterError}>다음 비슷한 작품을 불러오지 못했어요. 다시 시도해 주세요.</Text>
-                    <Pressable accessibilityLabel="다음 비슷한 작품 다시 시도" accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar(true)} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                    <Pressable accessibilityLabel="다음 비슷한 작품 다시 시도" accessibilityRole="button" aria-disabled={!focused||!online||!user} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar(true)} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
                       <Text style={styles.similarFooterButtonText}>다시 시도</Text>
                     </Pressable>
                   </>
                 ) : similarSearch.hasNextPage ? (
-                  <Pressable accessibilityRole="button" accessibilityState={{disabled:!focused||!online||!user}} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar()} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
+                  <Pressable accessibilityRole="button" aria-disabled={!focused||!online||!user} disabled={!focused||!online||!user} onPress={()=>loadMoreSimilar()} style={({pressed})=>[styles.similarFooterButton,(!focused||!online||!user)&&styles.similarDisabled,pressed&&styles.similarPressed]}>
                     <Text style={styles.similarFooterButtonText}>비슷한 작품 12개 더 보기</Text>
                   </Pressable>
                 ) : displayedResults.length > 0 ? (
@@ -1302,7 +1301,7 @@ export default function SearchScreen() {
             ) : null
           ) : hasSearchInput && hasSearchQuery ? (
             search.isFetchingNextPage ? (
-              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
+              <View accessibilityRole="progressbar" aria-busy={true} style={styles.loadMoreFooter}>
                 <ActivityIndicator color={colors.primary} size="small" />
                 <Text style={styles.loadMoreText}>다음 검색 결과를 불러오는 중이에요.</Text>
               </View>
@@ -1320,7 +1319,7 @@ export default function SearchScreen() {
             ) : null
           ) : showRecommendationFeed ? (
             topUp.active ? (
-              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.topUpFooter}>
+              <View accessibilityRole="progressbar" aria-busy={true} style={styles.topUpFooter}>
                 <View style={{ paddingHorizontal: displayedAsGallery ? spacing.sm : spacing.lg }}>
                   <View style={styles.sharedInset}>
                     <LoadingSkeleton expanded={expandedGallery} compact={displayedAsGallery} variant="recommendation-card" count={topUp.placeholderCount} columns={displayedAsGallery ? galleryColumns : 1} />
@@ -1331,7 +1330,7 @@ export default function SearchScreen() {
                 </View>
               </View>
             ) : personalizedRecommendations.isLoadingMore ? (
-              <View accessibilityRole="progressbar" accessibilityState={{ busy: true }} style={styles.loadMoreFooter}>
+              <View accessibilityRole="progressbar" aria-busy={true} style={styles.loadMoreFooter}>
                 <ActivityIndicator color={colors.primary} size="small" />
                 <Text accessibilityLiveRegion="polite" style={styles.loadMoreText}>
                   다음 추천 12개를 불러오는 중이에요.
@@ -1341,7 +1340,7 @@ export default function SearchScreen() {
               <View style={styles.loadMoreFooter}>
                 <Text style={styles.loadMoreErrorText}>{personalizedRecommendations.loadMoreError}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel={recommendationRestartRequired ? "최신 추천 처음부터 다시 찾기" : "다음 추천 다시 시도"}
-                  accessibilityState={{ disabled: recommendationActionsDisabled }} disabled={recommendationActionsDisabled}
+                  aria-disabled={recommendationActionsDisabled} disabled={recommendationActionsDisabled}
                   onPress={() => { if (recommendationRestartRequired) void refreshRecommendations(true); else void personalizedRecommendations.retryEmptyContinuation(); }} style={styles.inlineRetryButton}>
                   <Text style={styles.inlineRetryText}>{recommendationRestartRequired ? "처음부터 다시 찾기" : "다시 시도"}</Text>
                 </Pressable>

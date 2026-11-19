@@ -26,6 +26,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { getAuthLinkSession } from "@/utils/authLinks";
 import { getBottomNavMetrics, getNavItemVisual } from "@/utils/bottomNavLayout";
 import { useInputModality } from "@/hooks/useInputModality";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 export default function RootLayout() {
   return (
@@ -51,6 +52,7 @@ export default function RootLayout() {
           <Stack.Screen name="library/import" options={{ title: "감상 기록 가져오기" }} />
           <Stack.Screen name="library/photo-import" options={{ title: "사진에서 작품 찾기" }} />
           <Stack.Screen name="settings/excluded-recommendations" options={{ title: "추천에서 제외한 작품" }} />
+          <Stack.Screen name="settings/subscribed-otts" options={{ title: "구독 중인 OTT" }} />
         </Stack>
         <AuthRedirect />
         <AuthLinkHandler />
@@ -198,7 +200,7 @@ function GlobalBottomNav() {
             <Pressable
               accessibilityLabel={item.ariaLabel}
               accessibilityRole="button"
-              accessibilityState={{ selected: active }}
+              {...selectionAriaProps("button", active, Platform.OS, { current: true })}
               aria-current={active ? "page" : undefined}
               key={item.href}
               onBlur={() => setFocusedHref(current => current === item.href ? null : current)}

@@ -21,6 +21,7 @@ export interface SearchResult {
   genres?: string[];
   /** ISO 3166-1 alpha-2 codes, from TMDB `origin_country`. */
   origin_country?: string[];
+  original_language?: string;
   duplicate_hint?: boolean;
   match_titles?: string[];
   matched_via?: "direct" | "season_relation";

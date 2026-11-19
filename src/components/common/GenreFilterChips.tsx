@@ -1,8 +1,9 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import { ALL_GENRE_FILTER, createGenreFilterOptions } from "@/utils/genre";
 import { parseGenreFilters, serializeGenreFilters } from "@/utils/libraryFilters";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface GenreFilterChipsProps {
   value: string;
@@ -67,7 +68,7 @@ function GenreChip({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      {...selectionAriaProps("button", selected, Platform.OS)}
       onPress={onPress}
       style={[styles.chip, selected ? styles.chipSelected : null]}
     >

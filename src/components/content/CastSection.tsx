@@ -9,7 +9,7 @@ export function CastSection({ cast, isAnime, favoriteKeys, columns, onOpen }: Ca
   return <DashboardPanel title={isAnime ? "성우" : "출연 배우"} subtitle="누르면 인물 정보를 확인하고 좋아하는 인물로 등록할 수 있어요.">
     <View style={styles.grid}>{cast.slice(0, 8).map(member => {
       const registered = favoriteKeys.has(resolveCastMemberPerson(member, isAnime).key);
-      return <Pressable key={`${member.id}:${member.character ?? ""}`} accessibilityRole="button" accessibilityState={{ selected: registered }} accessibilityLabel={`${member.name} 인물 상세 보기${registered ? ", 등록됨" : ""}`} onPress={() => onOpen(member)} style={[styles.item, { width: columns === 2 ? "48.5%" : "100%", backgroundColor: registered ? colors.primarySoft : colors.surfaceMuted }]}>
+      return <Pressable key={`${member.id}:${member.character ?? ""}`} accessibilityRole="button" accessibilityLabel={`${member.name} 인물 상세 보기${registered ? ", 등록됨" : ""}`} onPress={() => onOpen(member)} style={[styles.item, { width: columns === 2 ? "48.5%" : "100%", backgroundColor: registered ? colors.primarySoft : colors.surfaceMuted }]}>
         <PersonAvatar name={member.name} profileUrl={member.profile_url} size={40} />
         <View style={styles.copy}>
           <View style={styles.nameRow}><Text numberOfLines={1} style={styles.name}>{member.name}</Text>{registered ? <Text style={styles.badge}>등록됨</Text> : null}</View>

@@ -67,7 +67,7 @@ export default function ForgotPasswordScreen() {
         ) : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: formState.isSubmitting || requestPasswordReset.isPending, busy: formState.isSubmitting || requestPasswordReset.isPending }}
+          aria-disabled={formState.isSubmitting || requestPasswordReset.isPending}
           aria-busy={formState.isSubmitting || requestPasswordReset.isPending}
           disabled={formState.isSubmitting || requestPasswordReset.isPending}
           onPress={submit}

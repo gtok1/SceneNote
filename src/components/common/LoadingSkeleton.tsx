@@ -32,7 +32,6 @@ export function LoadingSkeleton({
     <View
       accessibilityLabel={loadingLabel}
       accessibilityLiveRegion="polite"
-      accessibilityState={{ busy: true }}
       aria-busy
       style={[styles.container, isRecommendationGrid ? styles.recommendationGrid : null]}
     >

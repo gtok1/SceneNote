@@ -1,8 +1,9 @@
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface YearSelectProps {
   value: string;
@@ -36,7 +37,7 @@ export function YearSelect({
     <View style={[styles.container, open ? styles.containerOpen : null]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        aria-expanded={open}
         onPress={() => setOpen((current) => !current)}
         style={styles.trigger}
       >
@@ -58,7 +59,7 @@ export function YearSelect({
                   return (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      {...selectionAriaProps("button", selected, Platform.OS)}
                       key={year}
                       onPress={() => selectYear(year)}
                       style={[styles.option, selected ? styles.optionSelected : null]}

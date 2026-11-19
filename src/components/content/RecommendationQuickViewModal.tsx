@@ -160,7 +160,7 @@ export function RecommendationQuickViewModal({
             <Pressable
               accessibilityHint={RECOMMENDATION_ADD_HINT} accessibilityLabel={`${item.title_primary} ${addLabel}`}
               accessibilityRole="button"
-              accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
+              aria-disabled={isAddDisabled} aria-busy={addLabel.includes("중")}
               disabled={isAddDisabled}
               onPress={() => onAdd(item)}
               style={[styles.primaryButton, isAddDisabled ? styles.disabled : null]}
@@ -171,7 +171,7 @@ export function RecommendationQuickViewModal({
                 accessibilityLabel={`${item.title_primary} ${completeLabel}`}
                 accessibilityRole="button"
                 accessibilityHint={RECOMMENDATION_COMPLETE_HINT}
-                accessibilityState={{ disabled: isAddDisabled, busy: completeLabel === "기록 중" }}
+                aria-disabled={isAddDisabled} aria-busy={completeLabel === "기록 중"}
                 disabled={isAddDisabled}
                 onPress={() => onMarkCompleted(item)}
                 style={[styles.completeButton, isAddDisabled ? styles.disabled : null]}

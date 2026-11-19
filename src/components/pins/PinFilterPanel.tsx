@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { DashboardPanel } from "@/components/profile/DashboardPanel";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { ALL_GENRE_FILTER } from "@/utils/genre";
 import { PINS_SCREEN_COPY } from "@/utils/pinListUi";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface PinFilterChipProps {
   label: string;
@@ -17,7 +18,7 @@ export function PinFilterChip({ label, accessibilityLabel, selected, onPress }: 
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ selected }}
+      {...selectionAriaProps("button", selected, Platform.OS)}
       hitSlop={{ top: 4, bottom: 4 }}
       onPress={onPress}
       style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.pressed]}

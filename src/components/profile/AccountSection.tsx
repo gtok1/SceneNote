@@ -10,6 +10,8 @@ interface AccountSectionProps {
   width?: number | undefined;
   exclusionCount: number | null;
   onOpenExclusions?: (() => void) | undefined;
+  subscribedOttSummary?: string | undefined;
+  onOpenSubscribedOtts?: (() => void) | undefined;
   onSignOut: () => void;
   signingOut: boolean;
   onDeleteAccount: () => void;
@@ -20,6 +22,8 @@ export function AccountSection({
   width,
   exclusionCount,
   onOpenExclusions,
+  subscribedOttSummary,
+  onOpenSubscribedOtts,
   onSignOut,
   signingOut,
   onDeleteAccount,
@@ -30,8 +34,21 @@ export function AccountSection({
   return (
     <DashboardPanel title="계정" width={width}>
       <View>
+        {onOpenSubscribedOtts ? (
+          <Pressable
+            accessibilityLabel={subscribedOttSummary ? `구독 중인 OTT, ${subscribedOttSummary}` : "구독 중인 OTT"}
+            accessibilityRole="button"
+            onPress={onOpenSubscribedOtts}
+            style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
+          >
+            <Ionicons accessible={false} color={colors.textMuted} name="tv-outline" size={20} />
+            <Text style={styles.label}>구독 중인 OTT</Text>
+            <Text numberOfLines={1} style={[styles.meta, styles.subscriptionMeta]}>{subscribedOttSummary}</Text>
+            <Ionicons accessible={false} color={colors.textMuted} name="chevron-forward" size={20} />
+          </Pressable>
+        ) : null}
         {onOpenExclusions ? (
-          <Pressable accessibilityRole="button" onPress={onOpenExclusions} style={styles.row}>
+          <Pressable accessibilityRole="button" onPress={onOpenExclusions} style={[styles.row, onOpenSubscribedOtts ? styles.divider : null]}>
             <Ionicons color={colors.textMuted} name="eye-off-outline" size={20} />
             <Text style={styles.label}>추천에서 제외한 작품</Text>
             <Text style={styles.meta}>{`${exclusionCount ?? 0}개`}</Text>
@@ -42,7 +59,7 @@ export function AccountSection({
           accessibilityRole="button"
           disabled={busy}
           onPress={onSignOut}
-          style={[styles.row, onOpenExclusions ? styles.divider : null, busy ? styles.disabled : null]}
+          style={[styles.row, onOpenSubscribedOtts || onOpenExclusions ? styles.divider : null, busy ? styles.disabled : null]}
         >
           <Ionicons color={colors.textMuted} name="log-out-outline" size={20} />
           <Text style={styles.label}>{signingOut ? "로그아웃 중" : "로그아웃"}</Text>
@@ -81,6 +98,14 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
     fontVariant: ["tabular-nums"]
+  },
+  subscriptionMeta: {
+    flexShrink: 1,
+    maxWidth: "50%",
+    minWidth: 0
+  },
+  pressed: {
+    backgroundColor: colors.surfaceMuted
   },
   danger: {
     color: colors.danger

@@ -66,6 +66,85 @@ test("international TV category and authoritative query evidence support positiv
   assert.equal(matchesDiscoveryFilters({ content_type: "other" }, { mediaTypes: ["drama"] }), false);
 });
 
+test("explicit nonfiction genres cannot pass as drama through legacy type, category or season metadata", () => {
+  for (const genre of ["Reality", "Talk", "News", "Documentary", "리얼리티", "토크", "뉴스", "다큐멘터리", "예능"]) {
+    for (const shape of [{ content_type: "kdrama" }, { content_type: "jdrama" }, { category: "drama" }, { content_type: "other", has_seasons: true }]) {
+      const candidate = { ...shape, genres: ["Drama", genre], origin_country: ["KR"] };
+      assert.equal(discoveryContract.discoveryMediaType(candidate), null, `${genre}: ${JSON.stringify(shape)}`);
+      assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"] }), false);
+      assert.equal(matchesDiscoveryFilters(candidate), true, "no filters preserve every candidate");
+    }
+  }
+  for (const type of ["movie", "anime"] as const) {
+    const candidate = { content_type: type, genres: ["Documentary", "Talk"], has_seasons: true };
+    assert.equal(discoveryContract.discoveryMediaType(candidate), type);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [type] }), true);
+  }
+});
+
+test("Japanese-original TMDB coproductions match Japanese rather than Korean drama filters", () => {
+  for (const [title_primary, title_original] of [
+    ["가스인간", "ガス人間"], ["로맨틱 어나니머스", "匿名の恋人たち"], ["K-연하남 주의보", "韓ドラみたいな彼と私"]
+  ] as const) {
+    const candidate = { external_source: "tmdb", content_type: "kdrama", title_primary, title_original,
+      origin_country: ["JP", "KR"], genres: ["Drama"] };
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["KR"] }), false);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["JP"] }), true);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["KR", "JP"] }), true);
+    assert.equal(matchesDiscoveryFilters(candidate, { countries: ["KR"] }), true, "country-only filtering retains production-country semantics");
+    assert.equal(matchesDiscoveryFilters(candidate), true);
+  }
+  const koreanCountryOnly = { external_source: "tmdb", content_type: "kdrama", title_original: "ガス人間", origin_country: ["KR"] };
+  assert.equal(matchesDiscoveryFilters(koreanCountryOnly, { mediaTypes: ["drama"], countries: ["KR", "JP"] }), true,
+    "selecting both regions preserves the existing production-country OR match");
+});
+
+test("drama genre and country conjunction uses original language without an explicit media selection", () => {
+  const candidate = { external_source: "tmdb", content_type: "kdrama", title_original: "匿名の恋人たち",
+    genres: ["Drama", "Comedy"], origin_country: ["JP", "KR"], matched_countries: ["KR"] };
+  assert.equal(matchesDiscoveryFilters(candidate, { genres: ["드라마"], countries: ["KR"] }), false);
+  assert.equal(matchesDiscoveryFilters(candidate, { genres: ["드라마"], countries: ["JP"] }), true);
+  assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["KR"] }), false,
+    "matched_countries must not bypass a Japanese drama classification");
+  assert.equal(matchesDiscoveryFilters(candidate, { genres: ["Comedy"], countries: ["KR"] }), true,
+    "a generic country and non-drama genre query retains production-country semantics");
+});
+
+test("recommendation language and TMDB original_language resolve Korean-Japanese drama coproductions", () => {
+  for (const shape of [{ original_language: "ja" }, { languages: ["ja"] }]) {
+    const candidate = { external_source: "tmdb", category: "drama", countries: ["KR", "JP"], ...shape };
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["KR"] }), false);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["JP"] }), true);
+  }
+  const korean = { external_source: "tmdb", category: "drama", countries: ["KR", "JP"], original_language: "ko" };
+  assert.equal(matchesDiscoveryFilters(korean, { mediaTypes: ["drama"], countries: ["KR"] }), true);
+  assert.equal(matchesDiscoveryFilters(korean, { mediaTypes: ["drama"], countries: ["JP"] }), false);
+});
+
+test("ambiguous scripts, multilingual metadata and translated names retain the production-country match", () => {
+  for (const shape of [
+    { title_original: null }, { title_original: "氣體人間" }, { title_original: "韓國・人間ー" },
+    { title_original: "한국 ガス人間" }, { title_primary: "ガス人間" }, { languages: ["ja", "ko"] },
+    { title_original: "ガス人間", external_source: "anilist" }
+  ]) {
+    const candidate = { external_source: "tmdb", content_type: "kdrama", countries: ["JP", "KR"], ...shape };
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["KR"] }), true, JSON.stringify(shape));
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"], countries: ["JP"] }), true, JSON.stringify(shape));
+  }
+  const noSource = { content_type: "kdrama", countries: ["JP", "KR"], title_original: "ガス人間" };
+  assert.equal(matchesDiscoveryFilters(noSource, { mediaTypes: ["drama"], countries: ["KR"] }), true);
+});
+
+test("movie and anime country filters keep coproduction OR semantics even with Japanese original metadata", () => {
+  for (const content_type of ["movie", "anime"] as const) {
+    const candidate = { external_source: "tmdb", content_type, title_original: "ガス人間", original_language: "ja",
+      genres: ["Drama"], countries: ["JP", "KR"] };
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [content_type], countries: ["KR"] }), true);
+    assert.equal(matchesDiscoveryFilters(candidate, { genres: ["Drama"], countries: ["KR"] }), true);
+    assert.equal(matchesDiscoveryFilters(candidate, { countries: ["KR"] }), true);
+  }
+});
+
 test("Y-1 year choices normalize and isolate cache identities", () => {
   assert.equal(normalizeDiscoveryFilters({ year: 2025 }).year, 2025);
   for (const year of [null, undefined, 1899, 2101, 2025.5, NaN]) {

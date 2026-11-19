@@ -69,7 +69,7 @@ export function FilterSheet({
               ref={focus.firstRef}
               accessibilityRole="button"
               accessibilityLabel="필터 취소"
-              accessibilityState={{ disabled: isApplying }}
+              aria-disabled={isApplying}
               disabled={isApplying}
               onPress={close}
               style={{
@@ -88,7 +88,7 @@ export function FilterSheet({
           <View style={{ flexDirection: "row", gap: 12, padding: 12 }}>
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ disabled: isApplying }}
+              aria-disabled={isApplying}
               disabled={isApplying}
               onPress={onReset}
               style={{
@@ -102,7 +102,7 @@ export function FilterSheet({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ busy: isApplying, disabled: isApplying }}
+              aria-busy={isApplying} aria-disabled={isApplying}
               disabled={isApplying}
               onPress={onApply}
               style={{

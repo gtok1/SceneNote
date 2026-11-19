@@ -97,7 +97,7 @@ export default function ResetPasswordScreen() {
           {updatePassword.error ? <Text accessibilityRole="alert" style={styles.error}>{updatePassword.error.message}</Text> : null}
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: formState.isSubmitting || updatePassword.isPending, busy: formState.isSubmitting || updatePassword.isPending }}
+            aria-disabled={formState.isSubmitting || updatePassword.isPending}
             aria-busy={formState.isSubmitting || updatePassword.isPending}
             disabled={formState.isSubmitting || updatePassword.isPending}
             onPress={submit}

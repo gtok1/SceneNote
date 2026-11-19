@@ -1,11 +1,12 @@
 import { memo, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage } from "@/components/common/AppImage";
 import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
 import type { TimelinePin } from "@/types/pins";
 import { createPinCardModel, PINS_SCREEN_COPY } from "@/utils/pinListUi";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface PinListCardProps {
   pin: TimelinePin;
@@ -27,7 +28,7 @@ export const PinListCard = memo(function PinListCard({
       accessibilityRole="button"
       accessibilityLabel={model.accessibilityLabel}
       accessibilityHint={pressAction === "select" ? PINS_SCREEN_COPY.selectHint : PINS_SCREEN_COPY.openHint}
-      {...(pressAction === "select" ? { accessibilityState: { selected } } : {})}
+      {...(pressAction === "select" ? selectionAriaProps("button", selected, Platform.OS) : {})}
       onPress={() => onPressPin(pin.id)}
       style={({ pressed }) => [
         styles.card, { padding },

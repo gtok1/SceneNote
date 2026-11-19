@@ -9,6 +9,7 @@ export const TMDB_RECOMMENDATION_GENRES = new Map<number, string>([
   [53, "Thriller"], [80, "Crime"], [878, "Science Fiction"], [9648, "Mystery"],
   [10749, "Romance"], [10751, "Family"], [10759, "Action & Adventure"],
   [10765, "Sci-Fi & Fantasy"], [10766, "Soap"], [10768, "War & Politics"],
+  [10763, "News"], [10764, "Reality"], [10767, "Talk"],
   [99, "Documentary"], [10402, "Music"], [10752, "War"]
 ]);
 

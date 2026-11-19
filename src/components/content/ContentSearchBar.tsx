@@ -5,7 +5,7 @@ import {
   type SearchFilterDraft
 } from "@/utils/searchFilterDraft";
 import { forwardRef, memo, useImperativeHandle, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { YearSelect } from "@/components/common/YearSelect";
@@ -18,6 +18,7 @@ import { COUNTRY_FILTER_OPTIONS } from "@/utils/countryFilter";
 import { createGenreFilterOptions } from "@/utils/genre";
 import { normalizeDiscoveryGenre } from "../../../supabase/functions/_shared/discoveryFilters";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 type SelectedMediaType = Exclude<MediaTypeFilter, "all">;
 const FILTERS: { label: string; value: SelectedMediaType }[] = [
@@ -65,7 +66,6 @@ const FilterCheckbox = memo(function FilterCheckbox({
     <Pressable
       accessibilityLabel={`${group}: ${label}`}
       accessibilityRole="checkbox"
-      accessibilityState={{ checked, disabled }}
       aria-checked={checked}
       aria-disabled={disabled}
       disabled={disabled}
@@ -202,7 +202,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: !filtersReady }}
+            aria-disabled={!filtersReady}
             disabled={!filtersReady}
             onPress={onSubmit}
             style={[styles.button, !filtersReady && styles.disabled]}
@@ -212,7 +212,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
           <View style={styles.toolbar}>
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ expanded: filtersOpen, disabled: !filtersReady || saving }}
+              aria-expanded={filtersOpen} aria-disabled={!filtersReady || saving}
               disabled={!filtersReady || saving}
               onPress={openFilters}
               style={[
@@ -374,7 +374,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
                 return (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityState={{ selected, disabled: saving }}
+                    {...selectionAriaProps("button", selected, Platform.OS)} aria-disabled={saving}
                     disabled={saving}
                     key={filter}
                     onPress={() => changeStatusFilter(filter)}
@@ -401,7 +401,7 @@ export const ContentSearchBar = forwardRef<ContentSearchBarHandle, ContentSearch
                 return (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityState={{ selected, disabled: saving }}
+                    {...selectionAriaProps("button", selected, Platform.OS)} aria-disabled={saving}
                     disabled={saving}
                     key={item.value}
                     onPress={() => changeSortOrder(item.value)}

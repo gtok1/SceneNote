@@ -3,19 +3,16 @@ import { Platform } from "react-native";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export interface RecommendationExclusion {
-  key: string;
-  title: string;
-  excludedAt: string;
-}
+import {
+  createRecommendationExclusionActions,
+  type RecommendationExclusion,
+  type RecommendationExclusionActions,
+  type RecommendationExclusionSlice
+} from "@/utils/recommendationExclusionActions";
 
-interface RecommendationUiState {
-  excludedRecommendations: RecommendationExclusion[];
-  excludedRecommendationKeys: string[];
-  excludeRecommendation: (key: string, title?: string) => void;
-  removeExclusion: (key: string) => void;
-  clearExclusions: () => void;
-}
+export type { RecommendationExclusion } from "@/utils/recommendationExclusionActions";
+
+type RecommendationUiState = RecommendationExclusionSlice & RecommendationExclusionActions;
 
 const canUsePersistentStorage = Platform.OS !== "web" || typeof window !== "undefined";
 const noopStorage = {
@@ -29,36 +26,7 @@ export const useRecommendationUiStore = create<RecommendationUiState>()(
     (set) => ({
       excludedRecommendations: [],
       excludedRecommendationKeys: [],
-      excludeRecommendation: (key, title = "제목 없는 작품") =>
-        set((state) => {
-          if (state.excludedRecommendations.some((item) => item.key === key)) return {};
-
-          const excludedRecommendations = [
-            ...state.excludedRecommendations,
-            {
-              key,
-              title,
-              excludedAt: new Date().toISOString()
-            }
-          ];
-
-          return {
-            excludedRecommendations,
-            excludedRecommendationKeys: excludedRecommendations.map((item) => item.key)
-          };
-        }),
-      removeExclusion: (key) =>
-        set((state) => {
-          const excludedRecommendations = state.excludedRecommendations.filter((item) => item.key !== key);
-          return {
-            excludedRecommendations,
-            excludedRecommendationKeys: excludedRecommendations.map((item) => item.key)
-          };
-        }),
-      clearExclusions: () => ({
-        excludedRecommendations: [],
-        excludedRecommendationKeys: []
-      })
+      ...createRecommendationExclusionActions(set)
     }),
     {
       name: "scenenote-recommendation-ui",

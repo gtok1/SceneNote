@@ -63,6 +63,7 @@ import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import { ERROR_COPY } from "@/utils/errorCopy";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 const PRIMARY_WATCH_STATUS_SET = new Set<WatchStatus>(["wishlist", "watching", "dropped", "completed"]);
 
@@ -432,8 +433,7 @@ export default function LibraryScreen() {
                     <Pressable
                       accessibilityLabel={item.label}
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      aria-pressed={selected}
+                      {...selectionAriaProps("button", selected, Platform.OS)}
                       key={item.value}
                       onPress={() => changeViewMode(item.value)}
                       style={[styles.mobileIconButton, selected ? styles.filterSelected : null]}
@@ -444,7 +444,7 @@ export default function LibraryScreen() {
                 })}
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ expanded: showFilters }}
+                  aria-expanded={showFilters}
                   ref={filterButtonRef}
                   onPress={() => setShowFilters(true)}
                   style={[styles.mobileFilterButton, advancedFilterCount > 0 ? styles.filterSelected : null]}
@@ -480,7 +480,7 @@ export default function LibraryScreen() {
               return (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ selected }}
+                  {...selectionAriaProps("button", selected, Platform.OS)}
                   key={item}
                   onPress={() => commitFilters({ statusFilter: item })}
                   style={[styles.filter, selected && styles.filterSelected]}
@@ -512,7 +512,7 @@ export default function LibraryScreen() {
               return (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ selected }}
+                  {...selectionAriaProps("button", selected, Platform.OS)}
                   key={item.value}
                   onPress={() => changeViewMode(item.value)}
                   style={[styles.toolButton, selected && styles.filterSelected]}
@@ -529,7 +529,7 @@ export default function LibraryScreen() {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ expanded: showFilters }}
+              aria-expanded={showFilters}
               onPress={() => setShowFilters((current) => !current)}
               style={[
                 styles.toolButton,
@@ -582,7 +582,7 @@ export default function LibraryScreen() {
                 return (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityState={{ selected }}
+                    {...selectionAriaProps("button", selected, Platform.OS)}
                     key={item}
                     onPress={() => commitFilters({ contentTypeFilter: item })}
                     style={[styles.contentTypeFilter, selected && styles.filterSelected]}
@@ -636,7 +636,7 @@ export default function LibraryScreen() {
               <View style={styles.ratingFilterChips}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityState={{ selected: ratingFilter === "all" }}
+                  {...selectionAriaProps("button", ratingFilter === "all", Platform.OS)}
                   onPress={() => commitFilters({ ratingFilter: "all" })}
                   style={[styles.filter, ratingFilter === "all" && styles.filterSelected]}
                 >
@@ -647,7 +647,7 @@ export default function LibraryScreen() {
                   return (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      {...selectionAriaProps("button", selected, Platform.OS)}
                       key={rating}
                       onPress={() => commitFilters({ ratingFilter: rating })}
                       style={[styles.filter, selected && styles.filterSelected]}

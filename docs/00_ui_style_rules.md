@@ -80,10 +80,10 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
 - **UI-4.1 터치 영역 최소 44×44**(`docs/19` M-05). 시각 크기가 작으면 `hitSlop`으로 채운다. 주요 버튼 높이 44~48. 예: 알약 버튼 높이 32 + `hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}`, 아이콘 버튼 36 + `hitSlop={4}`.
 - **UI-4.2 눌림 피드백**은 `Pressable`의 `({ pressed }) =>` 스타일(투명도 0.72 또는 배경 `surfaceMuted`). **hover에만 의존하는 표시 금지**(앱에는 hover가 없다). hover는 웹 부가 효과로만.
 - **UI-4.3 Pressable 중첩 금지**(웹에서 button 안 button). 카드 열기와 카드 안 행동 버튼은 **형제**로 둔다.
-- **UI-4.4** 모든 상호작용 요소에 `accessibilityRole`, 글자가 없거나 모호하면 `accessibilityLabel`, 상태는 `accessibilityState`(`selected`/`disabled`/`expanded`/`checked`/`busy`). 아이콘만 있는 버튼은 라벨 필수.
+- **UI-4.4** 모든 상호작용 요소에 `accessibilityRole`, 글자가 없거나 모호하면 `accessibilityLabel`. **상태는 `aria-selected`·`aria-checked`·`aria-disabled`·`aria-expanded`·`aria-busy` 개별 속성으로 준다. `accessibilityState={{…}}`는 쓰지 않는다**(react-native-web 0.21이 읽지 않아 웹 낭독기에 상태가 전달되지 않는다. 앱은 `aria-*`를 같은 상태로 읽는다, docs/75). 선택 상태는 `role="tab"`만 `aria-selected`를 직접 쓰고, 그 밖의 요소는 `{...selectionAriaProps(role, selected, Platform.OS)}`(`src/utils/selectionAria.ts`)로 준다 — 웹은 button `aria-pressed`·radio `aria-checked`, 앱은 `aria-selected`를 받는다(docs/76). 현재 페이지 표시는 `aria-current`와 `{ current: true }`. 누르면 다른 화면으로 이동만 하는 버튼(예: 출연진 카드)에는 선택 상태를 주지 않는다. 등록·즐겨찾기 같은 표시는 라벨에 넣는다(docs/77). 아이콘만 있는 버튼은 라벨 필수.
 - **UI-4.5 비활성**은 `disabled` + `opacity: 0.5~0.6`. 처리 중인 항목만 비활성(한 항목 저장 중에 목록 전체를 막지 않는다 — 항목별 Set으로 관리, `docs/36` D-7).
 - **UI-4.6 글자 확대.** `allowFontScaling={false}` 금지. 앱 글자 크기 1.3배에서도 잘리거나 겹치지 않게: `flexWrap`, `numberOfLines`, `minHeight`. 열 수를 글자 크기에 맞춰야 하면 `useWindowDimensions().fontScale`을 넘긴다(예: `getResponsiveRecommendationColumns(width, fontScale)`).
-- **UI-4.7** 로딩 영역 `accessibilityState={{ busy: true }}` + 라벨, 동적 안내문 `accessibilityLiveRegion="polite"`.
+- **UI-4.7** 로딩 영역 `aria-busy` + 라벨, 동적 안내문 `accessibilityLiveRegion="polite"`.
 
 ---
 
@@ -180,7 +180,7 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
    ```
    grep -nE "#[0-9A-Fa-f]{3,6}\b|rgba?\(|fontWeight: \"|fontSize: [0-9]" <파일들>
    ```
-   결과 0줄(UI-1.1 예외 상수 제외). `grep -n "Alert.alert" <파일들>` 0줄(확인 창은 `confirmDestructive` 안에만).
+   결과 0줄(UI-1.1 예외 상수 제외). `grep -n "Alert.alert" <파일들>` 0줄(확인 창은 `confirmDestructive` 안에만). 저장소 전체 허용 목록은 `npm test`의 `alertUsageGuard`가 확인한다(docs/78). `grep -n "accessibilityState" <파일들>` 0줄(`npm test`의 `a11yAriaStateGuard` 검사가 저장소 전체를 확인한다).
 3. **웹**(8081만, `npm run web -- --port 8081 --localhost --clear`, 사용 중이면 기존 서버 재사용): 폭 375·768·1440. 확인 — 시작선 하나, 넓은 화면 빈 공간·끝으로 밀린 버튼 없음, 키보드 포커스 이동, 토스트·확인 창 동작.
 4. **앱**(가능하면 `npm run ios` iOS 시뮬레이터 세로): 안전 영역(노치·홈 인디케이터), 키보드가 입력·저장 버튼을 가리지 않음, 글자 크기 1.3배(설정 > 손쉬운 사용 > 더 큰 텍스트)에서 잘림 없음, 확인 창은 네이티브 Alert로 뜸.
 5. 로그인이 필요한 화면을 AI가 확인할 수 없으면 대신 로그인하지 않는다. 확인하지 못한 항목을 **웹/앱 구분해** 수동 확인 표로 보고한다.
@@ -207,7 +207,7 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
 - [ ] 토큰만 사용(16진 색·`fontWeight`·`fontSize` 숫자 없음)
 - [ ] 콘텐츠 컨테이너(최대 1200·gutter) 안, 레이아웃은 순수 함수 + 폭별 테스트
 - [ ] 375 / 768 / 1440에서 넘침·끝으로 밀린 버튼·빈 공간 없음
-- [ ] 터치 44, `accessibilityRole`/`Label`/`State`, Pressable 중첩 없음
+- [ ] 터치 44, `accessibilityRole`/`Label`, 상태는 `aria-*`(`accessibilityState` 없음), Pressable 중첩 없음
 - [ ] 입력 화면 키보드 회피 + `keyboardShouldPersistTaps="handled"`
 - [ ] `Alert.alert` 없음 — 토스트·`confirmDestructive`·`confirmDiscard`
 - [ ] 오류 문구 한국어, 서버 원문 노출 없음

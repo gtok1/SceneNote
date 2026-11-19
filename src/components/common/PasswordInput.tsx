@@ -29,7 +29,7 @@ export function PasswordInput({ inputRef, style, ...inputProps }: PasswordInputP
       <Pressable
         accessibilityLabel={visible ? "비밀번호 숨기기" : "비밀번호 보기"}
         accessibilityRole="button"
-        accessibilityState={{ disabled }}
+        aria-disabled={disabled}
         disabled={disabled}
         onPress={() => setVisible((current) => !current)}
         style={({ pressed }) => [styles.toggle, pressed && styles.pressed, disabled && styles.disabled]}

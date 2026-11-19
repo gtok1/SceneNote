@@ -54,6 +54,23 @@ it("S-3 classifies library content categories", () => {
   assert.equal(libraryContentCategory({ content_type: "jdrama", genres: ["드라마"] }), "jdrama");
 });
 
+it("counts corrected Japanese dramas and nonfiction in the same categories as library filters", () => {
+  const entries = [
+    item({ content_type: "kdrama", title_original: "한국 드라마", source_api: "tmdb" }),
+    item({ content_type: "kdrama", title_original: "ガス人間", source_api: "tmdb", genres: ["Sci-Fi & Fantasy", "범죄"] }),
+    item({ content_type: "kdrama", genres: ["Reality", "코미디"] }),
+    item({ content_type: "other", genres: ["드라마", "다큐멘터리"] }),
+    item({ content_type: "other", genres: ["Drama"] }),
+    item({ content_type: "movie", genres: ["Documentary"] }),
+    item({ content_type: "anime", genres: ["Talk"] })
+  ];
+  const stats = createContentTypeStats(entries);
+  assert.deepEqual(stats.map((stat) => [stat.type, stat.count]), [
+    ["anime", 1], ["kdrama", 1], ["jdrama", 1], ["foreign_drama", 1], ["movie", 1], ["other", 2]
+  ]);
+  assert.equal(stats.reduce((count, stat) => count + stat.count, 0), entries.length);
+});
+
 const yearItems = [
   item({ statuses: completed, last_watched_at: "2026-03-15T12:00:00Z" }),
   item({ statuses: wishlist, watch_count: 0, last_watched_at: "2026-05-15T12:00:00Z" }),

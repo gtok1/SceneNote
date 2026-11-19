@@ -206,6 +206,7 @@ interface TmdbSearchItem {
   release_date?: string;
   first_air_date?: string;
   origin_country?: string[];
+  original_language?: string;
   genre_ids?: number[];
 }
 
@@ -573,7 +574,8 @@ export function normalizeTmdbItem(
     has_seasons: isTv,
     episode_count: null,
     genres: genreNamesFromIds(item.genre_ids),
-    origin_country: item.origin_country ?? []
+    origin_country: item.origin_country ?? [],
+    ...(item.original_language ? { original_language: item.original_language } : {})
   };
 }
 

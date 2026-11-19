@@ -86,7 +86,7 @@ const EpisodeRow = memo(function EpisodeRow({
       <Pressable
         accessibilityLabel={`${episode.episode_number}화 시청 완료`}
         accessibilityRole="checkbox"
-        accessibilityState={{ checked: watched }}
+        aria-checked={watched}
         onPress={onToggle}
         style={styles.checkboxButton}
       >

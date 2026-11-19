@@ -3,6 +3,7 @@ import type { ContentType } from "@/types/content";
 import type { LibraryListItem, LibraryStatusFilter } from "@/types/library";
 import { filterByYear, normalizeYearFilter, sortByYear, type DateSortOrder } from "@/utils/contentSort";
 import { ALL_GENRE_FILTER, createDisplayGenreNames } from "@/utils/genre";
+import { hasJapaneseOriginalTitle, hasNonDramaGenre } from "../../supabase/functions/_shared/dramaClassification";
 
 export type ContentTypeFilter = ContentType | "all" | "foreign_drama";
 export type RatingFilter = number | "all";
@@ -108,10 +109,24 @@ export function createLibraryShareTitle(filters: LibraryFilterState): string {
 export type LibraryContentCategory = Exclude<ContentTypeFilter, "all">;
 
 export function libraryContentCategory(
-  item: Pick<LibraryListItem, "content_type" | "genres">
+  item: Pick<LibraryListItem, "content_type" | "genres"> &
+    Partial<Pick<LibraryListItem, "source_api" | "title_original">>
 ): LibraryContentCategory {
+  if (item.content_type === "movie" || item.content_type === "anime") return item.content_type;
+
+  const genres = createDisplayGenreNames(item.genres);
+  // Older metadata classified every KR/JP TV show as a drama, including variety shows.
+  if (hasNonDramaGenre(genres)) return "other";
+
+  // Co-productions can be stored as kdrama despite a Japanese original title (docs/81).
+  // Use actual kana letters, not punctuation or a translated display title. Keep ambiguous cases.
+  if (item.content_type === "kdrama" && item.source_api === "tmdb" &&
+    hasJapaneseOriginalTitle(item.title_original)) {
+    return "jdrama";
+  }
+
   if (item.content_type !== "other") return item.content_type;
-  return createDisplayGenreNames(item.genres).includes("드라마") ? "foreign_drama" : "other";
+  return genres.includes("드라마") ? "foreign_drama" : "other";
 }
 
 function matchesContentTypeFilter(item: LibraryListItem, filter: ContentTypeFilter): boolean {

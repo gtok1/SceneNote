@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, elevation, radius, spacing, typography } from "@/constants/theme";
 import type { WatchStatus } from "@/types/library";
 import type { createWatchStatusControlModel } from "@/utils/contentDetailView";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface WatchStatusControlProps { model: ReturnType<typeof createWatchStatusControlModel>; pending: boolean; onSelect: (status: WatchStatus) => void }
 export function WatchStatusControl({ model, pending, onSelect }: WatchStatusControlProps) {
@@ -10,13 +11,13 @@ export function WatchStatusControl({ model, pending, onSelect }: WatchStatusCont
     <Text style={[typography.label, styles.muted]}>{model.title}</Text>
     {model.hint ? <Text style={[typography.caption, styles.muted]}>{model.hint}</Text> : null}
     <View style={styles.row}>
-      <View style={styles.track}>{model.primary.map(({ status, label, selected }) => <Pressable key={status} accessibilityRole="button" accessibilityState={{ selected, disabled: pending }} disabled={pending} onPress={() => !pending && onSelect(status)} style={[styles.segment, selected ? styles.selected : null]}>
+      <View style={styles.track}>{model.primary.map(({ status, label, selected }) => <Pressable key={status} accessibilityRole="button" {...selectionAriaProps("button", selected, Platform.OS)} aria-disabled={pending} disabled={pending} onPress={() => !pending && onSelect(status)} style={[styles.segment, selected ? styles.selected : null]}>
         <Text style={[typography.label, { color: selected ? colors.text : colors.textMuted }]}>{label}</Text>
       </Pressable>)}</View>
       {model.secondary.map(({ status, label, selected }) => {
         const positive = status === "recommended";
         const color = selected ? positive ? colors.success : colors.danger : colors.textMuted;
-        return <Pressable key={status} accessibilityRole="button" accessibilityState={{ selected, disabled: pending }} disabled={pending} onPress={() => !pending && onSelect(status)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }} style={[styles.toggle, selected ? { backgroundColor: positive ? colors.successSoft : colors.dangerSoft, borderColor: positive ? colors.successSoft : colors.dangerSoft } : null]}>
+        return <Pressable key={status} accessibilityRole="button" {...selectionAriaProps("button", selected, Platform.OS)} aria-disabled={pending} disabled={pending} onPress={() => !pending && onSelect(status)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }} style={[styles.toggle, selected ? { backgroundColor: positive ? colors.successSoft : colors.dangerSoft, borderColor: positive ? colors.successSoft : colors.dangerSoft } : null]}>
           <Ionicons name={positive ? "thumbs-up-outline" : "thumbs-down-outline"} size={14} color={color} />
           <Text style={[typography.label, { color }]}>{label}</Text>
         </Pressable>;

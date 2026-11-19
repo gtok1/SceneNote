@@ -10,6 +10,14 @@
 
 ## 현재 구현과 설계 예제의 구분
 
+### 검색·추천의 한국 드라마 필터 (2026-11-19)
+
+[82](82_search_drama_filter_fixes_spec.md)에 따라 일반 검색·추천의 앱/서버가 함께 쓰는 `matchesDiscoveryFilters`는 명시 비드라마 TV를 드라마 유형·장르 가지에서 제외한다. 드라마 조건과 KR/JP 중 한쪽 국가를 선택하면 TMDB 원어(`original_language`/단일 `languages`)를 먼저 확인하고, 언어가 없을 때만 가나 원제를 보완 근거로 쓴다. 기존 제작 국가/질의 증거와 교집합하므로 언어로 새 제작 국가를 만들지 않는다. KR·JP 동시 선택·국가만 선택·영화·애니는 기존 국가 OR 의미를 유지한다. `_shared/dramaClassification.ts`의 장르·원제 helper는 81과 공유하되 라이브러리 계약은 유지한다. 일반 TMDB 검색은 원어를 전달하고 추천 장르 매핑은 News·Reality·Talk를 보존한다. 추가 조회·DB 변경은 없으며 앱은 구응답에도 방어적으로 판정한다. 서버 소스 수정은 운영 배포와 구분하며 이번 작업에서는 배포하지 않았다.
+
+### 라이브러리 작품 유형 보정 (2026-11-19)
+
+[81](81_library_content_type_filter_fixes_spec.md)에 따라 `libraryContentCategory`는 저장된 유형에 명시적인 비드라마(리얼리티·토크·뉴스·다큐멘터리·예능) 장르를 보완해 TV 항목을 `other`로 표시한다. `movie`·`anime`는 보존한다. TMDB의 `kdrama` 중 원제에 실제 가나가 있고 한글이 없는 경우는 일본어 원제에 따른 `jdrama` 표시 보정을 적용한다. 이는 국가 판정이 아니라 기존 메타데이터를 이용한 제한적 표시 규칙이며, 모호한 원제는 기존 유형을 유지한다. 필터·카드 라벨·프로필 통계가 같은 함수를 쓰고, 작품의 원본 유형·시청 기록·상태·외부 상세 캐시를 변경하거나 새 API 요청을 만들지 않는다.
+
 ### 작품 출연진 확인 후 등록 (2026-11-15)
 
 작품 상세 `CastSection`은 등록 여부와 관계없이 `openCastMember`로 `/people/[id]`를 연다. 출처·인물 ID·분류는 기존 `resolveCastMemberPerson`을 사용한다. 작품 상세의 직접 등록 mutation은 제거했다. 인물 상세에서 공개 프로필·소개·출연작 확인 후 `useAddFavoritePerson`으로 명시적으로 등록하고 기존 좋아하는 인물 Query를 무효화한다. 상세 응답의 분류·한글 이름을 등록에 사용하며, 등록 여부 조회 중/실패·기등록·진행 중에는 중복 등록을 막는다. 공개 메타데이터 저장·수동 갱신 계약은 유지한다.
@@ -90,8 +98,7 @@
 | 검색·라이브러리·추천 UI | `src/stores/searchUiStore.ts`, `searchHistoryStore.ts`, `libraryUiStore.ts`, `recommendationUiStore.ts` | 서버 응답을 새로운 UI store에 복제하지 않는다. 필터/정렬/검색 기록과 응답 캐시를 구분한다. |
 | 핀 작성 | `src/atoms/pinFormAtom.ts`: `pinFormDraftAtom`; `PinComposer`의 로컬 상태·`createPinSchema` | 현재 PinComposer는 Jotai draft + Zod 검증을 사용한다. 아래 RHF 예제는 이 컴포넌트의 실제 구현이 아니다. |
 | 스포일러 | `src/atoms/spoilerAtom.ts`: `revealedSpoilerPinIdsAtom`; 핀 상세는 `isSpoilerRevealed` 로컬 상태 | 전체 핀/작품 핀/홈과 상세의 초기화 범위가 다르므로 사용자 전환·화면 이탈 시 실제 초기화 코드를 확인한다. |
-| 시청처 캐시 | `src/hooks/useWatchProviders.ts` → TanStack Query; `get-watch-providers` → DB | docs/69의 수동 갱신 캐시다. `watchProvidersAtom.ts`는 이전 미사용 파일이며 서버 상태 저장에 사용하지 않는다. |
-| 정의만 남은 상태 | `src/stores/pinComposerStore.ts`, `episodeSelectionStore.ts`, `src/atoms/tagFilterAtom.ts` | 점검 시 `app/`·`src/` 사용처 검색에서 import를 찾지 못했다. 실제 작성 폼·회차 선택의 상태 원천으로 오인하지 말고, 제거/재사용은 별도 변경으로 검토한다. |
+| 시청처 캐시 | `src/hooks/useWatchProviders.ts` → TanStack Query; `get-watch-providers` → DB | docs/69의 수동 갱신 캐시다. 서버 상태를 Jotai·Zustand에 복제하지 않는다. |
 
 ### 캐시와 mutation의 현재 동작
 

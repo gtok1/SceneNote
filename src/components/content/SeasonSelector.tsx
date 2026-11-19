@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import type { Season } from "@/types/content";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface SeasonSelectorProps {
   seasons: Season[];
@@ -50,7 +51,7 @@ export function SeasonSelector({ seasons, selectedSeasonId, onSelect }: SeasonSe
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ expanded }}
+            aria-expanded={expanded}
             onPress={() => setExpanded((current) => !current)}
             style={styles.currentButton}
           >
@@ -75,7 +76,7 @@ export function SeasonSelector({ seasons, selectedSeasonId, onSelect }: SeasonSe
             return (
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
+                {...selectionAriaProps("button", selected, Platform.OS)}
                 key={season.id}
                 onPress={() => selectSeason(season.id)}
                 style={[styles.item, selected && styles.selected]}

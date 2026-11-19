@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { SearchContentResponse } from "../src/types/content";
-import type { PopularRecommendationsResponse } from "../src/services/popularRecommendations";
+import type { PopularRecommendationsResponse } from "../src/types/popularRecommendations";
 import type { Database } from "../src/types/database";
 
 loadEnvFile(".env");

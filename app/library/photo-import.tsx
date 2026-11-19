@@ -1,7 +1,7 @@
 import { Redirect , useRouter } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -12,10 +12,13 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAddToLibrary } from "@/hooks/useLibrary";
 import { searchContent } from "@/services/contentSearch";
+import { useAppUIStore } from "@/stores/appUIStore";
 import type { MediaTypeFilter, SearchResult } from "@/types/content";
 import { createAirDateLabel } from "@/utils/contentMetaDisplay";
 import { extractPhotoTitleCandidates } from "@/utils/photoTitleCandidates";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { selectionAriaProps } from "@/utils/selectionAria";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
@@ -27,6 +30,7 @@ const MEDIA_FILTERS: { label: string; value: MediaTypeFilter }[] = [
 ];
 
 function LibraryPhotoImportScreen() {
+  const addToast = useAppUIStore((state) => state.addToast);
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { gutter } = getHomeLayout(width);
@@ -93,7 +97,6 @@ function LibraryPhotoImportScreen() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "사진을 읽지 못했습니다.";
       setErrorMessage(message);
-      Alert.alert("사진 업로드 실패", message);
     } finally {
       setIsRecognizing(false);
       setOcrProgress(null);
@@ -118,7 +121,7 @@ function LibraryPhotoImportScreen() {
 
   const registerWishlist = () => {
     if (!selectedResult) {
-      Alert.alert("작품 선택 필요", "등록할 검색 결과를 먼저 선택해 주세요.");
+      addToast("등록할 검색 결과를 먼저 선택해 주세요.", "info");
       return;
     }
 
@@ -126,12 +129,9 @@ function LibraryPhotoImportScreen() {
       { result: selectedResult, status: "wishlist" },
       {
         onSuccess: () => {
-          Alert.alert("등록 완료", "보고 싶음으로 라이브러리에 추가했습니다.", [
-            { text: "라이브러리 보기", onPress: () => router.replace("/library") },
-            { text: "계속 등록", style: "cancel" }
-          ]);
+          addToast("보고 싶음으로 라이브러리에 추가했습니다.", "success", { actionLabel: "라이브러리 보기", onAction: () => router.replace("/library") });
         },
-        onError: (error) => Alert.alert("등록 실패", error.message)
+        onError: (error) => addToast(userFacingErrorMessage(error, "등록하지 못했어요. 잠시 후 다시 시도해 주세요."), "error")
       }
     );
   };
@@ -235,7 +235,7 @@ function LibraryPhotoImportScreen() {
             return (
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
+                {...selectionAriaProps("button", selected, Platform.OS)}
                 disabled={isBusy}
                 key={item.value}
                 onPress={() => changeMediaType(item.value)}
@@ -268,7 +268,7 @@ function LibraryPhotoImportScreen() {
             return (
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
+                {...selectionAriaProps("button", selected, Platform.OS)}
                 disabled={isBusy}
                 key={key}
                 onPress={() => setSelectedKey(key)}

@@ -157,7 +157,7 @@ function FilterChip({
     <Pressable
       accessibilityLabel={`${label} 추천 제외`}
       accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected, disabled }}
+      aria-disabled={disabled}
       aria-checked={selected}
       disabled={disabled}
       onPress={onPress}

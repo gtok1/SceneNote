@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { TMDB_RECOMMENDATION_GENRES } from "./recommendationProviderFilters.ts";
 import { describe, it } from "node:test";
 import {
   aniListExcludedFilters,
@@ -6,6 +7,12 @@ import {
   tmdbExcludedGenreIds,
   tmdbExcludedKeywordIds
 } from "./recommendationProviderFilters.ts";
+
+it("keeps nonfiction TV genre evidence for shared drama filters", () => {
+  assert.equal(TMDB_RECOMMENDATION_GENRES.get(10763), "News");
+  assert.equal(TMDB_RECOMMENDATION_GENRES.get(10764), "Reality");
+  assert.equal(TMDB_RECOMMENDATION_GENRES.get(10767), "Talk");
+});
 
 describe("upstream recommendation exclusions", () => {
   it("uses exact TMDB genre names and verified relationship keyword IDs", () => {

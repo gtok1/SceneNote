@@ -1,5 +1,1334 @@
 # SceneNote Development Next Steps
 
+## 쓰지 않는 상태 파일 삭제 (docs/83, 2026-11-19)
+
+상태: **구현·코드 검사 통과, 화면 미확인.** [83](83_unused_state_files_cleanup_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. D-1~D-4 변경 없음. 시작 경로 `/Users/youngilkim/SceneNote`의 git 상태·원문은 `/tmp/scenenote-83-start-{status.txt,snapshot.json}`에 기록했고, 실제 테스트 기준선은 **N=1,866**이다. `scenenote-verify`와 명령에만 적용한 Node 24를 사용했다. 기존 docs/74~82 작업을 보존했다. 브라우저·시청 앱·개발 서버·사용자 저장값·DB/Edge/secret·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 실제 실패 출력(요약)
+
+새 `scripts/unusedStateFilesCleanup.test.ts`만 먼저 작성한 뒤 전체 테스트를 실행했다. **1,870개 중 1,867개 통과·3개 실패**였고 실패는 정확히 T-1/T-2/T-4, 보호 테스트 T-3은 통과했다. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-9vxh5zej/test.log`, 전체 실제 출력 `/tmp/scenenote-83-step1-proof.json`.
+
+```text
+✖ 83 T-1: unused state files are removed (2.531209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+✖ 83 T-2: no source references the removed state files (27.910625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+✖ 83 T-4: current guidance docs no longer name the removed files (2.828417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+```
+
+- T-1: 삭제 대상 4파일의 existsSync가 실제 true·기대 false였다.
+- T-2: 네 정의 파일 자체에서 경로·내보내기 문자열이 검출돼 실제 참조 목록이 비어 있지 않았다.
+- T-4: 현재 안내 docs/08·docs/04·AGENTS에 이전 파일명이 남아 실제 참조 목록이 비어 있지 않았다.
+
+STEP 2에서 네 파일을 지운 뒤 **1,869개 통과·T-4만 실패**했고 typecheck도 통과했다. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-3r10oma5/test.log`, `/tmp/scenenote-83-step2-proof.json`. STEP 3에서 문서 문장만 정리한 뒤 네 테스트가 모두 통과했다. 단언·검사 범위는 완화하지 않았다.
+
+### 2. npm test before N / STEP 1 / STEP 2 / after
+
+| 단계 | 전체 | 통과 | 실패 |
+|------|------|------|------|
+| 실제 시작 기준선 N | 1,866 | 1,866 | 0 |
+| STEP 1 테스트 추가 | 1,870 | 1,867 | 3(T-1·T-2·T-4) |
+| STEP 2 4파일 삭제 | 1,870 | 1,869 | 1(T-4) |
+| STEP 3 문서 정리 후 최종 | 1,870 | 1,870 | 0 |
+
+기준선 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-4z6_dl27/test.log`; 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ic46csv2/test.log`. 새 테스트 4개, 기존 테스트 파일/단언 변경 0, 삭제된 테스트 0, 최종 skip 0이다. 다른 작업으로 작성 시점의 수와 달라질 수 있어 실제 N을 먼저 기록했고 이번 N은 명세 작성 시점과 같은 1,866이었다.
+
+### 3. typecheck / lint 결과와 보호 범위
+
+- 최종 `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ic46csv2/{typecheck.log,lint.log,summary.json}`.
+- STEP 2 typecheck도 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-3r10oma5/typecheck.log`에서 통과했다.
+- 남길 상태 10파일·package.json/package-lock.json·과거 프롬프트/명세 4문서의 **보호 16파일 SHA-256이 시작 때와 동일**하다. `/tmp/scenenote-83-protected-hashes.json`.
+- 삭제는 명세 6.1의 네 파일뿐이다. app/src/scripts에서 신규 guard 자신을 제외한 7문자열 참조가 0개이며, 최초 점검에서는 supabase에서도 사용처가 없었다. 사용 중인 폼·스포일러 atom과 다른 store는 그대로다.
+- 독립 읽기 전용 검토에서 문서 3곳 전체가 지정 변경만 적용한 기대 원문과 일치하고 AGENTS의 83번 작업 표 행도 동일함을 확인했다. `git diff --check` 통과. 화면·상태 동작 코드·패키지·서버 코드는 바꾸지 않았다.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `scripts/unusedStateFilesCleanup.test.ts`에 있다. 순수 Node 모듈만 import하고 RN/Expo/Supabase를 가져오지 않는다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 83 T-1: unused state files are removed |
+| T-2 | 83 T-2: no source references the removed state files |
+| T-3 | 83 T-3: state files in use are kept |
+| T-4 | 83 T-4: current guidance docs no longer name the removed files |
+
+T-2는 app/src/scripts의 TS/TSX 전체에서 자기 파일만 제외해 명세의 7문자열을 검사한다. T-3은 atoms 2개+stores 8개의 존재를 보호하고, T-4는 현재 안내 3문서의 4파일명 부재를 검사한다.
+
+### 5. 현재 안내 문서 3곳의 diff
+
+**`docs/08_frontend_architecture.md`**
+
+```diff
+--- before/docs/08_frontend_architecture.md
++++ after/docs/08_frontend_architecture.md
+@@ -98,8 +98,7 @@
+ | 검색·라이브러리·추천 UI | `src/stores/searchUiStore.ts`, `searchHistoryStore.ts`, `libraryUiStore.ts`, `recommendationUiStore.ts` | 서버 응답을 새로운 UI store에 복제하지 않는다. 필터/정렬/검색 기록과 응답 캐시를 구분한다. |
+ | 핀 작성 | `src/atoms/pinFormAtom.ts`: `pinFormDraftAtom`; `PinComposer`의 로컬 상태·`createPinSchema` | 현재 PinComposer는 Jotai draft + Zod 검증을 사용한다. 아래 RHF 예제는 이 컴포넌트의 실제 구현이 아니다. |
+ | 스포일러 | `src/atoms/spoilerAtom.ts`: `revealedSpoilerPinIdsAtom`; 핀 상세는 `isSpoilerRevealed` 로컬 상태 | 전체 핀/작품 핀/홈과 상세의 초기화 범위가 다르므로 사용자 전환·화면 이탈 시 실제 초기화 코드를 확인한다. |
+-| 시청처 캐시 | `src/hooks/useWatchProviders.ts` → TanStack Query; `get-watch-providers` → DB | docs/69의 수동 갱신 캐시다. `watchProvidersAtom.ts`는 이전 미사용 파일이며 서버 상태 저장에 사용하지 않는다. |
+-| 정의만 남은 상태 | `src/stores/pinComposerStore.ts`, `episodeSelectionStore.ts`, `src/atoms/tagFilterAtom.ts` | 점검 시 `app/`·`src/` 사용처 검색에서 import를 찾지 못했다. 실제 작성 폼·회차 선택의 상태 원천으로 오인하지 말고, 제거/재사용은 별도 변경으로 검토한다. |
++| 시청처 캐시 | `src/hooks/useWatchProviders.ts` → TanStack Query; `get-watch-providers` → DB | docs/69의 수동 갱신 캐시다. 서버 상태를 Jotai·Zustand에 복제하지 않는다. |
+
+ ### 캐시와 mutation의 현재 동작
+
+```
+
+**`docs/04_architecture.md`**
+
+```diff
+--- before/docs/04_architecture.md
++++ after/docs/04_architecture.md
+@@ -25,7 +25,7 @@
+ | 앱 진입·인증 | `app/_layout.tsx`: `RootLayout`, `AuthRedirect`, `AuthLinkHandler`; `src/providers/AppProviders.tsx`: `AppProviders` | 인증 링크 처리 `src/utils/authLinks.ts`, 세션 초기화, 비밀번호 재설정·공유 경로의 리다이렉트 예외 |
+ | 화면·공통 UI | `app/`, `src/components/`; 실제 검색 본체는 `app/search.tsx`: `SearchScreen`; 공통 Stack 헤더는 `src/components/common/ScreenHeader.tsx` | `(tabs)` 화면, 상세/핀 라우트, 공통 디자인 값 `src/constants/theme.ts`, 본문 폭 `src/utils/homeLayout.ts`·`src/constants/layout.ts` |
+ | 서버 상태·요청 | `src/hooks/` → `src/services/` → `src/lib/supabase.ts`; `src/lib/query.ts`: `queryClient`, `queryKeys` | 캐시 키와 mutation 후 갱신, 사용자 전환 시 캐시 정리, 서버 응답 타입 `src/types/` |
+-| UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. `watchProvidersAtom`은 이전 미사용 파일이며 현재 보러가기는 TanStack Query와 DB 저장 경로다(docs/69). |
++| UI·폼 상태 | `src/stores/`의 Zustand와 `src/atoms/`의 Jotai를 함께 사용 | 실제 사용처는 08 현황 표 참조. 보러가기는 TanStack Query와 DB 저장 경로다(docs/69). |
+ | 외부 콘텐츠 호출 | `supabase/functions/*/index.ts`; `_shared/externalContent.ts`; `search-content/adapters/` | `search-content/adapters/types.ts`, `_shared/types.ts`, 클라이언트 `src/types/content.ts` 및 응답 변환 서비스 |
+ | DB·권한 | `supabase/migrations/`의 순서별 SQL, `src/types/database.ts` | 후속 migration까지 읽어 최종 제약 확인. 로컬 파일 존재만으로 원격 적용을 단정하지 않는다. |
+
+```
+
+**`AGENTS.md`**
+
+```diff
+--- before/AGENTS.md
++++ after/AGENTS.md
+@@ -159,7 +159,7 @@
+
+ - TypeScript 타입을 명확히 작성한다.
+ - 서버 데이터는 TanStack Query, UI 상태는 Zustand로 관리한다.
+-- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. `watchProvidersAtom`은 이전 구현의 미사용 파일이며, 보러가기 서버 응답은 docs/69의 TanStack Query·DB 저장 경로를 쓴다. Jotai로 새 서버 캐시를 만들지 않는다.
++- 기존 Jotai 기반 폼·스포일러 상태는 관련 작업 없이 이관하지 않는다. 보러가기 서버 응답은 docs/69의 TanStack Query·DB 저장 경로를 쓴다. Jotai로 새 서버 캐시를 만들지 않는다.
+ - 기존 구조·명명·UI 동작을 우선하고 무관한 리팩터링이나 중복 유틸을 섞지 않는다. 오류를 숨기는 임시 우회로 완료 처리하지 않는다.
+ - 불확실한 외부 API 동작은 TODO와 문서에 남긴다.
+ - 큰 리팩터링보다 설계 문서에 맞는 작은 구현 단위를 선호한다.
+```
+
+AGENTS의 83 작업 표 행이나 다른 규칙은 고치지 않았다. docs/08의 지정 표 두 줄 외 과거 예제 본문도 그대로다.
+
+삭제 파일은 다음 네 개다. 원문은 시작 snapshot에 보존했다.
+
+- `src/stores/pinComposerStore.ts`
+- `src/stores/episodeSelectionStore.ts`
+- `src/atoms/watchProvidersAtom.ts`
+- `src/atoms/tagFilterAtom.ts`
+
+`docs/codex_prompt.md`, `docs/codex_implementation_prompt.md`, `docs/cursor_verification_prompt.md`, `docs/11_screen_implementation_spec.md`는 전혀 변경하지 않았다. docs/README 83번 상태는 **구현, 화면 미확인**으로 갱신했다.
+
+### 6. 수동 확인 M-1·M-2
+
+| ID | 플랫폼 | 결과·미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 8081 | **미실행.** 브라우저·로그인 세션·개발 서버를 조작하지 않았다. 사용처 부재와 전체 테스트/타입 검사는 확인했지만 실제 홈·핀·상세/회차 선택·핀 작성의 열림 및 콘솔 오류는 미확인이다. 저장 버튼이나 사용자 기록은 건드리지 않았다. |
+| M-2 | iOS 세로 | **미실행.** 기기·시뮬레이터를 실행하지 않았다. 같은 화면이 실제로 열리는지는 미확인이다. |
+
+Android 실제 화면 확인도 미실행이다. `EXTENDED_FEATURES_ENABLED`를 포함한 기존 기능 플래그와 상태 저장값을 바꾸지 않았으며 사용자 시청 환경을 보존했다.
+
+### 7. D-1~D-4 문제 여부
+
+**변경 필요사항·충돌 없음.** D-1의 삭제 4파일 한정·남길 10상태/패키지 불변, D-2의 문서 지정 문장만 정리, D-3의 과거 프롬프트/명세 불변, D-4의 순수 fs 검사를 준수했다. 변경은 명세의 10파일뿐이다(삭제 4개·새 테스트 1개·문서 5개). Jotai↔Zustand 이관이나 전수 export 정리는 하지 않았다.
+
+### 8. 사람이 할 후속 작업
+
+웹 8081과 iOS에서 M-1/M-2의 홈·핀 목록·작품 상세(회차 선택)·핀 작성 화면을 열고 콘솔 오류를 확인한다. **저장 버튼은 누르지 않는다.** 서버가 이미 실행 중이면 재사용하고 예전 번들이 의심될 때만 8081에서 재시작한다. 이번에는 서버를 조작하지 않았다. DB migration·배포는 필요 없고 실행하지 않았으며 커밋·푸시도 하지 않았다.
+
+
+## 검색·추천 한국 드라마 필터 혼입 정정 (docs/82, 2026-11-19)
+
+- 검색의 한국 드라마 조건은 유형 `drama` + 국가 `KR`이며, 공용 `discoveryMediaType`이 예능을 TV 드라마로 보고 국가 OR가 한일 공동 제작을 양쪽에 허용하던 것이 원인이다. 일반 검색은 TMDB 원어를 버리고 추천 장르 매핑은 News·Reality·Talk를 버렸다. 공통 `discoveryFilters`에서 명시 비드라마 TV를 드라마 유형/장르 가지에서 제외하고, 드라마 문맥에서 한일 중 한쪽만 선택하면 원어(없으면 가나 원제)와 기존 국가 증거를 교집합한다. 국가를 새로 만들지 않는다. 영화·애니·국가만 조건·KR/JP 동시 선택·다른 장르 OR는 보존했다. 새 `dramaClassification`의 장르/원제 helper를 81에서도 재사용하며 81의 결과는 유지했다.
+- T-1~T-3은 `discoveryFilters.test.ts`의 신규 6개 테스트, T-4는 `searchResultVisibility.test.ts`의 신규 3개, T-5는 TMDB 원어 전달/추천 장르 맵 각각 1개, T-6은 81의 라이브러리/통계 전체 사례로 대응했다. 총 신규 11개이며 기존 assertion을 줄이지 않았다. 초기 소유 테스트 37개 중 32 통과·5 실패(분류·지역·앱 방어): `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-uk3s15zr/test.log`. 전달/매핑 2개도 구현 전 실패: 같은 임시 상위 폴더의 `scenenote-verify-xfmrh446/test.log`. 첫 구현에서 기존 TMDB 복수 국가 OR 1개가 실패해 기존 assertion을 유지하고 KR/JP 동시선택 보호를 구현했다. 관련 115/115 통과(`scenenote-verify-c5orvzee/test.log`), 추가 동시선택 assertion까지 소유 37/37 통과(`scenenote-verify-e2t3kv9h/test.log`).
+- `scenenote-verify` + 명령 한정 Node 24로 전체 **1866/1866**, typecheck·lint 모두 exit 0. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-f90rwffs/{test.log,typecheck.log,lint.log,summary.json}`. 순수 공유 모듈 3개(`dramaClassification`·`discoveryFilters`·`recommendationProviderFilters`)의 strict TypeScript 검사 통과. 설치된 esbuild로 `search-content/index.ts`·`personalized-recommendations/index.ts`의 로컬 의존성 bundle을 메모리에서 검사해 모두 통과(원격/npm import는 external). Deno가 없어 실제 Deno 검사·Edge 실행은 미실행이며 앱 타입 검사/번들 검사가 이를 대신한다고 보지 않는다. diff 공백 검사 통과.
+- M-1 실제 로그인 웹 8081에서 유형 드라마+한국의 가스인간 3개 숨김/카드 없음, 일본 단독 조건의 가스인간 표시, 한국 조건의 나 혼자 산다 1개 숨김을 확인했다. 각각 모두 보기로 원래 카드를 확인한 뒤 필터를 재적용했다. 정상 한국 드라마 도깨비(2016, 공유·김고은)는 유지됐다. 유형 전체+장르 드라마+한국에서도 로맨틱 어나니머스(코미디·드라마)가 숨겨지는 것을 확인했다. 증빙 `/tmp/scenenote-search-kr-drama-fixed.jpg`, `/tmp/scenenote-search-variety-filter-fixed.jpg`. 기존 8081 서버를 재사용했다.
+- M-2 빈 검색어 추천을 유형 드라마+장르 드라마+한국에서 열어 최종 표시 수 **12개**, 실제 카드 12개 일치와 유일무이 로맨스·너에게 다이브·날아올라라 나비·공감세포 등 표시를 확인했다. 예능·일본 드라마 카드 혼입은 관찰되지 않았다. 증빙 `/tmp/scenenote-search-drama-recommendations-fixed.jpg`. 구응답에서 제거된 후보를 보충 목표에 세지 않는 경로는 `recommendationVisibility`·추천 훅의 공통 필터 사용처 및 기존 전체 자동 테스트로 확인했으며, 운영 서버에 인위적인 혼입 후보를 주입하지는 않았다. 검증 뒤 필터는 원래의 모든 유형·모든 장르·일본+한국·내 목록 전체·전체 연도·최신순으로 복원했고 검색어를 비웠다. 검색 실행으로 최근 검색어는 갱신됐으며 라이브러리/좋아하는 인물 등록 버튼은 누르지 않았다.
+- UI 스타일·접근성·Alert 변경은 0줄이다. M-3의 375/768/1440별 수동 조작 전체와 M-4 iOS/Android 실기기는 실행하지 않았다(로컬 웹 데스크톱에서 로직 확인, 네이티브 실행 환경 없음). 영화·애니·국가만·복수 장르/국가의 보호는 자동 테스트로 확인했다. 공개 메타데이터가 모호하거나 잘못된 모든 작품의 분류를 보장하지 않는다.
+- 앱 공통 판정은 구응답에도 적용된다. 서버 후보 수집·원어/장르 전달 소스를 운영에 반영하려면 별도 `search-content`·`personalized-recommendations` 배포가 필요하다. 이번 작업에서 운영 배포·DB·마이그레이션·개인 기록·secret·의존성·커밋/푸시는 변경하지 않았다. 구 서버/영속 캐시에 비드라마 근거 자체가 없으면 앱이 복원할 수 없다는 한계가 있다.
+
+## 라이브러리 한국 드라마 필터 혼입 정정 (docs/81, 2026-11-19)
+
+- 사용자 신고와 실제 8081에서 `한국 드라마 + 완료` 303개에 가스인간이 포함됨을 재현했다. 공개 콘텐츠 메타데이터 SELECT에서 `가스인간/ガス人間`, `로맨틱 어나니머스/匿名の恋人たち`, `K-연하남 주의보/韓ドラみたいな彼と私`가 `kdrama`로 저장되고, 나 혼자 산다 등 예능도 Reality·Talk인데 `kdrama`임을 확인했다. 원인은 국가 KR 우선의 서버 분류와 저장 유형을 그대로 믿던 앱 분류다. 국가·원어 필드는 현재 라이브러리 데이터에 없고 기존 콘텐츠 빠른 등록 경로도 과거 유형을 유지한다.
+- `src/utils/libraryFilters.ts`의 공용 `libraryContentCategory`만 보정했다. 영화·애니 보존 → 명시 비드라마 장르의 TV는 기타 → TMDB kdrama의 일본어 원제(실제 가나, 한글 없음)는 일본 드라마 → 기존 유형/해외 드라마 규칙 순서다. 이 분류를 쓰는 카드 라벨·프로필 통계도 함께 일치한다. 원제·출처 누락/모호함·한글 포함/한자만·수동 항목은 기존 지역 유형을 보존하고 번역 제목이나 출연자 이름으로 국적을 추측하지 않는다. 전체 목록·시청 기록은 유지한다. 국가 provenance를 추가하는 작업은 이 범위 밖이며 원제 기반 규칙은 한일 합작을 일본 드라마로 표시할 수 있다.
+- 기존 테스트를 유지하고 `libraryFilters.test.ts`·`profileStats.test.ts`에 신규 6개 추가. 초기 회귀 5개 추가 시 관련 28개 중 25 통과·3 실패(일본 원제/비드라마/통계), 수정 후 결합 필터 회귀 포함 29/29 통과. 상태·검색 공백·장르 OR·평점·연도 조합도 확인했다. red 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ctq582vg/test.log`; green `scenenote-verify-qeb6fhok/test.log`(같은 임시 상위 경로).
+- `scenenote-verify`와 명령 한정 Node 24로 전체 **1855/1855**, typecheck·lint 통과(exit 0). 최종 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-n42kg7cq/{test.log,typecheck.log,lint.log,summary.json}`. diff 공백 검사 통과. 공유 함수 사용처(라이브러리 필터·목록/갤러리 라벨·프로필 통계)를 검색하고 자동 회귀로 검사했다.
+- 실제 로그인 웹: 가스인간 검색 후 한국 드라마에서 빈 결과, 일본 드라마에서 `일본 드라마` 카드/완료 상태 유지 확인. 나 혼자 산다도 한국에서 빈 결과, 기타에서 `기타`·리얼리티 카드 유지 확인. 검색어를 비우고 원래 한국 드라마+완료+갤러리로 복원했으며 결과 267개. 증빙 `/tmp/scenenote-library-jdrama-fixed.jpg`, `/tmp/scenenote-library-variety-fixed.jpg`. 기존 8081 listener가 없어 지정 명령으로 같은 포트 서버를 시작했다. 사용자 감상 기록·DB·Edge 배포·secret·의존성·커밋/푸시 변경 없음.
+- 이번 변경은 순수 분류 로직이며 화면 스타일/접근성 속성은 수정하지 않았다. 수동 웹 확인은 데스크톱이며 iOS/Android 실기기·큰 글자·폭별 UI 재검증·실제 프로필 패널 수동 확인은 실행하지 않았다. 로맨틱 어나니머스·K-연하남 주의보는 저장 메타데이터와 자동 회귀로 확인했고 실제 해당 카드 수동 확인은 별도로 남는다. 문서81의 수동 표에 대응한다.
+
+## 인기 추천 잔여 코드 삭제·제외 해제 버튼 이름 (docs/80, 2026-11-19)
+
+상태: **구현·웹 화면 확인(2026-11-19, Claude), iOS 미확인.** [80](80_popular_recommendation_leftovers_and_exclusion_label_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. D-1~D-5 변경 없음. 기존 미커밋 작업을 명세의 삭제 대상 외 보존했다. 시작 git 상태·원문은 `/tmp/scenenote-80-start-{status.txt,snapshot.json}`, 보호할 서버 파일은 `/tmp/scenenote-80-server-hashes.json`에 기록했다. `scenenote-verify`와 명령에만 적용한 Node 24로 검증했다. 브라우저·시청 앱·개발 서버·계정 저장값·DB/Edge/secret·의존성·커밋/푸시는 조작하지 않았다. smoke 스크립트는 실행하지 않았다.
+
+### 웹 실제 화면 확인 (2026-11-19, Claude)
+
+- 코드 검사: `npm test` 1,855개 통과(docs/80 목표 1,849개 + 같은 날 docs/81의 6개), `typecheck`·`lint` 통과. 지운 3개 파일 없음, `app`·`src`·`scripts`의 남은 참조는 80 가드 테스트 자신뿐, `supabase/functions/` diff 0줄, 새 타입 파일은 `import type`만 가진다.
+- 이미 떠 있던 8081 서버(Codex가 시작)를 그대로 썼다. `EXTENDED_FEATURES_ENABLED`를 잠시 `true`로 바꿔 확인했고 확인 후 `false`로 되돌렸다. 검증용 항목 2개를 `localStorage`에 넣었다가 지웠다(원래 값은 비어 있었다).
+
+| ID | 결과 |
+|----|------|
+| M-1 | ✓ 해제 버튼 `aria-label`이 "검증용 작품 B 제외 해제"·"검증용 작품 A 제외 해제"로 서로 다르다. "전체 해제"는 `aria-label` 없이 글자 그대로 |
+| M-2 | ✓ A의 해제를 누르면 "1개", 저장 keys `["test:v80b"]`. 홈·검색·프로필이 정상으로 열리고 콘솔 오류 0건 |
+| M-3 | 미실행(iOS) |
+
+### 1. STEP 1 실제 실패 출력(요약)
+
+새 테스트 8개만 먼저 썼다. **1,853개 중 1,847개 통과·6개 실패**이며 실패는 정확히 T-1~T-5·T-7이었다. 보호 테스트 T-6·T-8은 통과했다. 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-58ypfzgu/test.log`, 전체 실패 출력 `/tmp/scenenote-80-step1-proof.json`.
+
+실제 실패 이름과 오류 첫 줄:
+
+```text
+✖ 80 T-1: unused client popular recommendation files are removed (3.874292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+✖ 80 T-2: no source references the removed client popular code (46.213833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+✖ 80 T-3: popular recommendation types live in a type-only module (0.231125ms)
+  AssertionError [ERR_ASSERTION]: Popular recommendation type module must exist
+✖ 80 T-4: the smoke script imports the response type from the types module (6.279959ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+✖ 80 T-5: the unused popular query key is removed (0.28725ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+✖ 80 T-7: each exclusion remove button names the title (9.617625ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+```
+
+- T-1: 삭제 대상 3파일이 존재해 실제 true·기대 false.
+- T-2: 기존 guard의 services 문자열, smoke 타입 import와 서비스 내부 실행 코드 참조가 남아 실제 목록이 비어 있지 않음.
+- T-3: 새 타입 모듈이 아직 없으므로 존재 assertion 실패.
+- T-4: smoke가 여전히 services 경로를 가져오므로 새 types import assertion 실패.
+- T-5: query 파일에 기존 `"popular"`가 있으므로 실제 true·기대 false.
+- T-7: 대상 버튼은 정확히 1개지만 지정 accessibilityLabel이 아직 없어 assertion 실패.
+
+STEP 2에서는 타입/참조를 옮기고 3파일·쿼리 키를 지운 뒤 **1,848개 통과·T-7만 실패**, typecheck도 통과했다. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-7k9laqtg/test.log`, `/tmp/scenenote-80-step2-proof.json`. STEP 3에서 라벨 한 줄을 더한 뒤 8개가 모두 통과했다. 단언 완화는 없었다.
+
+### 2. npm test before / STEP 1 / STEP 2 / after
+
+| 단계 | 전체 | 통과 | 실패 |
+|------|------|------|------|
+| 실제 시작 기준선 | 1,845 | 1,845 | 0 |
+| STEP 1 테스트 추가 | 1,853 | 1,847 | 6 |
+| STEP 2 클라이언트 정리 | 1,849 | 1,848 | 1(T-7) |
+| STEP 3 수정 후 최종 | 1,849 | 1,849 | 0 |
+
+시작 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-6wxfkshf/test.log`; 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ycy7e6yf/test.log`. 최종 skip 0. 새 테스트는 8개이며 삭제한 기존 테스트는 `src/utils/popularRanking.test.ts`의 아래 4개뿐이다. 랭킹 구현은 서버 복사본과 byte-identical이었고, 같은 4개 테스트가 서버 파일에서 계속 실행된다(테스트 파일은 import의 .ts 확장자와 describe 이름만 다름).
+
+- `keeps last month's most popular work above this month's weakest work`
+- `boosts a recent release above an older work with the same popularity`
+- `keeps December releases eligible across the January boundary`
+- `allows year-only rows when their year overlaps the rolling window`
+
+기존 테스트의 나머지 변경은 docs/80 D-3이 명시한 78 T-4의 타입 경로 문자열 한 곳뿐이다.
+
+### 3. typecheck / lint 결과와 서버 보존
+
+- 최종 `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ycy7e6yf/{typecheck.log,lint.log,summary.json}`. STEP 2 typecheck도 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-7k9laqtg/typecheck.log`에서 통과했다.
+- `supabase/functions/` 전체 **108파일의 경로 집합과 SHA-256이 시작 때와 동일**하다. 추가·삭제·수정 0이며 해당 경로 git diff도 0줄이다. 서버 함수와 서버 랭킹/테스트는 그대로다.
+- 새 타입 파일은 원래 타입 선언 3개를 글자 그대로 옮겼고 `import type { SearchResult } from "./content";` 외 import나 실행 코드가 없다. `/tmp/scenenote-80-type-contract.txt`, `-preservation-proof.json`.
+- UI-13.2 이번 변경 줄의 토큰·Alert 위반 0줄. 화면은 라벨 한 줄만 추가돼 역할·클릭·스타일·보이는 글자·전체 해제 버튼은 원문 그대로다. `git diff --check` 통과.
+- 추가 독립 읽기 전용 검토에서도 타입 원문·지정 수정·서버 파일 보존을 확인했다. 웹 빌드·원격 smoke·배포·DB 명령은 실행하지 않았다.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 순수 Node 모듈을 쓰고, 화면 검사는 기존 findJsxOpeningTags 함수로 ownText만 읽는다. 테스트에서 RN·Supabase·TSX를 import하지 않는다.
+
+| ID | 이름 | 파일 |
+|----|------|------|
+| T-1 | 80 T-1: unused client popular recommendation files are removed | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-2 | 80 T-2: no source references the removed client popular code | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-3 | 80 T-3: popular recommendation types live in a type-only module | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-4 | 80 T-4: the smoke script imports the response type from the types module | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-5 | 80 T-5: the unused popular query key is removed | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-6 | 80 T-6: server popular recommendation code is kept | `scripts/popularRecommendationsCleanup.test.ts` |
+| T-7 | 80 T-7: each exclusion remove button names the title | `scripts/excludedRecommendationsA11y.test.ts` |
+| T-8 | 80 T-8: exclusion remove button keeps role and handler | `scripts/excludedRecommendationsA11y.test.ts` |
+
+T-2는 app/src/scripts의 모든 TS/TSX를 검사하되 자기 파일만 제외한다. T-6은 서버 보호 검사다. T-7/T-8의 대상 태그는 removeExclusion(item.key)를 포함하는 Pressable 정확히 1개다.
+
+### 5. 지정된 4파일의 diff / 삭제·타입 이동
+
+**`src/lib/query.ts`**
+
+```diff
+--- before/src/lib/query.ts
++++ after/src/lib/query.ts
+@@ -29,7 +29,6 @@
+       ["search", "similar", "similarity-snapshot-v2", userId, librarySignature, anchorKey, focus, mediaType, sort, filters] as const
+   },
+   recommendations: {
+-    popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
+     personalized: (userId: string, mediaType: MediaTypeFilter, exclusionSignature = "[[],[]]", discoverySignature = "[[],[],[]]") =>
+       [
+         ...createRecommendationFeedKey(userId, mediaType, exclusionSignature, discoverySignature),
+```
+
+**`scripts/smoke-edge-functions.ts`**
+
+```diff
+--- before/scripts/smoke-edge-functions.ts
++++ after/scripts/smoke-edge-functions.ts
+@@ -6,7 +6,7 @@
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+ import type { SearchContentResponse } from "../src/types/content";
+-import type { PopularRecommendationsResponse } from "../src/services/popularRecommendations";
++import type { PopularRecommendationsResponse } from "../src/types/popularRecommendations";
+ import type { Database } from "../src/types/database";
+
+ loadEnvFile(".env");
+```
+
+**`scripts/alertUsageGuard.test.ts`**
+
+```diff
+--- before/scripts/alertUsageGuard.test.ts
++++ after/scripts/alertUsageGuard.test.ts
+@@ -58,5 +58,5 @@
+       return /PopularRecommendationSection|usePopularRecommendations/.test(source) ? [file] : [];
+     });
+   assert.deepEqual(references, []);
+-  assert.ok(readFileSync(join(root, "scripts/smoke-edge-functions.ts"), "utf8").includes("services/popularRecommendations"));
++  assert.ok(readFileSync(join(root, "scripts/smoke-edge-functions.ts"), "utf8").includes("types/popularRecommendations"));
+ });
+```
+
+**`app/settings/excluded-recommendations.tsx`**
+
+```diff
+--- before/app/settings/excluded-recommendations.tsx
++++ after/app/settings/excluded-recommendations.tsx
+@@ -64,6 +64,7 @@
+                 </Text>
+               </View>
+               <Pressable
++                accessibilityLabel={`${item.title} 제외 해제`}
+                 accessibilityRole="button"
+                 onPress={() => removeExclusion(item.key)}
+                 style={styles.removeButton}
+```
+
+- 새 파일: `src/types/popularRecommendations.ts`. RecommendationCategory·PopularRecommendation·PopularRecommendationsResponse의 필드는 변경하지 않았다.
+- 삭제: `src/services/popularRecommendations.ts`, `src/utils/popularRanking.ts`, `src/utils/popularRanking.test.ts`. 삭제 전 원문은 시작 snapshot에 보존했다.
+- **docs/78 D-7(서비스 보존)은 docs/80이 대체한다.** 과거 명세 본문은 고치지 않았다. 78 T-4의 이름·다른 단언·허용 목록은 그대로다.
+- smoke의 popular-recommendations 호출과 다른 점검 코드는 그대로다. 기존 캐시 저장값을 지우는 코드도 추가하지 않았다.
+- docs/README의 80번 상태는 **구현, 화면 미확인**으로 갱신했다. 이번 범위는 명세의 12파일(삭제 3개 포함)뿐이다.
+
+### 6. 수동 확인 M-1~M-3 / 기능 플래그
+
+| ID | 플랫폼 | 결과·미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 8081 | **미실행.** 브라우저·실제 저장값을 조작하지 않았다. 소스상 라벨 형식과 전체 해제 원문은 확인했지만 실제 aria-label 속성과 화면 낭독은 미확인이다. |
+| M-2 | 웹 8081 | **미실행.** 실제 항목 삭제·화면 탐색·콘솔 확인을 실행하지 않았다. onPress와 화면 원형 보존, 전체 테스트/타입 검사는 통과했지만 실제 탐색은 미확인이다. |
+| M-3 | iOS 세로 | **미실행.** 기기·시뮬레이터·VoiceOver를 실행하지 않았다. 실제 “<제목> 제외 해제, 버튼” 낭독은 미확인이다. |
+
+`EXTENDED_FEATURES_ENABLED`는 **true로 바꾼 적 없이 false 그대로**다. 되돌릴 변경이 없으며 해당 파일 원문은 동일하다. Android 실제 확인도 미실행이다. 사용자 시청 환경을 보존했고 개발 서버를 재시작하지 않았다.
+
+### 7. D-1~D-5 문제 여부
+
+**변경 필요사항·충돌 없음.** D-1의 서버 불변·smoke 호출 유지, D-2의 타입 원문 이전, D-3의 기존 guard 문자열 한 곳 변경, D-4의 지정 라벨과 다른 화면 코드 보존, D-5의 순수 소스 검사를 준수했다. 타입 단언·패키지·런타임 설정 변경은 없다. docs/76~79의 기존 변경도 이번 명세가 지정한 삭제/경로 갱신 외 보존했다.
+
+### 8. 사람이 할 후속 작업 (Edge Function 존폐·iOS)
+
+- 실제 항목을 건드리지 않는 검증용 환경에서 서로 다른 제목 2개로 M-1/M-2를 확인한다. 기존 사용자 항목이 있으면 삭제하지 말고 미실행으로 남긴다. 확장 플래그를 임시 true로 바꾼다면 8081 서버를 재시작하고, 확인 후 검증 항목을 지우고 false로 복구한다.
+- iOS VoiceOver로 M-3의 작품별 버튼 이름을 확인한다.
+- **popular-recommendations Edge Function과 smoke 점검의 존폐는 사람이 판단한다.** 이번에는 둘 다 보존했고 배포하지 않았다.
+- 로컬 제외 목록 화면을 유지할지 서버 설정 화면으로 전환할지는 docs/79의 제품 판단으로 남는다. 같은 제목 항목에 구분 정보를 덧붙이는 일도 범위 밖이다.
+- 기존 AsyncStorage 인기 추천 캐시 키는 읽는 코드가 제거됐으므로 그대로 두며 별도 정리 코드는 넣지 않았다. DB migration·Edge 배포·커밋·푸시는 실행하지 않았다.
+
+
+## 추천 제외 전체 해제 정정 (docs/79, 2026-11-19)
+
+상태: **구현·코드 검사 통과, 웹 화면 확인(2026-11-19, 아래 "웹 실제 화면 확인"). iOS M-3 미확인.** [79](79_recommendation_exclusion_clear_fix_spec.md) 전체와 14장 STEP 1→2→3을 따랐다. D-1~D-5 변경 없음. 시작 경로·git 상태와 기존 미커밋 원문은 `/tmp/scenenote-79-start-{status.txt,snapshot.json}`에 기록했다. `scenenote-verify` 스킬과 명령에만 적용한 Node 24를 사용했다. docs/76~78을 다시 구현하지 않았으며 기존 변경을 보존했다. 브라우저·시청 앱·개발 서버·계정 저장값·DB/Edge/secret·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 T-1·T-2 실제 실패
+
+액션 3개와 타입을 순수 모듈로 옮기고 시간만 주입 가능하게 바꿨다. 이때 **clearExclusions는 원래처럼 객체만 반환하고 set을 호출하지 않는 결함을 그대로 유지**했다. 스토어에 모듈을 연결하고 테스트 6개를 쓴 뒤 전체 검사를 실행했다.
+
+**1,843개 통과·T-1/T-2만 실패**, T-3~T-6은 통과했다. T-1은 a·b 항목이 그대로 남았고, T-2는 set 호출이 기대 1회 대신 실제 **0회**였다. 모듈이 없는 오류가 아닌 실제 결함의 실패다. 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-z0732tk0/test.log`, 원본 `/tmp/scenenote-79-red-proof.json`. 수정 전 추출 모듈·스토어는 `/tmp/scenenote-79-step1-{actions,store}.ts`에 보존했다.
+
+```text
+✖ 79 T-1: clearExclusions empties exclusions and keys (2.602791ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + [
+  +   {
+  +     excludedAt: '2026-11-19T00:00:00.000Z',
+  +     key: 'a',
+  +     title: '작품 a'
+  +   },
+  +   {
+  +     excludedAt: '2026-11-19T00:00:00.000Z',
+  +     key: 'b',
+  +     title: '작품 b'
+  +   }
+  + ]
+  - []
+
+      at TestContext.<anonymous> (/Users/youngilkim/SceneNote/src/utils/recommendationExclusionActions.test.ts:35:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { key: 'a', title: '작품 a', excludedAt: '2026-11-19T00:00:00.000Z' }, { key: 'b', title: '작품 b', excludedAt: '2026-11-19T00:00:00.000Z' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+```
+
+```text
+✖ 79 T-2: clearExclusions updates the store exactly once (0.252209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (/Users/youngilkim/SceneNote/src/utils/recommendationExclusionActions.test.ts:42:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+```
+
+STEP 2에서는 순수 모듈의 clearExclusions 한 곳만 `set({ excludedRecommendations: [], excludedRecommendationKeys: [] })`로 바꿨다. STEP 1 이후 테스트와 스토어 파일은 다시 고치지 않았다.
+
+### 2. npm test before / STEP 1 / after
+
+| 단계 | 통과 | 실패 |
+|------|------|------|
+| 실제 시작 기준선 | 1,839 | 0 |
+| STEP 1 결함 보존 추출 | 1,843 | 2(T-1·T-2) |
+| STEP 2 수정 후 최종 | 1,845 | 0 |
+
+- 기존 테스트·단언 변경 0, 신규 6개, 최종 skip 0.
+- 시작 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-560jlcus/test.log`.
+- STEP 1 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-z0732tk0/test.log`.
+- 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-yxugyyuo/test.log`.
+
+### 3. typecheck / lint 결과
+
+- `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-yxugyyuo/{typecheck.log,lint.log,summary.json}`.
+- 순수 모듈은 import가 0개다. RN·AsyncStorage·zustand 런타임/타입을 가져오지 않고 필요한 타입을 직접 정의했다. 테스트는 Node의 it/assert와 순수 모듈만 import한다.
+- UI-13.2의 이번 변경 줄 기준 토큰·Alert 위반 0줄. `git diff --check` 통과. 웹 빌드·서버 재시작·원격 검증은 실행하지 않았다.
+- 원문 비교 및 독립 읽기 전용 검토에서 추가/개별 해제 본문은 들여쓰기와 `new Date()`→`now()` 외에 동일함을 확인했다. 저장 키·version 2·persist options·migrate/normalize 전체와 canUsePersistentStorage/noopStorage는 byte-identical이다. `/tmp/scenenote-79-preservation-proof.json`.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `src/utils/recommendationExclusionActions.test.ts`에 있다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 79 T-1: clearExclusions empties exclusions and keys |
+| T-2 | 79 T-2: clearExclusions updates the store exactly once |
+| T-3 | 79 T-3: excludeRecommendation appends with default title, injected time and synced keys |
+| T-4 | 79 T-4: excludeRecommendation ignores a duplicate key |
+| T-5 | 79 T-5: removeExclusion removes only the given key and keeps order |
+| T-6 | 79 T-6: clearExclusions on an empty state stays empty |
+
+가짜 set은 calls에 먼저 기록하고, 함수 updater면 현재 상태에 적용한 반환값을, 객체면 그 값을 얕게 병합한다. 시각은 `2026-11-19T00:00:00.000Z`로 고정한다. 테스트가 실제 계정·저장소를 읽거나 쓰지는 않는다.
+
+### 5. recommendationUiStore.ts diff
+
+기존 액션 본문과 RecommendationExclusion 타입은 새 순수 모듈로 옮겼다. 스토어는 default now를 쓰도록 set만 넘기며, RecommendationExclusion 타입을 기존 경로에서 계속 재내보낸다. 상태는 기존 slice/actions와 같은 모양이다.
+
+```diff
+--- before/src/stores/recommendationUiStore.ts
++++ after/src/stores/recommendationUiStore.ts
+@@ -3,19 +3,16 @@
+ import { create } from "zustand";
+ import { createJSONStorage, persist } from "zustand/middleware";
+
+-export interface RecommendationExclusion {
+-  key: string;
+-  title: string;
+-  excludedAt: string;
+-}
++import {
++  createRecommendationExclusionActions,
++  type RecommendationExclusion,
++  type RecommendationExclusionActions,
++  type RecommendationExclusionSlice
++} from "@/utils/recommendationExclusionActions";
+
+-interface RecommendationUiState {
+-  excludedRecommendations: RecommendationExclusion[];
+-  excludedRecommendationKeys: string[];
+-  excludeRecommendation: (key: string, title?: string) => void;
+-  removeExclusion: (key: string) => void;
+-  clearExclusions: () => void;
+-}
++export type { RecommendationExclusion } from "@/utils/recommendationExclusionActions";
++
++type RecommendationUiState = RecommendationExclusionSlice & RecommendationExclusionActions;
+
+ const canUsePersistentStorage = Platform.OS !== "web" || typeof window !== "undefined";
+ const noopStorage = {
+@@ -29,36 +26,7 @@
+     (set) => ({
+       excludedRecommendations: [],
+       excludedRecommendationKeys: [],
+-      excludeRecommendation: (key, title = "제목 없는 작품") =>
+-        set((state) => {
+-          if (state.excludedRecommendations.some((item) => item.key === key)) return {};
+-
+-          const excludedRecommendations = [
+-            ...state.excludedRecommendations,
+-            {
+-              key,
+-              title,
+-              excludedAt: new Date().toISOString()
+-            }
+-          ];
+-
+-          return {
+-            excludedRecommendations,
+-            excludedRecommendationKeys: excludedRecommendations.map((item) => item.key)
+-          };
+-        }),
+-      removeExclusion: (key) =>
+-        set((state) => {
+-          const excludedRecommendations = state.excludedRecommendations.filter((item) => item.key !== key);
+-          return {
+-            excludedRecommendations,
+-            excludedRecommendationKeys: excludedRecommendations.map((item) => item.key)
+-          };
+-        }),
+-      clearExclusions: () => ({
+-        excludedRecommendations: [],
+-        excludedRecommendationKeys: []
+-      })
++      ...createRecommendationExclusionActions(set)
+     }),
+     {
+       name: "scenenote-recommendation-ui",
+```
+
+전체 diff는 `/tmp/scenenote-79-store.diff`에도 있다. 순수 모듈의 STEP 1→2 차이는 clearExclusions 한 곳뿐이다. 저장 키/버전/마이그레이션/스토리지 가드·정규화·화면 원문은 변경하지 않았다.
+
+### 6. 수동 확인 M-1~M-3 / 기능 플래그
+
+| ID | 플랫폼 | 결과·미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 8081 | **미실행.** 브라우저·실제 localStorage 항목을 조작하지 않았다. 메모리 가짜 set에서 두 배열이 비는 것은 확인했지만 실제 빈 상태/프로필 개수·새로고침 뒤 저장 유지는 미확인이다. |
+| M-2 | 웹 8081 | **미실행.** 실제 항목 삭제나 확인/취소를 실행하지 않았다. 순수 모듈의 개별 해제·순서·keys 동기화는 통과했지만 화면 확인은 하지 않았다. |
+| M-3 | iOS 세로 | **미실행.** 기기·시뮬레이터·AsyncStorage를 조작하지 않았다. 실제 앱 재실행 후 저장 유지 여부는 미확인이다. |
+
+`EXTENDED_FEATURES_ENABLED`는 **true로 바꾸지 않았고 false 그대로**다. 되돌릴 변경이 없으며 화면/feature flag 원문도 그대로다. Android 실제 확인도 미실행이다. 사용자 시청 환경을 보존했다.
+
+### 7. D-1~D-5 문제 여부
+
+**변경 필요사항·충돌 없음.** D-1의 RN 없는 액션 모듈, D-2의 결함 보존 추출 후 수정 순서, D-3의 상태/저장 스키마·타입 재내보내기, D-4의 선택적 시간 주입 및 default now, D-5의 화면 불변을 준수했다. 수정은 명세의 5파일에 한정한다. 기존 docs/76~78과 다른 스토어·서버 추천 제외 설정을 건드리지 않았다.
+
+### 8. 사람이 할 후속 작업 (13장 포함)
+
+- 검증용 항목만 있는 환경에서 M-1/M-2를 확인한다. 기존 사용자 실제 항목이 있으면 전체 해제로 지우지 말고 미실행으로 남긴다. 확장 플래그를 잠시 true로 바꾼다면 8081 서버를 재시작한 뒤 확인하고, 종료 후 false로 복구한다. 이번 세션은 서버/플래그를 변경하지 않았다.
+- iOS에서 같은 동작과 앱 재실행 후 AsyncStorage의 빈 목록 유지를 확인한다(M-3).
+- 현재 로컬 excludeRecommendation 호출부는 없고 이 화면은 예전 저장 항목만 다룬다. 확장 기능을 열 때 로컬 제외 목록 화면을 유지할지 서버 recommendationPreferences 화면으로 바꿀지는 제품 판단이 필요하다(13장).
+- DB migration·Edge 배포는 이번 변경에 필요 없고 실행하지 않았다. 커밋·푸시도 하지 않았다.
+
+
+### 웹 실제 화면 확인 (Claude, 2026-11-19)
+
+재실행 결과: `npm test` 1,845개 통과(79 T-1~T-6 포함), typecheck·lint 통과. 순수 모듈에 RN·AsyncStorage·zustand import가 없고, 스토어 diff는 인터페이스 이동·타입 재내보내기·액션 펼치기뿐이다(저장 키·버전·마이그레이션은 그대로). 로컬에서 `EXTENDED_FEATURES_ENABLED`를 잠시 `true`로 바꾸고 8081을 재시작해 확인한 뒤 `false`로 되돌렸다. 검증용 항목 3개를 `localStorage`에 넣어 확인하고 키를 지웠다(원래 값 `null`, 사용자 데이터 없음).
+
+| ID | 결과 |
+|----|------|
+| M-1 | ✓ "전체 해제" → 확인 시 "0개"와 빈 상태가 보이고, 저장값이 `{"excludedRecommendations":[],"excludedRecommendationKeys":[]}`가 된다. 새로고침 뒤에도 0개다 |
+| M-2 | ✓ 3개 중 B의 개별 "해제"를 누르면 A·C만 남는다(keys `["test:a79","test:c79"]`). 전체 해제를 취소하면 2개가 유지된다. 빈 목록에서 전체 해제를 누르면 확인 창이 뜨지 않는다(E-2) |
+| M-3 | 미실행(iOS) |
+
+참고(별도 개선 후보): 개별 "해제" 버튼은 모두 접근성 이름이 "해제"뿐이라, 화면 낭독기로는 어느 작품의 버튼인지 구분할 수 없다. 확장 기능을 켤 때 `accessibilityLabel={`${item.title} 제외 해제`}` 같은 라벨이 필요하다. 13장의 제품 판단(로컬 목록 화면 유지 여부)과 함께 정한다.
+
+## 웹 Alert 정리·미사용 추천 섹션 제거 (docs/78, 2026-11-19)
+
+상태: **구현·코드 검사 통과, 웹 화면 일부 확인(2026-11-19, 아래 "웹 실제 화면 확인"). 별도 결함 1건 발견(`clearExclusions`). iOS M-5 미확인.** 정정된 [78](78_web_alert_and_dead_code_cleanup_spec.md) 14장과 10장 T-4를 적용했다. D-1~D-7 변경 없음. 명세가 지정한 두 미사용 파일 삭제 외에는 docs/74~77과 사용자의 기존 미커밋 작업을 보존했다. 작업 시작/재개 상태는 `/tmp/scenenote-78-start-{status.txt,snapshot.json}`, `/tmp/scenenote-78-resume-{status.txt,snapshot.json}`에 기록했다. `scenenote-verify`와 명령에만 적용한 Node 24로 검증했다. 브라우저·시청 앱·개발 서버·운영 DB/Edge/secret·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 T-1·T-3 실제 실패 / 단계별 검증
+
+사용자 정정(2026-11-19)대로 기존 테스트의 **T-4 필터에 REMOVED_FILES 두 경로만 추가**했다. T-1의 허용 목록 3곳, 검사식, 기존 단언은 바꾸지 않았다. 정정 후 전체 테스트는 **1,839개 중 1,837개 통과·T-1/T-3만 실패**, T-2/T-4는 통과했다. T-1 실제 값은 15회·8파일이다. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-950wpcgx/test.log`, 원본 `/tmp/scenenote-78-corrected-step1-proof.json`.
+
+T-1 실제 출력:
+
+```text
+✖ 78 T-1: Alert.alert appears only in the documented allowlist (18.970542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      [
+        'app/(tabs)/pins.tsx',
+  +     2
+  +   ],
+  +   [
+  +     'app/(tabs)/profile.tsx',
+        1
+      ],
+      [
+  +     'app/library/import.tsx',
+  +     4
+  +   ],
+  +   [
+  +     'app/library/photo-import.tsx',
+  +     4
+  +   ],
+  +   [
+  +     'app/settings/excluded-recommendations.tsx',
+  +     1
+  +   ],
+  +   [
+  +     'src/components/content/PopularRecommendationSection.tsx',
+  +     1
+  +   ],
+  +   [
+        'src/utils/confirmDestructive.ts',
+        1
+      ],
+      [
+        'src/utils/confirmDiscard.ts',
+
+      at TestContext.<anonymous> (/Users/youngilkim/SceneNote/scripts/alertUsageGuard.test.ts:33:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ [ 'app/(tabs)/pins.tsx', 2 ], [ 'app/(tabs)/profile.tsx', 1 ], [ 'app/library/import.tsx', 4 ], [ 'app/library/photo-import.tsx', 4 ], [ 'app/settings/excluded-recommendations.tsx', 1 ], [ 'src/components/content/PopularRecommendationSection.tsx', 1 ], [ 'src/utils/confirmDestructive.ts', 1 ], [ 'src/utils/confirmDiscard.ts', 1 ] ],
+    expected: [ [ 'app/(tabs)/pins.tsx', 1 ], [ 'src/utils/confirmDestructive.ts', 1 ], [ 'src/utils/confirmDiscard.ts', 1 ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+```
+
+T-3 실제 출력:
+
+```text
+✖ 78 T-3: the unused popular recommendation section and hook are removed (0.367167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      [
+        'src/components/content/PopularRecommendationSection.tsx',
+  +     true
+  -     false
+      ],
+      [
+        'src/hooks/usePopularRecommendations.ts',
+  +     true
+  -     false
+      ]
+    ]
+
+      at TestContext.<anonymous> (/Users/youngilkim/SceneNote/scripts/alertUsageGuard.test.ts:47:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ [ 'src/components/content/PopularRecommendationSection.tsx', true ], [ 'src/hooks/usePopularRecommendations.ts', true ] ],
+    expected: [ [ 'src/components/content/PopularRecommendationSection.tsx', false ], [ 'src/hooks/usePopularRecommendations.ts', false ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+```
+
+STEP 2의 5개 화면 교체 뒤에도 **1,837개 통과·T-1/T-3 실패**였으며, T-1에는 허용 목록 외 `src/components/content/PopularRecommendationSection.tsx`의 1회만 남았다. 정정된 기대와 같다. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-z5zud10h/test.log`, `/tmp/scenenote-78-step2-proof.json` 및 `-step2-alerts.json`.
+
+STEP 3에서 컴포넌트와 전용 훅을 삭제한 뒤 T-1~T-4가 모두 통과했다.
+
+### 2. npm test before / after
+
+- 실제 시작 기준선 **1,835/1,835 → 최종 1,839/1,839**, 신규 4개·실패/skip 0. 기존 테스트 파일·단언은 변경하지 않았다. 이번 새 guard 파일의 T-4 제외 목록만 정정 지시대로 바꿨다.
+- 시작 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-rhyhdn_8/test.log`.
+- 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ws0xfy3_/test.log`.
+- 허용된 `Alert.alert`는 `app/(tabs)/pins.tsx`, `src/utils/confirmDestructive.ts`, `src/utils/confirmDiscard.ts` 각 1회로 **총 3회**다. 처음 15회에서 12회가 제거됐다(화면 호출부 11회 교체/삭제와 미사용 컴포넌트 1회 삭제).
+
+### 3. typecheck / lint 결과와 원문 보존
+
+- `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ws0xfy3_/{typecheck.log,lint.log,summary.json}`.
+- 별도 읽기 전용 검증은 resume snapshot에 6.2의 지정 교체를 적용한 기대 AST와 현재 5개 화면의 본문 AST가 동일함을 확인했다. 허용된 import 추가/제거 및 새 `addToast` selector 3개도 각각 검사했다. 인라인 오류 상태·스타일·role·기타 콜백·hasItems·console.error·스포일러 3지선다·기존 플랫폼 분기가 보존됐다. `/tmp/scenenote-78-preservation-audit{.cjs,-report.json}`.
+- UI-13.2 **이번에 추가·변경한 화면 줄의 토큰/Alert 위반 0줄**. 5개 화면의 기존 토큰 위반 74줄은 범위 밖으로 보존했다. `/tmp/scenenote-78-ui-added-lines.json`, `-preexisting-tokens.json`.
+- `git diff --check` 통과. 웹 빌드·개발 서버·화면 검증은 이번에 실행하지 않았다.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `scripts/alertUsageGuard.test.ts`에 있고 순수 Node 모듈만 import한다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 78 T-1: Alert.alert appears only in the documented allowlist |
+| T-2 | 78 T-2: the pins Alert is reachable only after the web early return |
+| T-3 | 78 T-3: the unused popular recommendation section and hook are removed |
+| T-4 | 78 T-4: no source file references the removed section or hook while the smoke type import remains |
+
+T-1은 app/src의 비테스트 TS/TSX에서 문서의 정규식으로 위치별 호출 수까지 비교하고, T-2는 sharePin 내부 웹 조기 반환 뒤에 Alert가 있는지 확인한다. T-3은 삭제 대상 두 파일의 부재, T-4는 그 두 파일과 자기 테스트를 제외한 외부 참조 0개 및 smoke 타입 import 보존을 확인한다. 허용 목록을 늘리지 않았다.
+
+### 5. 6.2 표 각 행의 교체 결과 / 삭제 파일
+
+| 원래 위치 | 현재 위치 또는 삭제 지점 | 결과 |
+|-----------|--------------------------|------|
+| `app/(tabs)/pins.tsx:137` | `app/(tabs)/pins.tsx:140` | 공유 오류를 지정 fallback의 error 토스트로 교체. console.error·앱 전용 가드·3지선다 유지 |
+| `app/(tabs)/profile.tsx:193` | `app/(tabs)/profile.tsx:191 뒤에서 삭제` | 중복 Alert와 Alert import만 삭제. 기존 shareFeedback 인라인 오류 보존 |
+| `app/settings/excluded-recommendations.tsx:28` | `app/settings/excluded-recommendations.tsx:29` | hasItems 가드 후 confirmDestructive. 전체 해제/추천 제외 목록을 모두 비울까요?/해제/clearExclusions 그대로 |
+| `app/library/import.tsx:87` | `app/library/import.tsx:89 인라인 상태 뒤 Alert 삭제` | 중복 Alert만 삭제. setParseError 인라인 상태 보존 |
+| `app/library/import.tsx:93` | `app/library/import.tsx:95` | 엑셀 미선택 본문 그대로 info 토스트 |
+| `app/library/import.tsx:107` | `app/library/import.tsx:109` | 검사/등록에 따라 지정한 한국어 fallback을 쓰는 error 토스트 |
+| `app/library/import.tsx:114` | `app/library/import.tsx:116` | Dry-run 안내 본문 그대로 info 토스트 |
+| `app/library/photo-import.tsx:97` | `app/library/photo-import.tsx:99 인라인 상태 뒤 Alert 삭제` | 중복 Alert만 삭제. setErrorMessage 인라인 상태 보존 |
+| `app/library/photo-import.tsx:122` | `app/library/photo-import.tsx:124` | 검색 결과 미선택 본문 그대로 info 토스트 |
+| `app/library/photo-import.tsx:130` | `app/library/photo-import.tsx:132` | 기존 등록 완료 본문의 success 토스트 + 라이브러리 보기 액션(router.replace) |
+| `app/library/photo-import.tsx:135` | `app/library/photo-import.tsx:134` | 지정 한국어 fallback을 쓰는 error 토스트 |
+
+- 삭제: `src/components/content/PopularRecommendationSection.tsx`, `src/hooks/usePopularRecommendations.ts`. 삭제 전 원문은 시작/재개 snapshot에 보존돼 있다.
+- 유지: `src/services/popularRecommendations.ts`, `scripts/smoke-edge-functions.ts`의 타입 import, `src/lib/query.ts`, `supabase/functions/popular-recommendations/`와 기타 Edge/DB 경로.
+- 관련 외부 참조는 새 guard 테스트 말고 0개다. 교체된 토스트 오류는 6.2의 한국어 fallback을 정확히 사용하고, 기존 한국어 안내 본문은 그대로다. D-2가 지정한 인라인 오류 표현식도 그대로다.
+- UI-13.2에 명세 11장 문장 하나만 추가했고, docs/README 78번 상태는 **구현, 화면 미확인**으로 갱신했다. 자세한 위치는 `/tmp/scenenote-78-{app-report,import-report}.json`.
+
+### 6. 수동 확인 M-1~M-5 / 기능 플래그
+
+| ID | 플랫폼 | 결과·미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 8081 | **미실행.** 브라우저·로그인 세션을 조작하지 않았다. hasItems 가드와 confirmDestructive 인자는 소스로 확인했으나 실제 확인/취소와 목록 변경은 미확인이다. |
+| M-2 | 웹 8081 | **미실행.** 파일 선택·잘못된 엑셀 입력을 실행하지 않았다. info 토스트와 읽기 오류의 인라인 상태 보존은 소스로 확인했으나 실제 표시 횟수는 미확인이다. |
+| M-3 | 웹 8081 | **미실행.** 사진 선택·등록으로 사용자 기록을 바꾸지 않았다. 성공 토스트의 액션/경로는 확인했지만 실제 표시 시간과 클릭 이동은 미확인이다. |
+| M-4 | 웹 8081 | **미실행.** 실제 공유 실패를 만들거나 브라우저를 조작하지 않았다. 기존 인라인 상태만 남았지만 실제 표시 확인은 하지 않았다. |
+| M-5 | iOS 세로 | **미실행.** 기기·시뮬레이터·네이티브 확인 창·공유를 실행하지 않았다. 3지선다 원문 보존과 전체 정적 검사는 통과했으나 실제 낭독/클릭/표시는 미확인이다. |
+
+`EXTENDED_FEATURES_ENABLED`는 **한 번도 true로 바꾸지 않았고 false 그대로다**. 되돌릴 변경이 없으며 기능 플래그 파일 원문도 동일하다. Android 실제 확인도 미실행이다. 사용자 시청 환경을 보존했다.
+
+### 7. D-1~D-7 문제 여부
+
+**변경 필요사항·충돌 없음.** D-1의 공용 토스트/확인 경로, D-2의 인라인 오류 원문 보존, D-3의 6.2 토스트 오류 변환, D-4의 본문 유지, D-5의 앱 3지선다, D-6의 3곳 허용 목록, D-7의 서비스/Edge/query key 보존을 지켰다. 새 플랫폼 분기나 화면 직접 window.confirm은 만들지 않았다. 변경은 명세 11장의 11파일(삭제 2개 포함)에 한정한다.
+
+### 8. 사람이 할 후속 작업 (12.1 포함)
+
+- 로그인된 웹에서 로컬 확장 플래그를 잠시 켜 M-1~M-3을 확인한 뒤 반드시 false로 복구한다. M-3은 3.5초 토스트 안의 “라이브러리 보기” 액션도 확인한다. M-4 공유 실패의 인라인 표시도 확인한다.
+- iOS에서 이 명세 M-5와 docs/74 M-11·M-12, docs/75 M-6·M-7, docs/76 M-5, docs/77 M-3을 함께 확인한다. docs/74 M-8은 웹도 미실행으로 남아 있다.
+- docs/74~78의 기존 미커밋 변경을 작업 단위로 나눠 검토·커밋한다(이번 세션은 커밋/푸시하지 않음).
+- 실제 화면 확인 전 필요하면 사람 담당자가 기존 8081 서버를 확인하고 같은 포트로 재시작한다. 이번 작업에서는 서버를 조작하지 않았다.
+- DB migration·Edge 배포는 이번 변경에 필요 없고 실행하지 않았다.
+
+### 웹 실제 화면 확인 (Claude, 2026-11-19)
+
+재실행 결과: `npm test` 1,839개 통과(78 T-1~T-4 포함), typecheck·lint 통과. `Alert.alert`는 허용 목록 3곳(`pins.tsx:149`, `confirmDiscard.ts:7`, `confirmDestructive.ts:18`)뿐이고 삭제 대상 두 파일은 없다. 6.2 표의 교체는 모두 명세대로다. 로컬에서 `EXTENDED_FEATURES_ENABLED`를 잠시 `true`로 바꾸고 8081을 재시작해 확인한 뒤 `false`로 되돌렸다.
+
+| ID | 결과 |
+|----|------|
+| M-1 | 확인 창 ✓, 해제 ✗(별도 결함). 빈 목록일 때 `localStorage`에 검증용 항목 1개를 넣어 확인했다(확인 후 키 삭제, 원래 `null`). "전체 해제"를 누르면 `window.confirm("전체 해제\n\n추천 제외 목록을 모두 비울까요?")`가 호출된다. 취소하면 목록이 유지된다 ✓. **확인해도 목록이 비워지지 않는다** ✗ |
+| M-2 | 부분. "Dry-run 확인"·"등록 확인"은 파일이 없거나 검사 전이면 `disabled`라 안내 토스트 2개는 화면에서 도달하지 않는 방어 코드다. 잘못된 파일의 `ErrorPanel` 단독 표시는 파일 업로드를 하지 않아 미확인 |
+| M-3 | 미실행. 등록 버튼은 선택 전 `disabled`. 등록 성공 토스트는 운영 DB에 실제로 라이브러리를 추가해야 해서 실행하지 않았다 |
+| M-4 | 미실행(공유 실패를 만들 수 없음) |
+| M-5 | 미실행(iOS) |
+
+**발견한 결함(docs/78 이전부터 있음):** `src/stores/recommendationUiStore.ts:58`의 `clearExclusions: () => ({ excludedRecommendations: [], excludedRecommendationKeys: [] })`는 `set()`을 호출하지 않고 객체만 반환한다. 그래서 "전체 해제"는 웹·앱 모두 아무것도 지우지 않는다. 예전 앱 `Alert` 경로도 같은 콜백이었다. `clearExclusions: () => set({ excludedRecommendations: [], excludedRecommendationKeys: [] })`로 고쳐야 한다. 확장 기능이 꺼져 있어 지금 사용자에게는 보이지 않는다.
+
+
+## 출연진 카드 선택 상태 정정 (docs/77, 2026-11-18)
+
+상태: **구현·코드 검사 통과, 웹 화면 확인(2026-11-18, 아래 "웹 실제 화면 확인"). iOS M-3 미확인.** [77](77_cast_card_selection_state_fix_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. 기존 docs/74·75·76 및 사용자 문서의 미커밋 변경을 보존했다. 시작 root `/Users/youngilkim/SceneNote`, `main` `519ddc7`; git 상태와 원문은 `/tmp/scenenote-77-start-{status.txt,snapshot.json}`에 기록했다. `scenenote-verify` 스킬과 명령에만 적용한 Node 24를 사용했다. docs/76 구현을 다시 수행하거나 helper·guard를 수정하지 않았다.
+
+### 1. STEP 1 T-2 실제 실패
+
+새 `scripts/castSectionA11y.test.ts`만 먼저 추가한 뒤 전체 `npm test`를 실행했다. **1,835개 중 1,834개 통과·T-2만 실패**, T-1·T-3은 통과했다. 검사나 단언을 완화하지 않았다. 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-frrsx3pq/test.log`. `/tmp/scenenote-77-red-proof.json`에 원본 출력을 보존했다.
+
+```text
+✖ 77 T-2: cast card exposes no selection or toggle state on any platform (2.225083ms)
+  AssertionError [ERR_ASSERTION]: Cast card must not include selectionAriaProps
+
+  true !== false
+
+      at TestContext.<anonymous> (/Users/youngilkim/SceneNote/scripts/castSectionA11y.test.ts:21:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+```
+
+### 2. npm test before / after
+
+- 시작 **1,832/1,832 → 최종 1,835/1,835**, 신규 3개·실패/skip 0. 기존 테스트 파일·단언 변경 0.
+- 시작 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-5vny3lml/test.log`.
+- 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-978rk2tt/test.log`.
+- `77 T-1~T-3`, `75 T-16` 및 기존 docs/76 테스트 모두 통과했다. 다른 선택 칩 호출부는 시작 원문 그대로다.
+
+### 3. typecheck / lint 결과
+
+- `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-978rk2tt/{typecheck.log,lint.log,summary.json}`.
+- UI-13.2 토큰·Alert grep은 이번에 바뀐 카드 줄 기준 **0줄**, CastSection 파일 전체도 **0줄**이다. 타입 단언·의존성·설정 변경 없음.
+- `git diff --check` 통과. 원문과 정확히 지정된 세 삭제만 대조했고, 별도 읽기 전용 검토에서도 일치를 확인했다. `/tmp/scenenote-77-scope-proof.json`.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `scripts/castSectionA11y.test.ts`에 있다. `node:test`·`node:assert/strict`·`node:fs`·`node:url`과 기존 guard의 순수 함수만 import한다. 테스트에서 RN/Expo/Supabase 모듈을 import하지 않는다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 77 T-1: cast section has exactly one person-detail card opening tag |
+| T-2 | 77 T-2: cast card exposes no selection or toggle state on any platform |
+| T-3 | 77 T-3: cast card keeps its button role, registered label and open handler |
+
+T-1은 인물 상세 카드 태그 1개, T-2는 카드 `ownText`의 금지 상태 문자열 5개와 파일 전체 helper 문자열 0회, T-3은 기존 button role·등록됨 라벨·이동 handler를 검사한다.
+
+### 5. CastSection.tsx diff
+
+스프레드와 더 쓰지 않는 `Platform`·helper import만 제거했다. 카드 줄의 나머지 문자와 `key`·role·라벨·onPress·style, 등록 배경·배지·8명 제한은 원문 그대로다. `plain`으로 대체하지 않았다.
+
+```diff
+--- before/src/components/content/CastSection.tsx
++++ after/src/components/content/CastSection.tsx
+@@ -1,16 +1,15 @@
+-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
++import { Pressable, StyleSheet, Text, View } from "react-native";
+ import { DashboardPanel } from "@/components/profile/DashboardPanel";
+ import { PersonAvatar } from "@/components/people/PersonAvatar";
+ import { colors, radius, spacing, typography } from "@/constants/theme";
+ import type { CastMember } from "@/types/content";
+ import { resolveCastMemberPerson } from "@/utils/peopleScreen";
+-import { selectionAriaProps } from "@/utils/selectionAria";
+ interface CastSectionProps { cast: CastMember[]; isAnime: boolean; favoriteKeys: ReadonlySet<string>; columns: 1 | 2; onOpen: (member: CastMember) => void }
+ export function CastSection({ cast, isAnime, favoriteKeys, columns, onOpen }: CastSectionProps) {
+   return <DashboardPanel title={isAnime ? "성우" : "출연 배우"} subtitle="누르면 인물 정보를 확인하고 좋아하는 인물로 등록할 수 있어요.">
+     <View style={styles.grid}>{cast.slice(0, 8).map(member => {
+       const registered = favoriteKeys.has(resolveCastMemberPerson(member, isAnime).key);
+-      return <Pressable key={`${member.id}:${member.character ?? ""}`} accessibilityRole="button" {...selectionAriaProps("button", registered, Platform.OS)} accessibilityLabel={`${member.name} 인물 상세 보기${registered ? ", 등록됨" : ""}`} onPress={() => onOpen(member)} style={[styles.item, { width: columns === 2 ? "48.5%" : "100%", backgroundColor: registered ? colors.primarySoft : colors.surfaceMuted }]}>
++      return <Pressable key={`${member.id}:${member.character ?? ""}`} accessibilityRole="button" accessibilityLabel={`${member.name} 인물 상세 보기${registered ? ", 등록됨" : ""}`} onPress={() => onOpen(member)} style={[styles.item, { width: columns === 2 ? "48.5%" : "100%", backgroundColor: registered ? colors.primarySoft : colors.surfaceMuted }]}>
+         <PersonAvatar name={member.name} profileUrl={member.profile_url} size={40} />
+         <View style={styles.copy}>
+           <View style={styles.nameRow}><Text numberOfLines={1} style={styles.name}>{member.name}</Text>{registered ? <Text style={styles.badge}>등록됨</Text> : null}</View>
+```
+
+전체 diff는 `/tmp/scenenote-77-cast.diff`에도 보존했다. UI-4.4에는 명세 8.1 문장만 지정 위치에 추가했다. `docs/README.md`의 77번 상태는 **구현, 화면 미확인**으로 갱신했다.
+
+### 6. 수동 확인 M-1~M-3
+
+| ID | 플랫폼 | 결과·사유 |
+|----|--------|-----------|
+| M-1 | 웹 8081 | **미실행.** 브라우저·로그인 세션을 조작하지 않았다. 순수 소스 검사에서 상태 속성 없음과 등록 라벨 보존을 확인했지만 실제 페이지 DOM·배지는 미확인이다. |
+| M-2 | 웹 8081 | **미실행.** 브라우저 클릭·이동을 실행하지 않았다. 다른 칩 원문 및 카드 onPress는 그대로이며 전체 정적 검사는 통과했지만 실제 탐색은 미확인이다. |
+| M-3 | iOS 세로 | **미실행.** 기기·시뮬레이터·VoiceOver를 실행하지 않았다. 등록된 카드에 선택 상태를 주는 코드는 제거했으나 실제 낭독은 미확인이다. |
+
+Android 실제 낭독도 실행하지 않았다. 사용자 시청 환경을 보존했고 브라우저·시청 앱·개발 서버는 열거나 종료하지 않았다.
+
+### 7. D-1~D-4 문제 여부
+
+**변경 필요사항·충돌 없음.** D-1의 플랫폼 공통 상태 제거, D-2의 나머지 원문 보존, D-3의 helper/guard 불변, D-4의 지정 문장 추가를 지켰다. 변경 범위는 명세의 5파일뿐이고 기존 다른 작업을 되돌리지 않았다.
+
+### 8. 사람이 할 후속 작업
+
+로그인된 웹에서 등록/미등록 카드의 pressed·selected가 모두 없고 등록 라벨·배지는 유지되는지(M-1), 다른 칩 상태와 인물 상세 이동이 같은지(M-2), iOS VoiceOver에서 “선택됨” 없이 기존 등록 라벨과 버튼 역할을 읽는지(M-3) 확인해야 한다. DB·Edge 변경/배포는 필요 없고 실행하지 않았다. 커밋·푸시도 하지 않았다.
+
+### 웹 실제 화면 확인 (Claude, 2026-11-18)
+
+재실행 결과: `npm test` 1,835개 통과(77 T-1~T-3 포함), typecheck·lint 통과. 실행 중이던 8081 서버가 변경 전 번들을 계속 내보내고 있어(새로고침 후에도 `selectionAriaProps` 호출이 남아 있었음), 서버를 재시작한 뒤 확인했다.
+
+| ID | 결과 |
+|----|------|
+| M-1 | ✓ 작품 상세 `/content/e24a00dc-…`에서 출연진 카드 8개 모두 `role=button`이고 `aria-pressed`·`aria-selected`가 없다. 등록된 카드의 라벨 "오세영 인물 상세 보기, 등록됨"과 "등록됨" 배지·배경색이 유지된다 |
+| M-2 | ✓ 같은 화면의 다른 칩은 `aria-pressed`를 유지한다(시청 상태 "보고 싶음", OTT "정액제" true). 등록 카드를 누르면 `/people/tmdb:2339725`로 이동한다. 콘솔 오류 0. tab이 아닌 요소의 `aria-selected` 0 |
+| M-3 | 미실행(iOS) |
+
+
+
+## 웹 접근성 선택 상태 후속 정정 (docs/76, 2026-11-18)
+
+상태: **코드 검사 통과, 웹 화면 확인(2026-11-18, 아래 "웹 실제 화면 확인"). iOS M-5 미확인.** [76](76_web_aria_selection_followup_spec.md) 전체와 14장 STEP 1→2→3→4→5를 따라 구현했다. D-1~D-6 변경 없음. 시작 경로 `/Users/youngilkim/SceneNote`, `main` `519ddc7`과 docs/74·75 및 사용자 문서의 기존 미커밋 변경을 `/tmp/scenenote-76-start-{status.txt,snapshot.json}`에 기록했다. `scenenote-verify` 스킬과 명령에만 적용한 Node 24를 사용했다. 브라우저·시청 앱·개발 서버·운영 DB·Edge·secret·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 및 STEP 3의 실제 실패
+
+먼저 신규 테스트 14개를 작성하고, docs/75 테스트를 명세 10장 허용 범위로만 변경했다. 함수·검사기·화면은 아직 고치지 않은 상태에서 전체 `npm test`를 실행했다.
+
+- STEP 1 실제 결과: 테스트 1,825개 중 1,811개 통과·14개 실패. 순수 함수가 아직 없어 아래 모듈 오류로 T-1~T-8은 **개별 등록/실행 전에 테스트 파일 전체가 실패**했다. 이를 T-1~T-8이 각각 실행된 실패라고 세지 않는다. T-9~T-11은 각각 실제 실패했고, T-13 및 변경된 docs/75의 구규칙 테스트도 예상대로 실패했다.
+- STEP 1 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-j0wd8a00/test.log`. `/tmp/scenenote-76-step1-proof.json`에 실패 이름과 합계를 보존했다.
+
+```text
+Error: Cannot find module './selectionAria'
+Require stack:
+- /Users/youngilkim/SceneNote/src/utils/selectionAria.test.ts
+code: 'MODULE_NOT_FOUND'
+✖ src/utils/selectionAria.test.ts
+
+✖ 76 T-9: nested opening tags retain source order and do not leak into parent ownText
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  1 !== 3
+✖ 76 T-10: nested tags with arrow functions and object braces keep their exact endpoints
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  1 !== 3
+✖ 76 T-11: a nested selected button reports R-2 on its own source line
+  +     line: 1,
+  -     line: 2,
+  +     snippet: '<FlashList ListHeaderComponent={<View>'
+```
+
+T-11 원본 diff의 정확한 두 줄:
+
+```text
+  +     snippet: '<FlashList ListHeaderComponent={<View>'
+  -     snippet: '<Pressable accessibilityRole="button" aria-selected={s}>'
+```
+
+STEP 2에서 순수 함수만 구현한 뒤 T-1~T-8 **8/8 통과**: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-xh9xvahs/test.log`.
+
+STEP 3에서 중첩 JSX와 `ownText`, R-1/R-2를 구현한 뒤 전체 `npm test`는 **1,832개 중 1,831개 통과·T-16만 실패**, 새 R-2가 정확히 **34건**이었다. T-9~T-14와 허용한 docs/75 기대값 변경도 이때 통과했다. 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-7_z3d0pv/test.log`, 근거 `/tmp/scenenote-76-step3-proof.json`.
+
+실제 T-16 실패 건수와 앞 10개 위치:
+
+```text
+AssertionError [ERR_ASSERTION]: ARIA state violations: 34
+app/(tabs)/library.tsx:432 R-2 <Pressable
+app/(tabs)/library.tsx:481 R-2 <Pressable
+app/(tabs)/library.tsx:514 R-2 <Pressable
+app/(tabs)/library.tsx:585 R-2 <Pressable
+app/(tabs)/library.tsx:640 R-2 <Pressable
+app/(tabs)/library.tsx:652 R-2 <Pressable
+app/_layout.tsx:199 R-2 <Pressable
+app/library/photo-import.tsx:236 R-2 <Pressable
+app/library/photo-import.tsx:270 R-2 <Pressable
+app/people/[id].tsx:792 R-2 <Pressable
+```
+
+### 2. npm test before / after
+
+- 기준선 **1,818/1,818 → 최종 1,832/1,832**, 신규 14개·실패/skip 0. 기존 테스트 수를 줄이지 않았다.
+- 기준선 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-hq25a_e3/test.log`.
+- 최종 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ea20kxsm/test.log`.
+- 최종 T-16 R-1/R-2 위반 0. `accessibilityState`는 app/src 전체 0줄을 유지하고, selectionAria 유틸/테스트를 제외한 직접 `aria-selected`는 `app/people/[id].tsx:535`의 `tab` 1줄뿐이다.
+
+### 3. typecheck / lint 결과와 별도 검증
+
+- `npm run typecheck`, `npm run lint` 모두 **exit 0·오류 0·경고 0**. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ea20kxsm/{typecheck.log,lint.log,summary.json}`. 속성 타입 단언·any·의존성 변경·검사 완화를 추가하지 않았다.
+- 별도 TypeScript AST 비교는 23개 화면/컴포넌트의 34개 선택 값과 역할 인자, 하단 탭 current 예외, 동적 TagChip·조건부 PinListCard를 대조했다. 기존 role/label/hint/liveRegion/다른 ARIA/구조/스타일/콜백은 동일하다. `/tmp/scenenote-76-ast-{verify.cjs,report.json}`.
+- 실제 설치 RN-web + ReactDOMServer 격리 검사 **25개 통과**. 실제 SegmentedControl·SeasonSelector·TagChip의 DOM, 선택 true/false, `radio`의 checked, `tab`의 selected, 현재 페이지 예외, 기존 disabled/busy를 확인했다. 외부 fetch 0·브라우저 프로세스 0. 아이콘만 모의 처리했고 화면 이벤트·화면 배치·실제 낭독을 검사한 것은 아니다. `/tmp/scenenote-76-dom-ssr-{fixture.mjs,report.json}`.
+- 독립 정적 검토에서도 실제 검색 FlashList 안 role 28개가 개별 추출되고 부모 `ownText`에는 role이 섞이지 않음을 확인했다. 라이브러리·핀의 prop 안 JSX도 별도 추출한다. episodes의 50줄 태그는 prop 안 JSX가 없고 중괄호·화살표를 지나 정상 종결한다.
+- `git diff --check` 통과. 빌드·배포·서버 재시작은 이번에 실행하지 않았다.
+
+### 4. 신규 테스트 ID와 이름 / docs/75 기대 변경
+
+| ID | 실제 이름 | 파일 |
+|----|-----------|------|
+| T-1 | 76 T-1: web buttons expose true and false pressed states | `src/utils/selectionAria.test.ts` |
+| T-2 | 76 T-2: iOS and Android buttons preserve true and false selected states | `src/utils/selectionAria.test.ts` |
+| T-3 | 76 T-3: current web buttons omit selection and pressed states | `src/utils/selectionAria.test.ts` |
+| T-4 | 76 T-4: web radios expose checked state only | `src/utils/selectionAria.test.ts` |
+| T-5 | 76 T-5: plain elements omit web state and preserve native selected state | `src/utils/selectionAria.test.ts` |
+| T-6 | 76 T-6: macOS and Windows follow the non-web selection contract | `src/utils/selectionAria.test.ts` |
+| T-7 | 76 T-7: native radios preserve false selected and checked states | `src/utils/selectionAria.test.ts` |
+| T-8 | 76 T-8: current native buttons preserve selected state | `src/utils/selectionAria.test.ts` |
+| T-9 | 76 T-9: nested opening tags retain source order and do not leak into parent ownText | `scripts/a11yAriaStateGuard.test.ts` |
+| T-10 | 76 T-10: nested tags with arrow functions and object braces keep their exact endpoints | `scripts/a11yAriaStateGuard.test.ts` |
+| T-11 | 76 T-11: a nested selected button reports R-2 on its own source line | `scripts/a11yAriaStateGuard.test.ts` |
+| T-12 | 76 T-12: a literal tab role may keep direct selected state | `scripts/a11yAriaStateGuard.test.ts` |
+| T-13 | 76 T-13: selected state is rejected for buttons, roleless views and dynamic roles | `scripts/a11yAriaStateGuard.test.ts` |
+| T-14 | 76 T-14: selection helper spreads and existing disabled state have no violation | `scripts/a11yAriaStateGuard.test.ts` |
+
+기존 테스트 변경은 다음 9개뿐이며, 허용 목록과 독립 대조했다.
+
+- `75 T-1~T-4`: 결과에 `ownText === text` 기대 필드만 추가.
+- `75 T-8~T-10`: 기대를 R-2 1건으로 강화하고 이름 끝에 ` (docs/76: R-2 replaced)` 추가.
+- `75 T-11`: 라디오 두 입력 모두 R-2 1건으로 강화.
+- `75 T-14`: 동적 role의 직접 selected를 R-2 1건으로 강화.
+- `75 T-5/6/7/12/13/15/16`과 기존 preamble/저장소 읽기 방식은 그대로. T-16 뒤 신규 테스트 구분용 빈 줄 외 변경 없음. 다른 기존 테스트 파일은 변경하지 않았다.
+
+### 5. 교체 34곳 / Platform import 추가
+
+| 파일:실제 줄 | role 인자·예외 |
+|-------------|----------------|
+| `app/_layout.tsx:203` | `"button"` · current: true |
+| `app/search.tsx:695` | `"button"` |
+| `app/search.tsx:896` | `"button"` |
+| `app/search.tsx:916` | `"button"` |
+| `app/(tabs)/library.tsx:436` | `"button"` |
+| `app/(tabs)/library.tsx:483` | `"button"` |
+| `app/(tabs)/library.tsx:515` | `"button"` |
+| `app/(tabs)/library.tsx:585` | `"button"` |
+| `app/(tabs)/library.tsx:639` | `"button"` |
+| `app/(tabs)/library.tsx:650` | `"button"` |
+| `app/library/photo-import.tsx:239` | `"button"` |
+| `app/library/photo-import.tsx:272` | `"button"` |
+| `app/people/[id].tsx:797` | `"button"` |
+| `src/components/common/GenreFilterChips.tsx:71` | `"button"` |
+| `src/components/common/SegmentedControl.tsx:28` | `"button"` |
+| `src/components/common/YearSelect.tsx:62` | `"button"` |
+| `src/components/content/CastSection.tsx:13` | `"button"` |
+| `src/components/content/ContentSearchBar.tsx:377` | `"button"` |
+| `src/components/content/ContentSearchBar.tsx:404` | `"button"` |
+| `src/components/content/EpisodeProgressCard.tsx:219` | `"button"` |
+| `src/components/content/EpisodeProgressCard.tsx:254` | `"radio"` |
+| `src/components/content/PopularRecommendationSection.tsx:168` | `"button"` |
+| `src/components/content/SeasonSelector.tsx:79` | `"button"` |
+| `src/components/content/WatchProviderList.tsx:89` | `"button"` |
+| `src/components/content/WatchStatusControl.tsx:14` | `"button"` |
+| `src/components/content/WatchStatusControl.tsx:20` | `"button"` |
+| `src/components/library/LibraryFilterBottomSheet.tsx:234` | `"button"` |
+| `src/components/library/LibraryStatusFilter.tsx:63` | `"button"` |
+| `src/components/pins/PinComposer.tsx:305` | `"button"` |
+| `src/components/pins/PinDetailPanel.tsx:116` | `"plain"` |
+| `src/components/pins/PinFilterPanel.tsx:21` | `"button"` |
+| `src/components/pins/PinListCard.tsx:31` | `"button"` · 조건부 스프레드 |
+| `src/components/pins/PinViewToggle.tsx:24` | `"button"` |
+| `src/components/pins/TagChip.tsx:22` | `onPress ? "button" : "plain"` |
+
+`Platform`을 기존 react-native import에 추가한 파일은 18개다. 나머지 5개 파일은 기존 import를 재사용했다. helper import는 23개 파일에 추가했다.
+
+- `app/people/[id].tsx`
+- `src/components/common/GenreFilterChips.tsx`
+- `src/components/common/SegmentedControl.tsx`
+- `src/components/common/YearSelect.tsx`
+- `src/components/content/CastSection.tsx`
+- `src/components/content/ContentSearchBar.tsx`
+- `src/components/content/EpisodeProgressCard.tsx`
+- `src/components/content/PopularRecommendationSection.tsx`
+- `src/components/content/SeasonSelector.tsx`
+- `src/components/content/WatchProviderList.tsx`
+- `src/components/content/WatchStatusControl.tsx`
+- `src/components/library/LibraryFilterBottomSheet.tsx`
+- `src/components/library/LibraryStatusFilter.tsx`
+- `src/components/pins/PinDetailPanel.tsx`
+- `src/components/pins/PinFilterPanel.tsx`
+- `src/components/pins/PinListCard.tsx`
+- `src/components/pins/PinViewToggle.tsx`
+- `src/components/pins/TagChip.tsx`
+
+`ContentSearchBar`의 checkbox 속성 사이 빈 줄 하나(F-4)만 제거했다. checkbox/switch의 기존 checked, disabled/busy/expanded/current는 그대로다. TagChip의 `onPress ? "button" : undefined` role도 그대로 유지했다. `/tmp/scenenote-76-{app-report,shared-report,content-report,ast-report}.json`에 상세 근거가 있다.
+
+### 6. 설계 결정 / UI 규칙 / 미충족 완료 조건
+
+- **D-1~D-6의 변경 필요사항 또는 충돌 없음.** non-web에서 기존 selected와 라디오 checked를 유지하고, web만 역할별 속성을 반환한다. 함수는 RN을 import하지 않는다. 중첩 태그는 각각 자기 `ownText`로 판정한다.
+- `docs/00_ui_style_rules.md` UI-4.4의 지정 문장 하나만 명세 8.2 그대로 바꿨다. 다른 규칙·AGENTS·문서 목차·명세 74/75/76은 시작 내용 그대로다.
+- **전체 파일 UI-13.2 grep 0줄 조건은 미충족이다.** 시작 때부터 이번 대상 23개 화면/컴포넌트에 토큰 위반 212줄과 `Alert.alert` 5줄, 합계 **217줄**이 있었고 수정 후에도 같다. 기존 스타일/Alert 동작은 AST 비교로 동일함을 확인했다. 새 스타일/Alert 변경은 0이며 D-6 및 범위 밖 금지에 따라 기존 항목을 고치지 않았다. 기존 인라인 스타일과 같은 줄의 선택 속성이 바뀐 경우는 줄 diff에 잡힐 수 있으나 스타일 자체는 그대로다. `/tmp/scenenote-76-{preexisting-ui,scope-report}.json`.
+- 변경 범위는 명세 11장의 총 29파일(새 2개·기존 27개)뿐이다. 관련 검사기 테스트 외 기존 테스트, DB/Edge, 서비스/훅, 사용자 기록은 변경하지 않았다. 기존 docs/74·75 및 사용자 변경을 보존했다.
+
+### 7. 수동 확인 M-1~M-5 / 사람이 할 후속 작업
+
+| ID | 플랫폼 | 결과·사유와 자동 근거의 한계 |
+|----|--------|------------------------------|
+| M-1 | 웹 | **미실행.** 로그인 화면·브라우저를 조작하지 않았다. 정적 검사 0 및 실제 일부 컴포넌트 DOM에서 금지 selected 0은 확인했지만 `/library`·`/search`·`/pins`·상세 전체 페이지는 미확인이다. |
+| M-2 | 웹 | **미실행.** 실제 클릭 이벤트를 실행하지 않았다. 실제 칩의 true/false 제어 속성별 DOM 스냅샷은 통과했으며 실제 이벤트 전환·낭독은 미확인이다. |
+| M-3 | 웹 | **미실행.** 실제 하단 탭·회차 라디오를 조작하지 않았다. 호출부 AST current 예외·기존 current 식 보존과 RN-web DOM의 current/checked는 확인했지만 페이지 탐색은 미확인이다. |
+| M-4 | 웹 375·1440 | **미실행.** 시청 환경을 보존하려고 브라우저를 열지 않았다. AST상 스타일·구조는 같지만 실제 배치 비교는 미확인이다. |
+| M-5 | iOS 세로 | **미실행.** 기기·시뮬레이터·VoiceOver/Inspector를 실행하지 않았다. 순수 함수의 non-web 계약과 설치 RN의 selected/checked 병합 근거는 확인했지만 실제 낭독은 미확인이다. |
+
+사람이 로그인된 웹에서 M-1~M-4와 iOS에서 M-5를 확인해야 한다. Android 실제 낭독도 미실행이다. 기존 토큰/Alert를 정리하는 작업은 이번의 스타일·동작 보존 범위와 별개다. 운영 DB/Edge 변경이나 배포는 필요 없고 실행하지 않았다.
+
+### 웹 실제 화면 확인 (Claude, 2026-11-18)
+
+로그인된 웹 8081(내장 브라우저, 폭 775px)에서 확인했다. 재실행 결과: `npm test` 1,832 통과, typecheck·lint 통과, `app`·`src`의 직접 `aria-selected`는 `app/people/[id].tsx:535`(tab) 1곳뿐.
+
+| ID | 결과 |
+|----|------|
+| M-1 | ✓ `/library`(이전 22건)·`/search`·`/pins`·작품 상세·인물 상세 모두 tab/option 외 `aria-selected` 0. 콘솔 오류 0 |
+| M-2 | ✓ 라이브러리 "보는 중" 클릭 시 `aria-pressed` 전체 true→false, 보는 중 false→true |
+| M-3 | ✓ 사이드 내비 현재 항목 `aria-current="page"`, `aria-pressed`·`aria-selected` 없음. 회차 라디오 12개 `aria-checked="false"` 출력(운영 DB 진행 저장을 피하려고 눌러 바꾸지는 않음). 인물 상세 탭(전체·봤어요·내 작품)은 `aria-selected` 유지 |
+| M-4 | 부분 ✓ 775px에서 라이브러리 모양 이상 없음. 375·1440 비교는 미실행(변경이 속성만이라 스타일 영향 없음) |
+| M-5 | 미실행(iOS) |
+
+후속 검토 1건: 출연진 카드(`CastSection`)는 누르면 인물 상세로 이동하는 버튼인데, 등록된 인물이면 `aria-pressed="true"`가 붙어 웹 낭독기가 "전환 버튼, 눌림"으로 읽는다. 누를 때 등록이 바뀌지 않으므로 전환 버튼이 아니다. 라벨에 이미 ", 등록됨"이 있으니 `plain`(웹 속성 없음)이 맞다. 명세 76이 이 곳을 button으로 지정했기 때문에 생긴 문제이고, 구현은 명세대로 됐다.
+
+
+## 웹 접근성 상태 aria-* 정정 (docs/75, 2026-11-18)
+
+- 상태: **코드 검사 통과, 화면 미확인.** [75](75_web_aria_state_fixes_spec.md) 14장의 STEP1→속성 변환→웹 의미 보충→UI 규칙→검증 순서로 진행했다. 시작 root는 `/Users/youngilkim/SceneNote`, `main` `519ddc7`+docs/74 미커밋 변경이다. `/tmp/scenenote-75-start-{snapshot.json,status.txt}`로 시작 소스/사용자 문서를 보존했다. `scenenote-verify`와 Node24를 명령에만 적용했다. 브라우저·기기·서버·운영 DB/Edge/secret·의존성·커밋/푸시는 변경하지 않았다.
+- D-1~D-6은 유지했다. 45개 파일의 R-1 **100개 줄**을 모두 정정했다. 실제 상태 객체는101개(한 줄에2개인 `SimilarContentQuickViewModal` 포함), 상태 키 항목139개다. 기존 키의 값은 그대로 유지하고 선택 버튼에 pressed25곳, 라디오에 checked1곳만 보충했다. 재발 검사는 `scripts/a11yAriaStateGuard.ts`·`.test.ts` 두 새 파일에 있다.
+
+### 1. STEP 1 T-16 실제 실패
+
+- 시작 `npm test` **1802/1802**: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ssonz6av/{test.log,summary.json}`.
+- 검사기와 T-1~T-16만 먼저 작성한 전체 실행은 **1818개 중1817 통과·1 실패**. T-1~T-15와 기존1802개는 통과하고 **T-16만 R-1 정확히100건**, R-2/R-3은0이었다. 명세의100건과 같음을 확인한 뒤 화면을 수정했다. 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-cutk_80t/{test.log,summary.json}`, 건수/목록 보존 `/tmp/scenenote-75-red-proof.json`.
+
+실제 실패 출력(건수와 앞10개 위치):
+
+```text
+  AssertionError [ERR_ASSERTION]: ARIA state violations: 100
+  app/(auth)/forgot-password.tsx:70 R-1 accessibilityState={{ disabled: formState.isSubmitting || requestPasswordReset.isPending, busy: formState.isSubmitting |
+  app/(auth)/reset-password.tsx:100 R-1 accessibilityState={{ disabled: formState.isSubmitting || updatePassword.isPending, busy: formState.isSubmitting || upda
+  app/(auth)/sign-in.tsx:91 R-1 accessibilityState={{ disabled: formState.isSubmitting || signIn.isPending, busy: formState.isSubmitting || signIn.isPen
+  app/(auth)/sign-up.tsx:109 R-1 accessibilityState={{ disabled: formState.isSubmitting || signUp.isPending, busy: formState.isSubmitting || signUp.isPen
+  app/(tabs)/library.tsx:435 R-1 accessibilityState={{ selected }}
+  app/(tabs)/library.tsx:447 R-1 accessibilityState={{ expanded: showFilters }}
+  app/(tabs)/library.tsx:483 R-1 accessibilityState={{ selected }}
+  app/(tabs)/library.tsx:515 R-1 accessibilityState={{ selected }}
+  app/(tabs)/library.tsx:532 R-1 accessibilityState={{ expanded: showFilters }}
+  app/(tabs)/library.tsx:585 R-1 accessibilityState={{ selected }}
+```
+
+### 2. npm test before / after
+
+- **1802/1802 →1818/1818**, 신규16개·실패0·skip0. 기존 테스트 파일/단언 변경0. 최종 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-q06pwehg/test.log`.
+- `grep -rn "accessibilityState" app src` **출력0줄**(일치 없음 exit1). T-16의 최종 R-1/R-2/R-3 위반0.
+- 별도 AST 검증은 실제45파일의101상태 그룹·139키 값이 정확히 이동했는지, 기존 중복8키가 같은 값인지, JSX 구조/역할/라벨/hint/liveRegion/스타일/로직이 유지됐는지 검사해 통과했다. 신규 pressed25/checked1과 조건 스프레드도 검증했다. `/tmp/scenenote-75-ast-{verify.cjs,verify.log,report.json}`. 처음 작성한 ad-hoc 비교기의 중첩 JSX 속성 정규화/SourceFile 경계를 고친 뒤 실행했으며 앱이나 기존 단언을 변경한 것은 아니다.
+
+### 3. typecheck / lint / build
+
+- 최종 `npm run typecheck`, `npm run lint` **exit0·오류0·경고0**. `scenenote-verify-q06pwehg/{typecheck.log,lint.log,summary.json}`.
+- 첫 타입 검사에서는 새 ARIA 속성 오류가 아니라 Node `readdirSync`의 `string|Buffer` 추론4건이 나왔다. T-16의 옵션에 기존 기본값과 같은 **`encoding: "utf8"`**을 명시해 문자열 overload를 선택했다. 타입 단언·any·검사 완화는 추가하지 않았다. 최종 테스트/타입/린트를 다시 통과했다. 최초 로그 `scenenote-verify-2erf4qdt/typecheck.log`.
+- 웹 `npm run build` export **exit0**: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-2erf4qdt/build.log`. 이후 앱 코드는 바꾸지 않았고 T-16의 encoding 명시와 문서만 정정했다.
+- 설치된 실제 RN-web0.21.2 + ReactDOMServer 격리 검증 **27개 통과**. 실제 설정·SegmentedControl·SeasonSelector·LoadingSkeleton의 DOM을 직렬화해 checkbox10개와 true/false, selected+pressed, expanded=false, busy/disabled, current-page 예외, undefined 생략을 확인했다. 기존 grouped state의 웹 DOM 누락도 재현했다. 훅/라우터/아이콘/safearea 경계만 모의로 치환했고 네트워크·브라우저0이다. 실제 이벤트 전환·낭독·시각 QA와는 구분한다. `/tmp/scenenote-75-dom-ssr-{fixture.mjs,final.log,report.json}`. 최종 소스 해시 일치.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `scripts/a11yAriaStateGuard.test.ts`에 있다. 검사기는 RN/Supabase 모듈을 가져오지 않는 순수 문자열 함수, 저장소 테스트는 node:fs만 읽는다.
+
+| ID | 실제 이름 |
+|----|-----------|
+| T-1 | 75 T-1: finds an opening tag and its first line |
+| T-2 | 75 T-2: arrow functions and comparisons inside braces do not end a tag |
+| T-3 | 75 T-3: quoted and template text may contain greater-than characters |
+| T-4 | 75 T-4: skips comparisons and closing tags while keeping multiline start lines |
+| T-5 | 75 T-5: reports the source line of multiline accessibilityState |
+| T-6 | 75 T-6: finds object keys and comments outside JSX once per source line |
+| T-7 | 75 T-7: selected buttons need a pressed or current attribute |
+| T-8 | 75 T-8: a selected button with pressed state has no violation |
+| T-9 | 75 T-9: conditional spread state names satisfy the button guard |
+| T-10 | 75 T-10: aria-current exempts the selected button from pressed state |
+| T-11 | 75 T-11: selected radios require matching checked state |
+| T-12 | 75 T-12: selected tabs already have the intended web state |
+| T-13 | 75 T-13: recognizes single-quoted role attributes |
+| T-14 | 75 T-14: dynamic roles are not guessed by the static guard |
+| T-15 | 75 T-15: diagnostics retain the file and trim snippets to at most 120 characters |
+| T-16 | 75 T-16: app and src have no obsolete or incomplete ARIA state props |
+
+### 5. 보충 위치 / E-9 / E-2
+
+신규 `aria-pressed`25곳과 `aria-checked`1곳의 실제 속성 줄이다. 기존 값 표현식과 동일하며 역할·라벨은 바꾸지 않았다.
+
+| 속성 | 위치 |
+|------|------|
+| `aria-pressed` | `app/(tabs)/library.tsx:484` |
+| `aria-pressed` | `app/(tabs)/library.tsx:517` |
+| `aria-pressed` | `app/(tabs)/library.tsx:588` |
+| `aria-pressed` | `app/(tabs)/library.tsx:643` |
+| `aria-pressed` | `app/(tabs)/library.tsx:655` |
+| `aria-pressed` | `app/library/photo-import.tsx:239` |
+| `aria-pressed` | `app/library/photo-import.tsx:273` |
+| `aria-pressed` | `app/people/[id].tsx:796` |
+| `aria-pressed` | `app/search.tsx:695` |
+| `aria-pressed` | `src/components/common/GenreFilterChips.tsx:70` |
+| `aria-pressed` | `src/components/common/SegmentedControl.tsx:27` |
+| `aria-pressed` | `src/components/common/YearSelect.tsx:61` |
+| `aria-pressed` | `src/components/content/CastSection.tsx:12` |
+| `aria-pressed` | `src/components/content/ContentSearchBar.tsx:377` |
+| `aria-pressed` | `src/components/content/ContentSearchBar.tsx:404` |
+| `aria-pressed` | `src/components/content/EpisodeProgressCard.tsx:217` |
+| `aria-pressed` | `src/components/content/PopularRecommendationSection.tsx:167` |
+| `aria-pressed` | `src/components/content/SeasonSelector.tsx:78` |
+| `aria-pressed` | `src/components/content/WatchProviderList.tsx:88` |
+| `aria-pressed` | `src/components/content/WatchStatusControl.tsx:13` |
+| `aria-pressed` | `src/components/content/WatchStatusControl.tsx:19` |
+| `aria-pressed` | `src/components/pins/PinComposer.tsx:304` |
+| `aria-pressed` | `src/components/pins/PinFilterPanel.tsx:20` |
+| `aria-pressed` | `src/components/pins/PinListCard.tsx:30` (기존 조건 스프레드 안) |
+| `aria-pressed` | `src/components/pins/PinViewToggle.tsx:23` |
+| `aria-checked` | `src/components/content/EpisodeProgressCard.tsx:252` |
+
+- **E-9 1곳:** `src/components/pins/TagChip.tsx:20`의 `accessibilityRole={onPress ? "button" : undefined}`를 그대로 유지했다. selected/disabled는 D-2로 옮겼지만, 역할을 추측해 pressed를 보충하지 않았다. 동적 `Container`와 `onPress={disabled ? undefined : onPress}`의 기존 동작도 보존했다. 이 분기의 실제 웹 역할/비활성·선택 낭독은 수동 확인 대상이다.
+- **E-2 충돌0:** 같은 의미의 기존 ARIA가 있던8키를 대조해 모두 동일했다. 인증4개 화면의 busy, LoadingSkeleton busy, ContentSearchBar checked/disabled, RecommendationExclusionSheet checked는 기존 속성만 유지하고 중복 추가하지 않았다. 값 불일치로 중단한 곳은 없다.
+- 기존 pressed5곳(`app/search.tsx`2, `app/(tabs)/library.tsx`1, LibraryFilterBottomSheet1, LibraryStatusFilter1)과 하단 탭의 current-page1곳은 그대로다. radio는 selected를 유지하면서 checked만 보충했다.
+- 전체 근거: `/tmp/scenenote-75-{inventory,app-report,shared-report,content-report,positions,ast-report}.json`.
+
+### 6. 설계 결정과 UI 규칙 / 완료 조건의 한계
+
+- **D-1~D-6 변경 또는 변경 필요사항 없음.** `docs/00_ui_style_rules.md`의 UI-4.4·4.7·13.2·15 해당4문장을 명세8.1 그대로 반영했다(명세의 Markdown 중첩 코드 이스케이프를 해제한 문장과 일치). 다른 규칙/과거 명세는 바꾸지 않았다.
+- **명세 DoD의 전체파일 UI-13.2 결과0줄 조건은 미충족이다.** 시작 시 대상45파일에 이미 색·글꼴320줄과 `Alert.alert`7줄, 합계327줄이 있었다. 이후에도 **320/7로 동일**, 이번 추가 위반은0이며 해당 기존 줄의 내용도 바꾸지 않았다. D-4의 스타일·문구·동작 변경 금지와 범위 밖 “김에 고치기” 금지를 지키기 위해 기존 위반을 정리하지 않았다. 이 결과를 전체 검사0이라고 보고하지 않는다.
+- 기존 Alert7곳: `app/(tabs)/pins.tsx`2, `app/library/photo-import.tsx`4, `src/components/content/PopularRecommendationSection.tsx`1. 기존 토큰/Alert 목록과 추가줄 검사 `/tmp/scenenote-75-{preexisting-ui,ui-scope-report}.json`.
+- 소스 수정은 명세11장의45파일, 새 검사기2파일, 문서2파일뿐이다. 기존 docs/74 작업과 사용자의 AGENTS/목차/명세75는 보존했다. 기존 테스트 파일 변경0, DB/Edge/의존성 변경0. `git diff --check` 통과.
+
+### 7. 수동 확인 M-1~M-7 / 후속 작업
+
+| ID | 플랫폼 | 실행 여부·사유 / 별도 근거 |
+|----|--------|----------------------------|
+| M-1 | 웹 | **미실행.** 사용자 브라우저·로그인 세션을 조작하지 않았다. 실제 설정 컴포넌트 SSR은 체크박스10개와 선택 true/false를 확인했으나 로그인된 실제 페이지/클릭은 미확인이다. |
+| M-2 | 웹 | **미실행.** 브라우저를 열지 않았다. 실제 SegmentedControl SSR의 selected+pressed, 전체 저장소 정적 R-2/R-3 위반0을 확인했지만 /search 이벤트 전환은 미확인이다. |
+| M-3 | 웹 | **미실행.** 현재 탭/시즌을 실제 조작하지 않았다. current 예외 소스 보존·SSR current만 출력·SeasonSelector 초기 expanded=false는 확인했으나 펼침 이벤트는 미확인이다. |
+| M-4 | 웹 | **미실행.** 브라우저 클릭을 하지 않았다. 실제 스켈레톤 busy와 RN-web disabled/busy DOM, tabIndex=-1은 SSR 확인. 실제 눌림 차단은 미확인이다. |
+| M-5 | 웹375·1440 | **미실행.** 화면을 열지 않아 실제 배치/시각 비교를 하지 않았다. 45파일 AST의 스타일·레이아웃·라벨·구조 원형은 확인했다. |
+| M-6 | iOS 세로 | **미실행.** 시뮬레이터·VoiceOver·Inspector를 실행하지 않았다. 설치 RN Pressable/View의 ARIA→기존 상태 병합 코드와139개 기존 키의 표현식 동치는 확인했지만 실제 낭독은 미확인이다. |
+| M-7 | iOS 세로 | **미실행.** 기기·Inspector를 실행하지 않았다. disabled prop을 그대로 보존했지만 실제 “흐리게 표시됨” 낭독·터치 차단은 미확인이다. |
+
+Android 실기기/낭독도 미실행이다. 로그인된 웹에서 M-1~M-5, iOS에서 M-6~M-7과 E-9의 동적 TagChip을 사람이 확인해야 한다. 기존 토큰/Alert를0으로 만드는 작업에는 이번 D-4와 별개 범위 결정이 필요하다. DB migration·Edge 배포는 필요 없고 실행하지 않았다. 이번 세션에서 브라우저·시청 앱·개발 서버를 열거나 종료하지 않았다.
+
+### 웹 실제 화면 확인 (Claude, 2026-11-18)
+
+로그인된 앱 내 브라우저, 로컬 8081(운영 Supabase)에서 DOM 속성으로 확인했다. 시험 중 바꾼 구독 값은 원래(미설정)로 되돌렸다.
+
+| ID | 결과 | 확인 내용 |
+|----|------|-----------|
+| M-1 | **통과** | `/settings/subscribed-otts` checkbox 10개 모두 `aria-checked`. 넷플릭스 클릭 시 `"true"`, 다시 클릭 시 `"false"` |
+| M-2 | **통과(단서)** | `/search` 보기 전환 "갤러리" `aria-selected="true"`+`aria-pressed="true"`. `/search`에서 `[role=button][aria-selected]:not([aria-pressed]):not([aria-current])` 0개. 단 `/library`에서는 하단 탭의 현재가 아닌 5개(`aria-current` 없음, `aria-selected="false"`)가 이 조회에 걸린다 — 명세 E-4 예외의 의도된 결과이며 결함 아님 |
+| M-3 | **통과** | 하단 탭 현재 "라이브러리로 이동" `aria-current="page"`+`aria-selected="true"`, `aria-pressed` 없음. 라이브러리 "필터" `aria-expanded` `false→true` |
+| M-4 | **통과(속성)** | `/search`에 `aria-busy` 4개·`aria-disabled="true"` 1개 출력. 비활성 버튼 터치 차단은 기존 `disabled` 속성 유지로 변화 없음 |
+| M-5 | 미실행 | 속성만 바뀌어 배치 영향은 없다고 보고 시각 비교는 하지 않음 |
+| M-6·M-7 | 미실행 | iOS 시뮬레이터 미실행 |
+
+콘솔 경고·오류 0건. 보완 후보: ① `role="button"`의 `aria-selected`는 ARIA 규격상 허용되지 않는 속성이다(`/library` 22개, axe `aria-allowed-attr` 대상). 낭독기는 무시하고 `aria-pressed`가 상태를 전달하므로 동작 문제는 없다(명세 D-3의 앱 동일성 결정에 따른 결과). ② E-9 `TagChip`은 `onPress`+`selected`로 쓰면 웹에 `aria-pressed`가 없다. 현재 사용처 3곳(`app/pins/[id].tsx:75`, `PinTimelineItem.tsx:70`, `PinComposer.tsx:280`)은 모두 `onPress`·`selected`를 넘기지 않아 실제 영향은 없다. ③ `ContentSearchBar.tsx:68` JSX 속성 사이 빈 줄, 여러 파일에서 `aria-*` 여러 개를 한 줄에 둔 서식 불일치(동작 무관).
+
+## 내 구독 OTT (docs/74, 2026-11-17)
+
+- 상태: **구현·자동 검사 통과. 사용자 승인 후 운영 DB 적용·로컬 웹8081 반영 완료, 웹 화면 검증 완료(11절, 2026-11-18). iOS·Android·M-8 미확인.** [74](74_subscribed_ott_spec.md) 전체와 D-1~D-12를 따라 프로필의 구독 설정, 보러가기 우선 표시/초기 탭, 작품 상세 히어로의 시청 행동만 구현했다. 확인된 구독 제공처가 없을 때 애니의 라프텔은 “찾기”로만 연결한다. 검색·추천·홈·시청 제공처 조회 정책·Edge는 그대로다. 구현 검증 중에는 브라우저·앱·Expo 서버를 실행하거나 조작하지 않았다. 후속 “적용되게 전체 적용해줘” 요청으로 아래 운영 migration과 로컬 서버를 반영했다. 사용자 구독 값·감상 기록·secret·Edge·커밋/푸시는 변경하지 않았다.
+- 시작: root `/Users/youngilkim/SceneNote`, `main` `519ddc7`. 시작 변경은 사용자 편집 `AGENTS.md`·`docs/README.md`와 미추적 명세74였다. `/tmp/scenenote-74-start-{snapshot.json,status.txt}`로 시작 상태를 기록하고 해당 변경을 보존했다. `scenenote-verify`와 Node24를 사용했으며 의존성·전역 런타임/환경 파일은 변경하지 않았다.
+
+### 1. STEP 1 실제 실패 출력
+
+- 기준선 **1769/1769**: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-z460h6q0/{test.log,summary.json}`.
+- 테스트만 먼저 작성한 전체 실행은 **1802개 중1769 통과·33 실패**였다. 신규 T-1~T-33 모두 모듈 없음으로 각각 실패했고 기존 테스트는 전부 통과했다. 각 테스트 본문에서 dynamic import하여 파일 전체 실패 1개로 축약하지 않았다. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-tmg4az2w/{test.log,summary.json}`, `/tmp/scenenote-74-red-coverage.json`.
+
+대표 실제 출력(세 테스트 모두 `ERR_MODULE_NOT_FOUND`):
+
+```text
+✖ 74 T-1: non-array saved values normalize to an empty subscription
+✖ 74 T-16: an actionable subscribed provider supplies the existing link and Korean label
+✖ 74 T-32: rapid choices coalesce into the first save and one latest-value save
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/subscribedOtt' imported from /Users/youngilkim/SceneNote/src/utils/subscribedOtt.test.ts
+```
+
+### 2. 테스트 before / after
+
+- **1769/1769 →1802/1802**, 신규33·실패0·skip0. 기존 테스트 파일 변경0. 명세의 모든 다중 입력·안정 정렬/새 배열·연속3토글 저장2회 사례를 포함했다.
+- 최종 전체 검사 로그: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ze72fwti/test.log`, 같은 폴더 `summary.json`.
+- 추가 격리 실행(테스트 개수에 합산하지 않음): 실제 service/hook + 설치 QueryCore **60개**, 실제 설정/계정 행/WatchNowButton 렌더 **30개**, 실제 WatchProviderList **44개** 통과. 다중 observer의 단일 저장 큐·마지막 값 병합, 첫/둘째 저장 실패 rollback·한국어 토스트, 세션 대기 중/응답 뒤 계정 변경·cache.clear 방어, 조회 실패 시 캐시가 있어도 groups[], 플래그false/로그아웃 조회·명시refetch·저장0을 확인했다. 원본/현재 WatchProviderList의 기본 속성 **8상태**는 스타일·텍스트·접근성을 포함한 렌더 결과가 동일했다. 각 fixture는 React/RN/SDK 경계를 모의로 격리했고 네트워크0이다. 실제 화면·실기기·운영 저장 증거가 아니다.
+- 증거: `/tmp/scenenote-74-{storage,ui,watchproviders}-report.json` 및 같은 이름의 `*-fixture.mjs`/로그. 보고서의 소스 해시가 최종 파일과 일치한다.
+
+### 3. 타입·린트·빌드 / SQL
+
+- 전체 `npm run lint`와 웹 `npm run build` **exit0**. 위 `ze72fwti` 폴더의 `lint.log`, `build.log`. 웹 export는 성공했고 기존 Expo 강제 종료 안내가 있었으며 브라우저/서버를 띄우지 않았다.
+- 최초 `typecheck`는 새 설정 경로가 기존 `.expo/types/router.d.ts`에 없어 TS2345 두 건으로 실패했다. 설치된 Expo Router의 실제 `regenerateDeclarations`를 서버 없이 실행해 생성 타입만 갱신했다. 앱에 캐스트/타입 우회를 추가하지 않았다. 이후 `npm run typecheck` **exit0**: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-pngo4f0f/{typecheck.log,summary.json}`. `.expo`는 생성 산출물이며 추적 구현 파일을 추가하지 않았다.
+- SQL은 CLI2.75의 `migration new profile_subscribed_otts`로 만든 새 파일을 명세의 `20261117062800_profile_subscribed_otts.sql` 이름에 맞춘 뒤 7장 전문을 그대로 기록했다. **구현 검증 시에는 운영 적용하지 않았고, 이후 사용자 승인으로 아래 9절에서 적용했다.** 임시 PGlite PostgreSQL에서 운영과 같은0001~0022+정합성3개 기반으로 새 SQL **20개** 검증 통과: 기존 프로필/이름/검색필터 보존, 기존/신규 계정 빈 기본값, 소유자 조회/upsert, 타인 쓰기 거절, anon 비공개, 기존 RLS/정책 불변, 20개 허용/21개 거절/null 거절, 미래 키 DB 허용. 실제 Supabase/PostgREST를 대신하지 않는다. `/tmp/scenenote-74-sql-{fixture.mjs,fixture.log,report.json}`.
+
+### 4. 추가 테스트 ID와 이름
+
+이름은 `src/utils/subscribedOtt.test.ts`의 실제 이름이다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 74 T-1: non-array saved values normalize to an empty subscription |
+| T-2 | 74 T-2: saved values are trimmed, lowercased, deduplicated and validated |
+| T-3 | 74 T-3: subscriptions use the catalog order with Laftel last |
+| T-4 | 74 T-4: the ten service groups retain their names, order and matching contract |
+| T-5 | 74 T-5: toggling adds or removes a known group and ignores unknown groups |
+| T-6 | 74 T-6: provider ids resolve advertising variants and reject unknown ids |
+| T-7 | 74 T-7: subscribed services match flatrate and free provider variants |
+| T-8 | 74 T-8: rental and purchase do not count as subscribed availability |
+| T-9 | 74 T-9: subscription sorting is stable within both groups and does not mutate input |
+| T-10 | 74 T-10: rental and unset subscriptions preserve order in a fresh array |
+| T-11 | 74 T-11: a subscribed free provider wins over unrelated flatrate providers |
+| T-12 | 74 T-12: a subscribed flatrate provider wins over a subscribed free provider |
+| T-13 | 74 T-13: unavailable subscriptions retain the existing rental fallback |
+| T-14 | 74 T-14: a rental listing cannot select a subscribed provider tab |
+| T-15 | 74 T-15: no providers or no subscriptions produce no watch action |
+| T-16 | 74 T-16: an actionable subscribed provider supplies the existing link and Korean label |
+| T-17 | 74 T-17: missing or malformed links skip candidates and allow a later free service |
+| T-18 | 74 T-18: a Disney home link is labeled as opening the service |
+| T-19 | 74 T-19: subscribed rental providers do not produce a watch action |
+| T-20 | 74 T-20: unavailable matchable subscriptions get a qualified availability note |
+| T-21 | 74 T-21: Laftel-only, unset and empty provider results do not assert unavailability |
+| T-22 | 74 T-22: an empty subscription summary says unset |
+| T-23 | 74 T-23: summaries use catalog order and count services after the first two |
+| T-24 | 74 T-24: the summary includes the unmatchable Laftel subscription |
+| T-25 | 74 T-25: Laftel uses only the separate search action |
+| T-26 | 74 T-26: confirmed subscribed availability wins over Laftel search |
+| T-27 | 74 T-27: a Laftel action needs both the subscription and a nonempty anime search URL |
+| T-28 | 74 T-28: unrelated providers do not suppress the subscribed Laftel search |
+| T-29 | 74 T-29: a pending save prevents another write |
+| T-30 | 74 T-30: normalized equal saved and desired sets need no write |
+| T-31 | 74 T-31: a changed desired set writes only normalized known groups |
+| T-32 | 74 T-32: rapid choices coalesce into the first save and one latest-value save |
+| T-33 | 74 T-33: save states use fixed Korean status text |
+
+### 5. UI-13.2와 범위 확인
+
+- 명세의 네 파일 대상 색·글꼴 grep **출력0줄**(일치 없음 exit1), `Alert.alert` grep **출력0줄**. 작품 상세·프로필은 시작 snapshot 대비 추가 줄만 검사해 위반0.
+- 명세의 `git status --short supabase/functions app/search.tsx "app/(tabs)/index.tsx" src/components/home src/utils/recommendationPresentation.ts src/utils/watchProviderDisplay.ts src/utils/watchProviderLookup.ts src/hooks/useWatchProviders.ts src/services/profile.ts`는 **출력0줄**. `getProfile` 파일·기존 테스트 파일은 시작 SHA와 같다. `/tmp/scenenote-74-source-audit.json`.
+- `git diff --check` 통과. 허용 파일만 구현했고 AGENTS의 사용자 편집은 추가로 고치지 않았다. 프로필 통계 select에 새 칼럼을 넣지 않았다. 새 migration은 명세7장과 전문 일치한다.
+
+### 6. 수동 확인 M-1~M-12
+
+아래는 구현 검증 당시의 결과다. 이후 DB 적용과 로컬 서버 반영을 마쳐도 로그인된 화면·실기기 수동 검증은 실행하지 않았으며, 아래 미실행 상태는 유지한다.
+
+| ID | 플랫폼 | 실행 상태·사유 / 보완 근거 |
+|----|--------|---------------------------|
+| M-1 | 웹1440 | **화면 미실행.** 운영 migration 미적용, 브라우저/로그인 조작 안 함. 설정 렌더·10칩·직렬 저장은 격리 확인, 실제 저장 유지 미확인. |
+| M-2 | 웹1440 | **화면 미실행.** 운영 migration 미적용, 브라우저 안 함. 제공처/링크 선택과 실제 카드 우선 표시 검증, 히어로 클릭/새 탭은 미확인. |
+| M-3 | 웹1440 | **화면 미실행.** 운영 migration 미적용. 내 OTT 없음 문구·카드 렌더를 격리 확인, 실제 작품 화면 미확인. |
+| M-4 | 웹1440 | **화면 미실행.** 운영 migration 미적용. 기존 시즌 응답 guard와 Laftel-only fallback 유지·렌더 확인, 실제 시즌/라프텔 이동 미확인. |
+| M-5 | 웹375 | **화면 미실행.** 브라우저 안 함. 375/768/1440 설정 컨테이너·안전 여백·44터치 스타일은 격리 확인, 실제 넘침/히어로 스크롤 양 미측정. |
+| M-6 | 웹1440 | **화면 미실행.** 브라우저 안 함. 새 칼럼 없음·조회 오류의 groups[]와 설정 고정 오류/재시도를 격리 확인, 기존 getProfile 소스 동일. 실제 화면은 미확인. |
+| M-7 | 웹1440 | **화면 미실행.** 브라우저/운영 기록 변경 안 함. 첫/둘째 저장 실패에 lastSaved 복구·토스트1회·대기 폐기를 실제 훅 fixture 확인, 실제 오프라인 전환 미확인. |
+| M-8 | 웹1440 | **화면 미실행.** 실제 로그아웃/계정 변경 안 함. 세션 대기·cache.clear/이전 응답·다중 observer 계정 격리는 실제 훅/service fixture 확인. |
+| M-9 | 웹1440 | **화면 미실행.** 운영 migration 미적용. 준비된 빈 구독의 등록 안내·설정 이동 callback만 카드 fixture 확인. |
+| M-10 | 웹1440 | **코드 검사 통과, 화면 미실행.** 검색·추천·홈 파일 변경0, 실제 화면은 브라우저를 열지 않아 미확인. |
+| M-11 | iOS 세로 | **미실행.** 실기기/시뮬레이터 실행 안 함, migration 미적용. 실제 홈 인디케이터·글자1.3배·OTT 유니버설 링크 미확인. |
+| M-12 | iOS 세로 | **미실행.** 실기기/시뮬레이터 실행 안 함, migration 미적용. 애니에만 Laftel 검색 주소를 전달하는 연결은 코드 확인, 실제 OS 이동 미확인. |
+
+Android 실기기/에뮬레이터도 미실행이며 공유 코드의 타입·스타일/접근성 계약만 확인했다. 수동 시각 검증을 완료로 표시하지 않는다.
+
+### 7. 설계 결정
+
+D-1~D-12 변경 또는 변경 필요사항 **없음**. 저장은 QueryClient+계정+현재 Query 객체별 공유 controller로 직렬화하며 판단은 `nextSubscribedOttWrite`를 사용한다. SDK 세션은 실제 인증을, UI의 시작 계정은 쓰기 문맥 확인만 맡는다. 라프텔은 matchable=false와 찾기 문구를 유지한다. D-8에 따라 첫 조회뿐 아니라 수동 제공처 갱신 중에도 히어로 버튼을 숨긴다.
+
+### 8. 후속 작업 상태
+
+1. 사용자 “적용되게 전체 적용해줘” 승인 후 **운영 DB migration 적용 완료**. 실제 버전 `20261117062800`으로 이번 새 로컬 파일명을 맞췄으며 SQL 전문/SHA256은 변하지 않았다. 0023·0024는 적용하지 않았다.
+2. 실제 로그인된 화면 M-1~M-12·Android의 안전 영역·확대·OS 링크 확인은 남아 있다. 브라우저와 시청 앱은 조작하지 않았다.
+3. **Edge Function 재배포 불필요, 실행0회.** 로컬 Expo 웹은 아래 9절처럼8081에 반영했다. 별도 운영 웹 호스팅·네이티브 스토어/EAS 연결 설정은 이 저장소에서 확인되지 않아 새 배포 대상을 임의로 만들지 않았다.
+
+### 9. 운영 적용·로컬 앱 반영 (2026-11-17)
+
+- 현재 연결 프로젝트 `pstkeooflscvtaxxrwdf`와 후보 소스/SQL 해시를 확인한 뒤 Supabase 플러그인으로 **`profile_subscribed_otts` 한 개만** 적용했다. 적용 전 칼럼/제약은 없었고 기존 이력은0001~0022+정합성3개였다. 도구가 기록한 운영 버전은 **20261117062800**(KST15:28)이다. 승인 SQL과 운영 `schema_migrations.statements`가 전문 일치한다. SHA256 `693de644dac6d3c0eaf4e49bb8671a901a2cb81cb57edef702745dad53fc5aee`.
+- 읽기 전용 운영 사후 검사 **11개 전부 통과**: 이력1개/SQL일치/text[]/NOT NULL/빈 배열 기본값/20개 제한/제약 validated/RLS 켜짐/기존 owner 정책3개 불변/Edge15개 버전·JWT·번들 불변/보안 advisor 전후 동일. 기존 보안 advisor 항목과 링크는 [73 운영 기록](#운영-반영-완료와-남은-설정)에 있다. 새 권한·함수·트리거·secret은 만들지 않았다.
+- 실제 PostgREST에 anon 공개 키로 `profiles?select=subscribed_otts&limit=0`를 요청해 **HTTP200·반환 사용자행0**을 확인했다. 새 칼럼이 Data API에 반영됐다는 확인이며 실제 계정의 읽기/저장 성공 검증은 아니다. 사용자 구독/감상/핀 값을 임의로 변경하지 않았다.
+- 프런트엔드 대상 확인: `.vercel/project.json`, `.openai/hosting.json`, `eas.json`, GitHub 배포 workflow, EAS projectId가 없었고, 정식 웹 주소도 확인되지 않았다. 기존 실행 경로는 `.vscode/tasks.json`의 로컬 Expo8081이다. 시작 전8081 LISTEN은 없었다.
+- 설치된 Expo CLI→better-opn 코드에서 `BROWSER=none`이 브라우저 실행을 건너뛰는 것을 먼저 확인했다. **`PATH=/opt/homebrew/opt/node@24/bin:$PATH BROWSER=none EXPO_NO_TELEMETRY=1 npm run web -- --port 8081 --localhost --clear`**로 로컬 앱 서버만 시작해 계속 실행 중이다. 다른 포트·브라우저·시청 창은 열거나 닫지 않았다. 기존 의존성 버전 안내는 실행 로그에 남았고 이번에 업그레이드하지 않았다.
+- headless HTTP 검증: `/status`는 packager running, `/settings/subscribed-otts` **200**, 해당 페이지가 참조하는 현재 앱 번들 **200**. 번들에 “구독 중인 OTT”, `subscribed_otts`, “라프텔에서 찾기”, “구독 OTT 등록”이 포함됐다. JS를 브라우저에서 실행한 화면 확인은 아니다. 실제 사용하는 탭을 새로고침한 뒤 **프로필 → 구독 중인 OTT**에서 설정하면 된다.
+- 증거: `/tmp/scenenote-74-{deployment-report,schema-before,schema-after,advisors-before,advisors-after,api-schema-check,live-web}.json`. 코드/SQL 내용은 기존 전체1802개·타입·린트·웹 export·격리 검증 이후 바꾸지 않았으며 이번에는 migration 이름과 적용 기록만 정렬했다. 새 서버는 Node24로 실행하고 전역 설정/환경 파일을 수정하지 않았다.
+
+### 10. 후속 리뷰 — useCallback 의존성 경고 정정 (2026-11-17)
+
+- 리뷰에서 지적한 `src/hooks/useSubscribedOtts.ts:140` 경고를 실제 린트로 재현했다: `React Hook useCallback has a missing dependency: 'query'`(**오류0·경고1**). `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-9_umkab9/lint.log`.
+- Query 결과 객체에서 바인딩된 `refetch`를 `refetchQuery`로 분리하고 callback 본문/의존성이 같은 함수 참조를 쓰게 했다. 설치된 QueryObserver의 바인딩 구현을 확인했으며 `enabled` 방어·계정별 키·저장 큐·D-1~D-12는 그대로다. 코드 변경은 이 훅의 해당3줄뿐이고 기존 테스트·화면·서비스·DB·Edge는 변경하지 않았다.
+- `scenenote-verify` 재검사: **테스트1802/1802, 타입 통과, 린트 오류0·경고0**. 로그와 실제 명령: `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ej4y27bc/{test.log,typecheck.log,lint.log,summary.json}`. 실제 저장 훅/서비스+QueryCore 격리 검증 **60개**도 다시 통과했다(`/tmp/scenenote-74-storage-report.json`, `scenenote-74-storage-lint-followup.log`). 외부 요청0, `git diff --check` 통과.
+- 로그인 뒤 화면 M-1~M-12·iOS/Android 실기기는 **여전히 미확인**이다. 이번 후속 작업에서 브라우저·시청 창·서버를 조작하지 않았고 계정에 대신 로그인하거나 기록을 바꾸지 않았다. 이전 웹 export 성공과 실제 화면 검증을 구분한다. (→ 웹 분은 11절에서 확인)
+
+### 11. 웹 실제 화면 검증 (2026-11-18)
+
+사용자가 Claude 앱 내 브라우저 창에서 직접 로그인한 계정으로, 로컬 8081(운영 Supabase 연결)에서 확인했다. 폭은 창 기본 775px과 모바일 375px이다(1440 미측정). 시험 중 바꾼 구독 값은 끝에 **원래 상태(미설정)로 되돌렸다**.
+
+| ID | 결과 | 확인 내용 |
+|----|------|-----------|
+| M-1 | **통과** | 프로필 "구독 중인 OTT, 미설정" → 설정 화면, 칩 10개. 넷플릭스·티빙 연속 클릭 후 "저장했어요.", 뒤로 가면 "넷플릭스 · 티빙", 새로고침 후 유지 |
+| M-2 | **통과** | 오징어 게임 시즌 2: 진입 후 약 2.5초 동안 버튼 없음 → "넷플릭스에서 보기". 누르면 `window.open(넷플릭스 검색 주소, "_blank", "noopener")`. 보러가기 정액제 넷플릭스 + "내 OTT" |
+| M-3 | **통과** | 무빙(디즈니+만): 히어로 버튼 없음, "구독 중인 OTT에서는 아직 제공 정보를 찾지 못했어요." |
+| M-4 | **통과(라프텔 분)** | 라프텔만 구독, 진격의 거인 시즌 3: 히어로 "라프텔에서 찾기" → `laftel.net/search?keyword=진격의 거인 3기`. 시즌 제공 정보 미확인 작품으로 다른 시즌 제공처 버튼이 생기지 않는지는 별도 작품으로 확인 못 함 |
+| M-5 | **통과** | 375: 칩 줄바꿈·넘침 없음, "넷플릭스에서 보기" 하단 403px(스크롤 없이 보임), `scrollWidth` 375. 제공처 이름 줄임표 상황은 재현 작품 없음 |
+| M-6 | **해당 없음** | 운영 migration이 이미 적용돼 "적용 전" 상태를 만들 수 없음 |
+| M-7 | **통과** | 프로필 쓰기 요청만 실패시키도록 fetch를 가로채고(오프라인 대용) 쿠팡플레이 클릭: 칩 원복, 상태 줄과 오류 토스트 "구독 OTT를 저장하지 못했어요. 잠시 후 다시 시도해 주세요." |
+| M-8 | **미실행** | 두 번째 계정 없음 |
+| M-9 | **통과** | 구독 전부 해제 후 무빙: 등록 안내 + "구독 OTT 등록" → `/settings/subscribed-otts` |
+| M-10 | **부분** | 검색 결과·추천 로딩 화면이 기존과 같게 동작. 홈 이어보기는 보지 않음 |
+| M-11 | **미실행** | iOS 시뮬레이터 미실행 |
+| M-12 | **웹으로 대체 확인** | 라프텔만 구독 시 애니(진격의 거인)에만 "라프텔에서 찾기", 비애니(무빙)는 버튼 없음. iOS OS 이동은 미확인 |
+
+- 확인 중 발견(이번 기능 결함 아님, 앱 전체 기존 문제): 웹에서 `accessibilityState={{ checked }}`/`{{ selected }}`가 `aria-checked`·`aria-selected`로 출력되지 않는다(react-native-web 0.21, 화면 전체에서 해당 속성 0개). 화면 낭독기가 칩·탭의 선택 상태를 읽지 못한다.
+- 콘솔에 400 응답 2건이 기록됐으나 설정·상세·검색 화면을 다시 열어 재현되지 않았고 요청 주소는 특정하지 못했다.
+
 ## 프로젝트 정합성 보완 (docs/73, 2026-11-16)
 
 - 상태: **결함 11건 코드 보완·자동 검사 완료. 사용자 승인 후 운영 migration 3개·함수 7개 반영 완료, 실제 웹/iOS/Android 화면 미확인.** 사용자의 “문제점 보완해줘”에 따라 [73](73_project_integrity_fixes_spec.md)을 구현했다. 브라우저·시청 앱·Expo 서버를 열거나 조작하지 않았고 실제 계정의 감상/핀/공유 기록도 검증용으로 쓰지 않았다. 기존 docs/71·72 변경을 보존했으며 커밋/푸시는 하지 않았다.

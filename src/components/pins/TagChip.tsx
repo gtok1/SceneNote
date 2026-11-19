@@ -1,8 +1,9 @@
 import { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import type { Tag } from "@/types/pins";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface TagChipProps {
   tag: Pick<Tag, "id" | "name">;
@@ -18,13 +19,14 @@ export const TagChip = memo(function TagChip({ tag, selected, disabled = false, 
   return (
     <Container
       accessibilityRole={onPress ? "button" : undefined}
-      accessibilityState={{ selected: Boolean(selected), disabled }}
+      {...selectionAriaProps(onPress ? "button" : "plain", Boolean(selected), Platform.OS)}
+      aria-disabled={disabled}
       onPress={disabled ? undefined : onPress}
       style={[styles.chip, selected && styles.selected]}
     >
       <Text style={[styles.text, selected && styles.selectedText]}>#{tag.name}</Text>
       {onRemove ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${tag.name} 삭제`} accessibilityState={{ disabled }} disabled={disabled} onPress={onRemove} style={[styles.removeButton, disabled && styles.disabled]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${tag.name} 삭제`} aria-disabled={disabled} disabled={disabled} onPress={onRemove} style={[styles.removeButton, disabled && styles.disabled]}>
           <Text style={styles.remove}>×</Text>
         </Pressable>
       ) : null}

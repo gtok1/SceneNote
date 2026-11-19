@@ -90,7 +90,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
             accessibilityHint={onReduceTheme ? "이 작품과 비슷한 테마의 추천을 줄입니다" : "이 작품에는 조절할 수 있는 테마 정보가 없습니다"}
             accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !onReduceTheme }}
+            aria-disabled={!onReduceTheme}
             disabled={!onReduceTheme}
             onPress={onReduceTheme}
             style={[styles.iconButton, !onReduceTheme ? styles.disabledThemeIcon : null]}
@@ -106,7 +106,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
           accessibilityHint={RECOMMENDATION_ADD_HINT}
               accessibilityLabel={`${result.title_primary} ${addLabel}`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isAddDisabled, busy: addLabel.includes("중") }}
+          aria-disabled={isAddDisabled} aria-busy={addLabel.includes("중")}
           disabled={isAddDisabled}
           onPressIn={() => addPressGuard.current.begin(result.canonical_id)}
               onPress={() => {
@@ -120,7 +120,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
           accessibilityLabel={`${result.title_primary} ${completeLabel}`}
           accessibilityRole="button"
           accessibilityHint={RECOMMENDATION_COMPLETE_HINT}
-          accessibilityState={{ disabled: isAddDisabled, busy: completeLabel === "기록 중" }}
+          aria-disabled={isAddDisabled} aria-busy={completeLabel === "기록 중"}
           disabled={isAddDisabled}
           onPressIn={() => addPressGuard.current.begin(result.canonical_id)}
           onPress={() => {

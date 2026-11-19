@@ -106,7 +106,7 @@ export default function SignUpScreen() {
         ) : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: formState.isSubmitting || signUp.isPending, busy: formState.isSubmitting || signUp.isPending }}
+          aria-disabled={formState.isSubmitting || signUp.isPending}
           aria-busy={formState.isSubmitting || signUp.isPending}
           disabled={formState.isSubmitting || signUp.isPending}
           onPress={submit}

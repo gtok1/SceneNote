@@ -93,7 +93,7 @@ export const SearchResultItem = memo(function SearchResultItem({
         <Pressable
           accessibilityLabel={`${displayTitle} 보고 싶음`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+          aria-disabled={areActionsDisabled} aria-busy={isActionPending}
           disabled={areActionsDisabled}
           onPress={onAddToWishlist}
           style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}
@@ -105,7 +105,7 @@ export const SearchResultItem = memo(function SearchResultItem({
         <Pressable
           accessibilityLabel={`${displayTitle} 완료`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: areActionsDisabled, busy: isActionPending }}
+          aria-disabled={areActionsDisabled} aria-busy={isActionPending}
           disabled={areActionsDisabled}
           onPress={onMarkCompleted}
           style={[styles.addButton, areActionsDisabled ? styles.addButtonDisabled : null]}

@@ -21,6 +21,8 @@ export interface SearchResult {
   genres?: string[];
   /** ISO 3166-1 alpha-2 codes, from TMDB `origin_country`. */
   origin_country?: string[];
+  /** Original production language when supplied by the provider; not a country proof. */
+  original_language?: string;
   /** Country-set proof from a provider discovery query, not inferred production countries. */
   matched_countries?: string[];
   /** Genre-set proof when a provider query can verify any selected alternative. */

@@ -13,3 +13,6 @@ export const PEOPLE_FEATURES_ENABLED = true;
 
 /** Search discovery is part of MVP; unrelated extended features stay gated. */
 export const SEARCH_RECOMMENDATIONS_ENABLED = true;
+
+/** docs/74: 계정에 저장한 구독 OTT 설정과 작품 상세 바로가기. */
+export const SUBSCRIBED_OTT_FEATURES_ENABLED = true;

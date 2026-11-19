@@ -7,7 +7,7 @@ export function ProfileSkeleton({ layout }: { layout: ProfileLayout }) {
   return (
     <View
       accessibilityLabel="프로필 통계를 불러오는 중입니다"
-      accessibilityState={{ busy: true }}
+      aria-busy={true}
       accessible
       style={{ gap: layout.gap }}
     >

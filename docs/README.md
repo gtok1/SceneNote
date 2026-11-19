@@ -76,6 +76,16 @@
 | [71 의미 없는 API 호출 차단·편의성 정정](71_meaningless_api_calls_and_usability_fixes_spec.md) | 응답을 안 쓰는 공개 회차 조회 차단, 카드 조회 계획, Edge 목록 조회 재시도·창 복귀 재조회 끄기, "API" 문구 제거, 총 화수 미정 진행 막대, 앱 당겨서 새로고침 | 앱 구현·자동 검사 통과, 웹 공개 8화/저장 7화 확인. M-2~M-4·M-6 일부·네이티브 M-7~M-8 미확인. 배포 없음([검증 기록](development_next_steps.md#의미-없는-api-호출-차단편의성-docs71-2026-11-16)) |
 | [72 라이브러리 1000행 잘림·중복 조회 정정](72_library_row_limit_and_redundant_reads_fixes_spec.md) | 라이브러리·핀 끝까지 읽기, 저장 전 인증 왕복 제거, 라이브러리 단일 캐시, 회차 방영일 조회 축소 | 앱 구현·자동 검사 통과. 웹/앱 M-1~M-8 화면 미확인, 배포 없음([검증 기록](development_next_steps.md#라이브러리-1000행-잘림중복-조회-docs72-2026-11-16)) |
 | [73 프로젝트 정합성 결함 11건 보완](73_project_integrity_fixes_spec.md) | TMDB 식별자·인증 복원·쓰기/복구·회차 완전성·목록/추천 입력·시즌 공유·원자적 핀 저장/이동 | 코드·자동 검사 완료, 사용자 승인 후 운영 DB 3개·함수 7개 반영 완료. 웹/iOS/Android 화면 미확인, 공개 웹 origin 미설정([검증 기록](development_next_steps.md#프로젝트-정합성-보완-docs73-2026-11-16)) |
+| [74 내 구독 OTT로 바로 보러 가기](74_subscribed_ott_spec.md) | 구독 OTT 계정 저장·설정 화면, 보러가기 내 OTT 우선·표시, 작품 상세 히어로 시청 버튼(라프텔은 찾기). 키노라이츠와의 사용자 작업 단계 비교에서 편의성 기준을 넘은 것만 | 구현·자동 검사 통과. 운영 DB·로컬 웹8081 반영, 웹 화면 검증 완료(iOS·M-8 미확인). Edge 배포 불필요([검증 기록](development_next_steps.md#내-구독-ott-docs74-2026-11-17)) |
+| [75 웹 접근성 상태 aria-* 정정](75_web_aria_state_fixes_spec.md) | 웹에서 칩·탭·체크박스·펼침 상태가 화면 낭독기에 전달되지 않는 결함(`accessibilityState` 미출력) 정정, 정적 검사·UI 규칙 개정 | 구현·웹 화면 확인(2026-11-18), iOS 미확인. 후속 76 |
+| [76 웹 접근성 선택 상태 후속 정정](76_web_aria_selection_followup_spec.md) | 버튼·라디오의 허용되지 않는 `aria-selected` 제거(플랫폼별 `selectionAriaProps`), 검사기 중첩 JSX 빈틈, `TagChip` | 구현·웹 화면 확인(2026-11-18), iOS 미확인. 후속 77 |
+| [77 출연진 카드 선택 상태 정정](77_cast_card_selection_state_fix_spec.md) | 이동 버튼인 출연진 카드의 선택 상태 속성 제거(웹 `aria-pressed`·앱 `aria-selected`), UI-4.4 이동 버튼 문장 | 구현·웹 화면 확인(2026-11-18), iOS 미확인 |
+| [78 웹 Alert 정리·미사용 추천 섹션 제거](78_web_alert_and_dead_code_cleanup_spec.md) | 웹에서 무동작인 `Alert.alert` 13곳을 토스트·`confirmDestructive`로 교체, `alertUsageGuard` 허용 목록 테스트, 미사용 `PopularRecommendationSection`·훅 삭제, 코드 밖 보완 항목(iOS 확인·커밋) | 구현·웹 일부 확인(2026-11-19), `clearExclusions` 결함 발견, iOS 미확인 |
+| [79 추천 제외 전체 해제 정정](79_recommendation_exclusion_clear_fix_spec.md) | `clearExclusions`가 `set`을 부르지 않아 "전체 해제"가 웹·앱 모두 무동작 → 액션을 순수 모듈로 옮겨 테스트, 한 곳 수정 | 구현·웹 화면 확인(2026-11-19), iOS 미확인 |
+| [80 인기 추천 잔여 코드·해제 버튼 이름](80_popular_recommendation_leftovers_and_exclusion_label_spec.md) | 앱에서 쓰지 않는 인기 추천 클라이언트 서비스·랭킹 복사본·쿼리 키 삭제(서버 함수 유지), 제외 목록 해제 버튼에 작품 제목 이름 | 구현·웹 화면 확인(2026-11-19), iOS 미확인 |
+| [81 라이브러리 작품 유형 필터 정정](81_library_content_type_filter_fixes_spec.md) | 예능·일본어 원제 작품의 한국 드라마 혼입을 공통 표시 분류에서 보정, 영화·애니·전체 보존, 카드 라벨·프로필 통계 일치 | 요구 계약: 실행·검증 결과는 development_next_steps 확인 |
+| [82 검색·추천 드라마 필터 정정](82_search_drama_filter_fixes_spec.md) | 드라마 문맥의 예능·일본 드라마 혼입 방어, 원어/원제와 제작 국가 증거 교집합, 앱 구응답 방어·81 호환 | 요구 계약: 실행·검증 및 운영 배포 상태는 development_next_steps 확인 |
+| [83 쓰지 않는 상태 파일 삭제](83_unused_state_files_cleanup_spec.md) | 아무도 불러오지 않는 store 2개·atom 2개 삭제, 현재 안내 문서의 미사용 경고 정리(동작 변화 없음) | 구현, 화면 미확인 |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시

@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Platform, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage as Image } from "@/components/common/AppImage";
 import { colors, radius, spacing, typography } from "@/constants/theme";
-import { canDisplayWatchProviderAvailability, describeNoKrProviders, describeNoSeasonProviders, DISNEY_PLUS_HOME_URL, formatRegionNames, normalizeWatchProviderLink, pickInitialWatchCategory, WATCH_PROVIDER_REFRESH_MESSAGE } from "@/utils/watchProviderDisplay";
+import { canDisplayWatchProviderAvailability, describeNoKrProviders, describeNoSeasonProviders, DISNEY_PLUS_HOME_URL, formatRegionNames, normalizeWatchProviderLink, WATCH_PROVIDER_REFRESH_MESSAGE } from "@/utils/watchProviderDisplay";
+import { isSubscribedProvider, pickInitialWatchCategoryForSubscription, sortProvidersBySubscription, subscribedOttAvailabilityNote, SUBSCRIBED_OTT_COPY } from "@/utils/subscribedOtt";
 import { formatWatchProviderUpdatedAt, isWatchProviderResponseCompatible, watchProviderPersistenceNotice } from "@/utils/watchProviderLookup";
 import { useAppUIStore } from "@/stores/appUIStore";
 import {
@@ -16,6 +17,7 @@ import {
   type WatchProvidersByCategory,
   type WatchProvidersResponse
 } from "@/types/watchProviders";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface WatchProviderListProps {
   response: WatchProvidersResponse;
@@ -26,11 +28,15 @@ interface WatchProviderListProps {
   requireSeasonMatch?: boolean;
   onRetry: (() => void) | null;
   laftelSearchUrl?: string | null;
+  subscribedOtts?: readonly string[];
+  subscribedOttsReady?: boolean;
+  onOpenOttSettings?: (() => void) | null;
 }
 
 const emptyProviders: WatchProvidersByCategory = { flatrate: [], free: [], rent: [], buy: [] };
+const emptySubscriptions: readonly string[] = [];
 
-export function WatchProviderList({ response, isLoading = false, isRefreshing = false, error = null, seasonNumber = null, requireSeasonMatch = false, onRetry, laftelSearchUrl = null }: WatchProviderListProps) {
+export function WatchProviderList({ response, isLoading = false, isRefreshing = false, error = null, seasonNumber = null, requireSeasonMatch = false, onRetry, laftelSearchUrl = null, subscribedOtts = emptySubscriptions, subscribedOttsReady = false, onOpenOttSettings = null }: WatchProviderListProps) {
   const addToast = useAppUIStore(state => state.addToast);
   const canShowAvailability = canDisplayWatchProviderAvailability({ response, seasonNumber, requireSeasonMatch });
   const responseCompatible = isWatchProviderResponseCompatible({ response, seasonNumber, requireSeasonMatch });
@@ -40,16 +46,18 @@ export function WatchProviderList({ response, isLoading = false, isRefreshing = 
   const pending = isLoading || isRefreshing;
   const providers = canShowAvailability ? response.providers : emptyProviders;
   const otherRegions = canShowAvailability ? response.other_regions ?? [] : [];
-  const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategory(providers));
+  const [selectedCategory, setSelectedCategory] = useState<WatchProviderCategory>(() => pickInitialWatchCategoryForSubscription(providers, subscribedOtts));
   const providerIds = WATCH_PROVIDER_CATEGORIES.map(category =>
     `${category}:${providers[category].map(provider => provider.provider_id).join(",")}`
   ).join("|");
+  const subscriptionSignature = subscribedOtts.join(",");
   useEffect(() => {
-    setSelectedCategory(pickInitialWatchCategory(providers));
-    // Reset only when the available provider identities change, not after a user's tab selection.
-  }, [providerIds]); // eslint-disable-line react-hooks/exhaustive-deps
+    setSelectedCategory(pickInitialWatchCategoryForSubscription(providers, subscribedOtts));
+    // Keep a user's tab until provider identities or account subscriptions change.
+  }, [providerIds, subscriptionSignature]); // eslint-disable-line react-hooks/exhaustive-deps
   const hasAnyProvider = WATCH_PROVIDER_CATEGORIES.some((category) => providers[category].length > 0);
-  const activeProviders = providers[selectedCategory];
+  const activeProviders = useMemo(() => sortProvidersBySubscription(providers[selectedCategory], selectedCategory, subscribedOtts), [providers, selectedCategory, subscribedOtts]);
+  const subscriptionNote = useMemo(() => subscribedOttAvailabilityNote({ providers, subscribed: subscribedOtts }), [providers, subscribedOtts]);
   const laftelLabel = seasonNumber === null ? "라프텔에서 찾아보기" : seasonNumber === 0 ? "라프텔에서 스페셜 찾아보기" : `라프텔에서 ${seasonNumber}기 찾아보기`;
 
   const openProvider = (provider: WatchProvider) => {
@@ -78,7 +86,7 @@ export function WatchProviderList({ response, isLoading = false, isRefreshing = 
           return (
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ selected }}
+              {...selectionAriaProps("button", selected, Platform.OS)}
               key={category}
               onPress={() => setSelectedCategory(category)}
               style={[styles.tab, selected ? styles.tabSelected : null]}
@@ -108,36 +116,51 @@ export function WatchProviderList({ response, isLoading = false, isRefreshing = 
 
       {!isLoading && activeProviders.length > 0 ? (
         <View style={styles.list}>
-          {activeProviders.map((provider) => (
-            <Pressable
-              accessibilityRole="link"
-              disabled={!normalizeWatchProviderLink(provider.link)}
-              key={`${provider.service_type}:${provider.provider_id}`}
-              onPress={() => openProvider(provider)}
-              style={styles.item}
-            >
-              <Image
-                contentFit="cover"
-                source={provider.logo_url ? { uri: provider.logo_url } : null}
-                style={styles.logo}
-              />
-              <View style={styles.providerTextBox}>
-                <Text numberOfLines={1} style={styles.providerName}>
-                  {provider.provider_name}
-                </Text>
-                <Text style={styles.providerType}>{provider.service_type_label}</Text>
-              </View>
-              <Ionicons color={colors.textSubtle} name="chevron-forward" size={20} />
-            </Pressable>
-          ))}
+          {activeProviders.map((provider) => {
+            const subscribed = isSubscribedProvider(provider.provider_id, selectedCategory, subscribedOtts);
+            return (
+              <Pressable
+                accessibilityRole="link"
+                {...(subscribed ? { accessibilityLabel: `${provider.provider_name}, 내 OTT, ${provider.service_type_label}` } : {})}
+                disabled={!normalizeWatchProviderLink(provider.link)}
+                key={`${provider.service_type}:${provider.provider_id}`}
+                onPress={() => openProvider(provider)}
+                style={styles.item}
+              >
+                <Image
+                  contentFit="cover"
+                  source={provider.logo_url ? { uri: provider.logo_url } : null}
+                  style={styles.logo}
+                />
+                <View style={styles.providerTextBox}>
+                  {subscribed ? <View style={styles.providerNameRow}>
+                    <Text numberOfLines={1} style={[styles.providerName, styles.subscribedProviderName]}>{provider.provider_name}</Text>
+                    <Text style={styles.subscribedBadge}>{SUBSCRIBED_OTT_COPY.badge}</Text>
+                  </View> : <Text numberOfLines={1} style={styles.providerName}>
+                    {provider.provider_name}
+                  </Text>}
+                  <Text style={styles.providerType}>{provider.service_type_label}</Text>
+                </View>
+                <Ionicons color={colors.textSubtle} name="chevron-forward" size={20} />
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
+      {!isLoading && subscriptionNote ? <Text style={styles.scopeHint}>{subscriptionNote}</Text> : null}
+      {!isLoading && subscribedOttsReady && subscribedOtts.length === 0 && hasAnyProvider && onOpenOttSettings ? <>
+        <Text style={styles.scopeHint}>{SUBSCRIBED_OTT_COPY.registerHint}</Text>
+        <Pressable accessibilityRole="button" onPress={onOpenOttSettings}
+          style={({ pressed }) => [styles.retryButton, pressed ? styles.laftelPressed : null]}>
+          <Text style={styles.laftelLabel}>{SUBSCRIBED_OTT_COPY.registerAction}</Text>
+        </Pressable>
+      </> : null}
       {lastCheckedLabel ? <Text style={styles.scopeHint}>{lastCheckedLabel}</Text> : null}
       {persistenceNotice ? <Text style={styles.scopeHint}>{persistenceNotice}</Text> : null}
       {onRetry ? <Pressable
         accessibilityRole="button"
         accessibilityLabel="시청 정보 다시 불러오기"
-        accessibilityState={{ disabled: pending, busy: pending }}
+        aria-disabled={pending} aria-busy={pending}
         disabled={pending}
         onPress={onRetry}
         style={({ pressed }) => [styles.retryButton, pending || pressed ? styles.laftelPressed : null]}
@@ -168,6 +191,9 @@ export function WatchProviderList({ response, isLoading = false, isRefreshing = 
 }
 
 const styles = StyleSheet.create({
+  providerNameRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
+  subscribedProviderName: { flexShrink: 1, minWidth: 0 },
+  subscribedBadge: { ...typography.micro, backgroundColor: colors.primary, color: colors.surface, borderRadius: radius.pill, paddingHorizontal: spacing.sm },
   heading: { flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.sm },
   emptyState: { gap: spacing.sm },
   retryButton: { minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.textSubtle, borderRadius: radius.pill },

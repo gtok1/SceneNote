@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,6 +24,7 @@ import {
   resolveEpisodeProgress,
   selectLibraryProgressSeasons,
 } from "@/utils/episodeProgress";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface EpisodeProgressCardProps {
   item: LibraryListItem;
@@ -214,7 +216,7 @@ export function EpisodeProgressCard({
                 <Pressable
                   key={season.season_number}
                   accessibilityRole="button"
-                  accessibilityState={{ selected, disabled }}
+                  {...selectionAriaProps("button", selected, Platform.OS)} aria-disabled={disabled}
                   disabled={disabled}
                   onPress={() => selectSeason(season.season_number)}
                   style={[styles.seasonButton, selected ? styles.seasonButtonSelected : null]}
@@ -249,7 +251,7 @@ export function EpisodeProgressCard({
                     key={episodeNumber}
                     accessibilityLabel={`${episodeNumber}화까지 봄`}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected, disabled }}
+                    {...selectionAriaProps("radio", selected, Platform.OS)} aria-disabled={disabled}
                     disabled={disabled}
                     onPress={() => changeDraft(episodeNumber)}
                     style={[styles.episodeChoice, selected ? styles.episodeChoiceSelected : null]}
@@ -267,7 +269,7 @@ export function EpisodeProgressCard({
           <Pressable
             accessibilityLabel="시청 회차 1 줄이기"
             accessibilityRole="button"
-            accessibilityState={{ disabled: disabled || draftEpisodeNumber <= 0 }}
+            aria-disabled={disabled || draftEpisodeNumber <= 0}
             disabled={disabled || draftEpisodeNumber <= 0}
             hitSlop={4}
             onPress={() => changeDraft(draftEpisodeNumber - 1)}
@@ -297,7 +299,7 @@ export function EpisodeProgressCard({
           <Pressable
             accessibilityLabel="시청 회차 1 늘리기"
             accessibilityRole="button"
-            accessibilityState={{ disabled: disabled || draftEpisodeNumber >= upperBound }}
+            aria-disabled={disabled || draftEpisodeNumber >= upperBound}
             disabled={disabled || draftEpisodeNumber >= upperBound}
             hitSlop={4}
             onPress={() => changeDraft(draftEpisodeNumber + 1)}
@@ -330,7 +332,7 @@ export function EpisodeProgressCard({
           </Pressable>
         ) : null}
         <Pressable
-          accessibilityState={{ disabled: disabled || item.progress_source !== "manual" }}
+          aria-disabled={disabled || item.progress_source !== "manual"}
           disabled={disabled || item.progress_source !== "manual"}
           onPress={reset}
           style={styles.quickButton}
@@ -341,7 +343,7 @@ export function EpisodeProgressCard({
 
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ disabled: saveDisabled }}
+        aria-disabled={saveDisabled}
         disabled={saveDisabled}
         onPress={save}
         style={[styles.saveButton, saveDisabled ? styles.buttonDisabled : null]}

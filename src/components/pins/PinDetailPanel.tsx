@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { AppImage } from "@/components/common/AppImage";
@@ -7,6 +7,7 @@ import { colors, elevation, radius, spacing, typography } from "@/constants/them
 import type { TimelinePin } from "@/types/pins";
 import { createCrewSummary } from "@/utils/contentCrew";
 import { createPinCardModel, getPinAddAccessibilityLabel, PIN_CONTEXT_COPY, PINS_SCREEN_COPY, type PinPanelTimeline } from "@/utils/pinListUi";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface PinDetailPanelProps {
   pin: TimelinePin | null;
@@ -112,7 +113,7 @@ export function PinDetailPanel({
                         </>
                       );
                       return item.current ? (
-                        <View key={item.id} accessible accessibilityLabel={item.accessibilityLabel} accessibilityState={{ selected: true }}
+                        <View key={item.id} accessible accessibilityLabel={item.accessibilityLabel} {...selectionAriaProps("plain", true, Platform.OS)}
                           style={[styles.timelineRow, styles.currentRow]}>{content}</View>
                       ) : (
                         <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.accessibilityLabel}

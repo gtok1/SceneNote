@@ -83,6 +83,77 @@ describe("library filters", () => {
     assert.deepEqual(foreign.map((entry) => entry.content_id), ["foreign"]);
     assert.deepEqual(other.map((entry) => entry.content_id), ["documentary"]);
   });
+
+  it("keeps Japanese-original TMDB dramas out of the Korean drama filter", () => {
+    const entries = [
+      { ...item("gas", "kdrama", ["Sci-Fi & Fantasy", "범죄"]), title_primary: "가스인간", title_original: "ガス人間" },
+      { ...item("romantic", "kdrama", ["Drama", "코미디"]), title_primary: "로맨틱 어나니머스", title_original: "匿名の恋人たち" },
+      { ...item("younger", "kdrama", ["드라마"]), title_primary: "K-연하남 주의보", title_original: "韓ドラみたいな彼と私" },
+      { ...item("korean", "kdrama", ["코미디", "범죄", "SF"]), title_original: "한국 드라마" }
+    ];
+    assert.deepEqual(filterLibraryItems(entries, { ...baseFilters, contentTypeFilter: "kdrama" }).map((entry) => entry.content_id), ["korean"]);
+    assert.deepEqual(new Set(filterLibraryItems(entries, { ...baseFilters, contentTypeFilter: "jdrama" }).map((entry) => entry.content_id)), new Set(["gas", "romantic", "younger"]));
+    assert.deepEqual(new Set(filterLibraryItems(entries, baseFilters).map((entry) => entry.content_id)), new Set(["gas", "romantic", "younger", "korean"]));
+    assert.equal(entries[0]?.content_type, "kdrama", "display correction must not mutate the stored metadata");
+  });
+
+  it("classifies explicit nonfiction genres as other even when Drama is also present", () => {
+    const genres = ["Reality", "리얼리티", "Talk", "토크", "News", "뉴스", "Documentary", "다큐멘터리", "예능"];
+    for (const contentType of ["kdrama", "jdrama", "other"] as const) {
+      for (const genre of genres) {
+        const entry = item(`${contentType}-${genre}`, contentType, ["Drama", genre]);
+        assert.equal(libraryFilters.libraryContentCategory(entry), "other", `${contentType}: ${genre}`);
+        assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, contentTypeFilter: "kdrama" }), []);
+        assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, contentTypeFilter: "jdrama" }), []);
+        assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, contentTypeFilter: "foreign_drama" }), []);
+        assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, contentTypeFilter: "other" }), [entry]);
+        assert.deepEqual(filterLibraryItems([entry], baseFilters), [entry]);
+      }
+    }
+  });
+
+  it("does not infer Japanese origin from a translated title or ambiguous original script", () => {
+    const entries = [
+      ...[null, "", "氣體人間", "가스인간 ガス人間", "한국 드라마"].map((title_original, index) => ({
+        ...item(`original-${index}`, "kdrama", ["드라마"]), title_primary: "ガス人間", title_original
+      })),
+      { ...item("manual", "kdrama", ["드라마"]), source_api: "manual" as const, title_original: "ガス人間" },
+      { ...item("punctuation", "kdrama", []), title_original: "韓國・人間ー" }
+    ];
+    assert.deepEqual(new Set(filterLibraryItems(entries, { ...baseFilters, contentTypeFilter: "kdrama" })), new Set(entries));
+    assert.deepEqual(filterLibraryItems(entries, { ...baseFilters, contentTypeFilter: "jdrama" }), []);
+  });
+
+  it("preserves movie and anime categories despite nonfiction genres and Japanese originals", () => {
+    for (const contentType of ["movie", "anime"] as const) {
+      const entry = { ...item(contentType, contentType, ["Documentary", "Talk"]), title_original: "ガス人間" };
+      assert.equal(libraryFilters.libraryContentCategory(entry), contentType);
+      assert.deepEqual(filterLibraryItems([entry], { ...baseFilters, contentTypeFilter: contentType }), [entry]);
+    }
+  });
+
+  it("combines corrected Japanese categories with status, compact search, genres, rating and year", () => {
+    const gas: LibraryListItem = {
+      ...item("gas", "kdrama", ["Sci-Fi & Fantasy", "범죄"]),
+      title_primary: "가스 인간",
+      title_original: "ガス人間",
+      statuses: ["watching", "recommended"],
+      rating: 8
+    };
+    const entries = [gas, item("unrelated", "jdrama", ["범죄"])];
+    const filters: LibraryFilterState = {
+      ...baseFilters, statusFilter: "watching", contentTypeFilter: "jdrama", searchQuery: "가스인간",
+      genreFilter: serializeGenreFilters(["범죄", "SF/판타지"]), ratingFilter: 8, year: "2026"
+    };
+    const watching = libraryFilters.filterLibraryItemsByStatus(entries, filters.statusFilter);
+    assert.deepEqual(filterLibraryItems(watching, filters), [gas]);
+    assert.deepEqual(filterLibraryItems(watching, { ...filters, year: "2025" }), []);
+    assert.deepEqual(filterLibraryItems(watching, { ...filters, ratingFilter: 7 }), []);
+    assert.deepEqual(filterLibraryItems(watching, { ...filters, genreFilter: "로맨스" }), []);
+    assert.deepEqual(filterLibraryItems(libraryFilters.filterLibraryItemsByStatus(entries, "completed"), filters), []);
+    assert.equal(libraryFilters.filterLibraryItemsByStatus(entries, "all"), entries);
+    assert.deepEqual(new Set(filterLibraryItems(entries, baseFilters)), new Set(entries));
+  });
 });
 
 function item(contentId: string, contentType: LibraryListItem["content_type"], genres: string[]): LibraryListItem {

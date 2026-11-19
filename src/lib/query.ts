@@ -29,7 +29,6 @@ export const queryKeys = {
       ["search", "similar", "similarity-snapshot-v2", userId, librarySignature, anchorKey, focus, mediaType, sort, filters] as const
   },
   recommendations: {
-    popular: (userId: string) => ["recommendations", userId, "popular", "ko-title-v2"] as const,
     personalized: (userId: string, mediaType: MediaTypeFilter, exclusionSignature = "[[],[]]", discoverySignature = "[[],[],[]]") =>
       [
         ...createRecommendationFeedKey(userId, mediaType, exclusionSignature, discoverySignature),
@@ -74,6 +73,7 @@ export const queryKeys = {
   },
   profile: {
     detail: (userId: string) => ["profile", userId, "detail"] as const,
+    subscribedOtts: (userId: string) => ["profile", userId, "subscribed-otts"] as const,
     stats: (userId: string) => ["profile", userId, "stats"] as const
   },
   genreStats: (userId: string) => ["genre-stats", userId] as const

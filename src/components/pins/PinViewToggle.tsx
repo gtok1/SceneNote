@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { colors, radius } from "@/constants/theme";
 import type { PinViewMode } from "@/types/pins";
 import { PIN_VIEW_COPY, PIN_VIEW_OPTIONS } from "@/utils/pinListUi";
+import { selectionAriaProps } from "@/utils/selectionAria";
 
 interface PinViewToggleProps {
   value: PinViewMode;
@@ -20,7 +21,7 @@ export function PinViewToggle({ value, onChange }: PinViewToggleProps) {
             key={option.value}
             accessibilityRole="button"
             accessibilityLabel={option.label}
-            accessibilityState={{ selected }}
+            {...selectionAriaProps("button", selected, Platform.OS)}
             onPress={() => onChange(option.value)}
             style={({ pressed }) => [styles.button, selected && styles.selected, pressed && styles.pressed]}
           >

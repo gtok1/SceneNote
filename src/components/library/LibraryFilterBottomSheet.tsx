@@ -1,7 +1,7 @@
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +12,7 @@ import { colors, radius, spacing } from "@/constants/theme";
 import type { LibraryStatusFilter } from "@/types/library";
 import type { DateSortOrder } from "@/utils/contentSort";
 import { ALL_GENRE_FILTER, createGenreFilterOptions } from "@/utils/genre";
+import { selectionAriaProps } from "@/utils/selectionAria";
 import {
   CONTENT_TYPE_FILTERS,
   CONTENT_TYPE_LABELS,
@@ -230,8 +231,7 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected }}
-      aria-pressed={selected}
+      {...selectionAriaProps("button", selected, Platform.OS)}
       onPress={onPress}
       style={[styles.chip, selected ? styles.chipSelected : null]}
     >

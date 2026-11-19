@@ -29,6 +29,16 @@ const result: SearchResult = {
   episode_count: null
 };
 
+it("preserves TMDB original language for regional drama filtering without extra requests", () => {
+  const gas = normalizeTmdbItem({
+    id: 253960, media_type: "tv", name: "가스인간", original_name: "ガス人間",
+    original_language: "ja", origin_country: ["KR", "JP"], genre_ids: [10765, 80]
+  }, "drama");
+  assert.equal(gas?.original_language, "ja");
+  assert.deepEqual(gas?.origin_country, ["KR", "JP"]);
+  assert.deepEqual(gas?.genres, ["Sci-Fi & Fantasy", "Crime"]);
+});
+
 describe("applyTmdbSeasonMetadata", () => {
   it("applies the measured second-season date and episode count", () => {
     const updated = applyTmdbSeasonMetadata(result, [

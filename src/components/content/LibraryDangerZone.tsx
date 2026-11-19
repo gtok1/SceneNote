@@ -12,7 +12,7 @@ export function LibraryDangerZone({ pending, onDelete }: { pending: boolean; onD
       <Pressable
         accessibilityLabel={LIBRARY_DELETE_ZONE_COPY.actionLabel}
         accessibilityRole="button"
-        accessibilityState={{ disabled: pending, busy: pending }}
+        aria-disabled={pending} aria-busy={pending}
         disabled={pending}
         onPress={onDelete}
         style={({ pressed }) => [styles.button, pressed && !pending ? styles.buttonPressed : null, pending ? styles.buttonPending : null]}

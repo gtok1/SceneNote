@@ -1,5 +1,5 @@
-import { PEOPLE_FEATURES_ENABLED } from "@/constants/features";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, useWindowDimensions, ScrollView, View } from "react-native";
+import { PEOPLE_FEATURES_ENABLED, SUBSCRIBED_OTT_FEATURES_ENABLED } from "@/constants/features";
+import { KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, ScrollView, View } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,7 +14,9 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton";
 import { ContentReviewEditor } from "@/components/content/ContentReviewEditor";
 import { EpisodeProgressCard } from "@/components/content/EpisodeProgressCard";
 import { WatchProviderList } from "@/components/content/WatchProviderList";
-import { createLaftelSearchLink } from "@/utils/watchProviderDisplay";
+import { WatchNowButton } from "@/components/content/WatchNowButton";
+import { canDisplayWatchProviderAvailability, createLaftelSearchLink } from "@/utils/watchProviderDisplay";
+import { pickSubscribedWatchAction } from "@/utils/subscribedOtt";
 import { resolveWatchProviderMediaType, supportsWatchProviderLookup } from "@/utils/watchProviderLookup";
 import { normalizeWatchStatuses } from "@/constants/status";
 import { colors, radius, spacing, typography } from "@/constants/theme";
@@ -31,6 +33,8 @@ import {
 } from "@/hooks/useLibrary";
 import { useFavoritePeople } from "@/hooks/usePeople";
 import { useWatchProviders } from "@/hooks/useWatchProviders";
+import { useSubscribedOtts } from "@/hooks/useSubscribedOtts";
+import { emptyWatchProviders } from "@/services/watchProviders";
 import { useAppUIStore } from "@/stores/appUIStore";
 import type { CastMember, SearchResult } from "@/types/content";
 import type { WatchStatus } from "@/types/library";
@@ -110,6 +114,7 @@ export default function ContentDetailScreen() {
   const updateStatuses = useUpdateLibraryStatuses();
   const deleteLibraryItem = useDeleteLibraryItem();
   const favoritePeople = useFavoritePeople();
+  const subscribedOtts = useSubscribedOtts();
 
   const dbContent = content.data;
   const dbDetailSource =
@@ -389,6 +394,17 @@ export default function ContentDetailScreen() {
     confirmDestructive({ title: copy.title, message: copy.message, confirmLabel: copy.confirmLabel, onConfirm: removeFromLibrary });
   };
   const statusPending = addToLibrary.isPending || updateStatuses.isPending || deleteLibraryItem.isPending;
+  const laftelSearchUrl = view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle, watchProviderSeason) : null;
+  const canShowWatchAvailability = canDisplayWatchProviderAvailability({ response: watchProviders.data, seasonNumber: watchProviderSeason, requireSeasonMatch: requireWatchProviderSeason });
+  const watchAction = watchProviders.isLoading || watchProviders.isRefreshing ? null : pickSubscribedWatchAction({
+    providers: canShowWatchAvailability ? watchProviders.data.providers : emptyWatchProviders,
+    subscribed: subscribedOtts.groups,
+    laftelSearchUrl
+  });
+  const openWatchPlatform = () => {
+    if (!watchAction) return;
+    void Linking.openURL(watchAction.link).catch(() => addToast("시청 플랫폼을 열지 못했어요. 잠시 후 다시 시도해 주세요.", "error"));
+  };
   const sections = contentDetailSections({ columns: layout.columns, inLibrary: Boolean(libraryItem), isSeries: view.contentType !== "movie", hasCast: view.cast.length > 0, peopleEnabled: PEOPLE_FEATURES_ENABLED });
   const renderSection = (key: ContentDetailSection) => {
     switch (key) {
@@ -402,7 +418,8 @@ export default function ContentDetailScreen() {
       case "providers": return <WatchProviderList key={key} error={watchProviders.error} isLoading={watchProviders.isLoading} isRefreshing={watchProviders.isRefreshing}
         response={watchProviders.data} seasonNumber={watchProviderSeason} requireSeasonMatch={requireWatchProviderSeason}
         onRetry={watchProviderExternalId && supportsWatchProviderLookup({ source: watchProviderSource, mediaType: watchProviderMediaType }) ? watchProviders.refetch : null}
-        laftelSearchUrl={view.contentType === "anime" ? createLaftelSearchLink(watchProviderTitle, watchProviderSeason) : null} />;
+        laftelSearchUrl={laftelSearchUrl} subscribedOtts={subscribedOtts.groups} subscribedOttsReady={subscribedOtts.isReady}
+        onOpenOttSettings={SUBSCRIBED_OTT_FEATURES_ENABLED ? () => router.push("/settings/subscribed-otts") : null} />;
       case "review": return libraryItem ? <ContentReviewEditor key={key} contentId={libraryItem.content_id} contentAirDate={view.airDate} contentEndDate={view.endDate} contentAirYear={view.airYear} firstWatchedAt={libraryItem.first_watched_at} lastWatchedAt={libraryItem.last_watched_at} libraryItemId={libraryItem.library_item_id} onSaved={() => addToast("내 감상을 저장했어요.", "success")} /> : null;
       case "overview": return <ContentOverviewCard key={key} overview={view.overview} />;
       case "cast": return <CastSection key={key} cast={view.cast} isAnime={view.contentType === "anime"} favoriteKeys={favoritePersonKeys} columns={layout.mainWidth >= 520 ? 2 : 1} onOpen={openCastMember} />;
@@ -426,8 +443,10 @@ export default function ContentDetailScreen() {
               onAddMoviePin={() => router.push({ pathname: "/pins/new", params: { contentId: libraryItem?.content_id ?? params.id } })}
               onOpenPins={() => router.push({ pathname: "/content/[id]/pins", params: { id: libraryItem?.content_id ?? params.id, ...(libraryItem ? { libraryItemId: libraryItem.library_item_id } : {}), ...(params.season ? { season: params.season } : {}) } })}
               onOpenList={openLibraryList} /> : null}
+            {watchAction ? <WatchNowButton label={watchAction.label} icon={watchAction.kind === "laftel" ? "search" : "play"} onPress={openWatchPlatform} /> : null}
             {params.source || dbDetailSource ? <Pressable accessibilityRole="button" accessibilityLabel="작품 정보 다시 불러오기"
-              accessibilityState={{ disabled: externalDetail.isFetching, busy: externalDetail.isFetching }}
+              aria-disabled={externalDetail.isFetching}
+              aria-busy={externalDetail.isFetching}
               disabled={externalDetail.isFetching} onPress={() => void refreshContentInformation()}
               style={({ pressed }) => ({ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: spacing.md,
                 borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,

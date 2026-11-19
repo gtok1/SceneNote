@@ -1,7 +1,6 @@
-import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
+import { EXTENDED_FEATURES_ENABLED, SUBSCRIBED_OTT_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -30,6 +29,7 @@ import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { useGenreStats } from "@/hooks/useGenreStats";
 import { useLibrary, useLibraryStats } from "@/hooks/useLibrary";
+import { useSubscribedOtts } from "@/hooks/useSubscribedOtts";
 import { queryClient, queryKeys } from "@/lib/query";
 import { getProfile, updateProfileDisplayName } from "@/services/profile";
 import { useAppUIStore } from "@/stores/appUIStore";
@@ -52,6 +52,7 @@ import {
   displayNameFromEmail
 } from "@/utils/profileStats";
 import { shareTasteReportImage } from "@/utils/tasteReportShare";
+import { describeSubscribedOtts } from "@/utils/subscribedOtt";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -59,6 +60,7 @@ export default function ProfileScreen() {
   const stats = useLibraryStats();
   const library = useLibrary("all");
   const genreStats = useGenreStats();
+  const subscribedOtts = useSubscribedOtts();
   const { width } = useWindowDimensions();
   const layout = getProfileLayout(width);
   const insets = useSafeAreaInsets();
@@ -187,7 +189,6 @@ export default function ProfileScreen() {
         status: "error",
         message: error instanceof Error ? error.message : "취향 카드를 공유하지 못했습니다."
       });
-      Alert.alert("공유 실패", error instanceof Error ? error.message : "취향 카드를 공유하지 못했습니다.");
     }
   };
 
@@ -291,6 +292,8 @@ export default function ProfileScreen() {
             </>
           )}
           <AccountSection
+            subscribedOttSummary={describeSubscribedOtts(subscribedOtts.groups)}
+            onOpenSubscribedOtts={SUBSCRIBED_OTT_FEATURES_ENABLED ? () => router.push("/settings/subscribed-otts") : undefined}
             deleting={deleteAccount.isPending}
             exclusionCount={recommendationExclusionCount}
             onDeleteAccount={handleDeleteAccount}

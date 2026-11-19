@@ -1,7 +1,7 @@
 import { Redirect } from "expo-router";
 import { EXTENDED_FEATURES_ENABLED } from "@/constants/features";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -10,9 +10,11 @@ import * as DocumentPicker from "expo-document-picker";
 import { EmptyState } from "@/components/common/EmptyState";
 import { colors, radius, spacing } from "@/constants/theme";
 import { useNetflixBulkImport } from "@/hooks/useBulkImport";
+import { useAppUIStore } from "@/stores/appUIStore";
 import type { BulkImportReport, BulkImportRowResult, BulkImportSummary, NetflixBulkImportRow } from "@/types/bulkImport";
 import { parseNetflixBulkWorkbook } from "@/utils/netflixBulkWorkbook";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { userFacingErrorMessage } from "@/utils/profileDashboard";
 
 const EXCEL_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -36,6 +38,7 @@ const SUMMARY_ITEMS: { key: keyof BulkImportSummary; label: string }[] = [
 ];
 
 function LibraryImportScreen() {
+  const addToast = useAppUIStore((state) => state.addToast);
   const { width } = useWindowDimensions();
   const { gutter } = getHomeLayout(width);
   const insets = useSafeAreaInsets();
@@ -84,13 +87,12 @@ function LibraryImportScreen() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "엑셀을 읽지 못했습니다.";
       setParseError(message);
-      Alert.alert("엑셀 읽기 실패", message);
     }
   };
 
   const submit = (commit: boolean) => {
     if (!rows.length) {
-      Alert.alert("엑셀 필요", "먼저 업로드할 엑셀 파일을 선택해 주세요.");
+      addToast("먼저 업로드할 엑셀 파일을 선택해 주세요.", "info");
       return;
     }
 
@@ -104,14 +106,14 @@ function LibraryImportScreen() {
           setReport(nextReport);
           setCommitConfirmVisible(false);
         },
-        onError: (error) => Alert.alert(commit ? "등록 실패" : "검사 실패", error.message)
+        onError: (error) => addToast(userFacingErrorMessage(error, commit ? "등록하지 못했어요. 잠시 후 다시 시도해 주세요." : "검사하지 못했어요. 잠시 후 다시 시도해 주세요."), "error")
       }
     );
   };
 
   const confirmCommit = () => {
     if (!report || report.mode !== "dry-run") {
-      Alert.alert("검사 먼저 실행", "실제 등록 전에 Dry-run으로 중복과 검토 항목을 확인해 주세요.");
+      addToast("실제 등록 전에 Dry-run으로 중복과 검토 항목을 확인해 주세요.", "info");
       return;
     }
 

@@ -88,7 +88,7 @@ export default function SignInScreen() {
         {signIn.error ? <Text accessibilityRole="alert" style={styles.error}>{signIn.error.message}</Text> : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: formState.isSubmitting || signIn.isPending, busy: formState.isSubmitting || signIn.isPending }}
+          aria-disabled={formState.isSubmitting || signIn.isPending}
           aria-busy={formState.isSubmitting || signIn.isPending}
           disabled={formState.isSubmitting || signIn.isPending}
           onPress={submit}

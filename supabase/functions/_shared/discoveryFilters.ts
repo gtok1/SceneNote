@@ -1,3 +1,5 @@
+import { dramaRegionalCountry, hasNonDramaGenre } from "./dramaClassification.ts";
+
 /** Positive discovery choices. Recommendation exclusions remain a separate, stricter rule. */
 export type DiscoveryMediaType = "anime" | "drama" | "movie";
 
@@ -19,6 +21,10 @@ export interface DiscoveryFilterInput {
 }
 
 export interface DiscoveryCandidate {
+  external_source?: string;
+  title_original?: string | null;
+  original_language?: string | null;
+  languages?: readonly string[] | null;
   air_year?: number | null;
   genres?: readonly string[] | null;
   countries?: readonly string[] | null;
@@ -86,16 +92,26 @@ export function matchesDiscoveryGenre(genres: readonly string[] | null | undefin
 
 export function matchesDiscoveryFilters(candidate: DiscoveryCandidate, input: DiscoveryFilterInput = {}): boolean {
   const filters = normalizeDiscoveryFilters(input);
-  const genreMatches = filters.genres.length === 0 || filters.genres.some((genre) =>
-    matchesDiscoveryGenre(candidate.genres, genre) ||
-    (genre === "animation" && (candidate.content_type === "anime" || candidate.category === "anime"))
-  ) || Boolean(candidate.matched_genres?.length && candidate.matched_genres.every((possibleGenre) =>
-    filters.genres.some((genre) => matchesDiscoveryGenre([possibleGenre], genre))
-  ));
-  const countries = [...(candidate.countries ?? []), ...(candidate.origin_country ?? [])];
-  const countryMatches = filters.countries.length === 0 || countries.some((country) => filters.countries.includes(country.trim().toUpperCase())) ||
-    Boolean(candidate.matched_countries?.length && candidate.matched_countries.every((country) => filters.countries.includes(country.trim().toUpperCase())));
   const type = discoveryMediaType(candidate);
+  const nonDramaTv = type !== "movie" && type !== "anime" && hasNonDramaGenre(candidate.genres);
+  const genreMatches = filters.genres.length === 0 || filters.genres.some((genre) =>
+    !(genre === "drama" && nonDramaTv) && (matchesDiscoveryGenre(candidate.genres, genre) ||
+    (genre === "animation" && (candidate.content_type === "anime" || candidate.category === "anime")))
+  ) || Boolean(candidate.matched_genres?.length && candidate.matched_genres.every((possibleGenre) =>
+    filters.genres.some((genre) => !(genre === "drama" && nonDramaTv) && matchesDiscoveryGenre([possibleGenre], genre))
+  ));
+  // Only the drama + country combination uses regional display classification. Country-only,
+  // movie and anime filtering retain production-country OR semantics (docs/82).
+  const bothRegionalCountries = filters.countries.includes("KR") && filters.countries.includes("JP");
+  const region = type === "drama" && !bothRegionalCountries &&
+    (filters.mediaTypes.includes("drama") || filters.genres.includes("drama"))
+    ? dramaRegionalCountry(candidate) : null;
+  const allowedCountries = region
+    ? filters.countries.filter((country) => country !== "KR" && country !== "JP" || country === region)
+    : filters.countries;
+  const countries = [...(candidate.countries ?? []), ...(candidate.origin_country ?? [])];
+  const countryMatches = filters.countries.length === 0 || countries.some((country) => allowedCountries.includes(country.trim().toUpperCase())) ||
+    Boolean(candidate.matched_countries?.length && candidate.matched_countries.every((country) => allowedCountries.includes(country.trim().toUpperCase())));
   const typeMatches = filters.mediaTypes.length === 0 || (type !== null && filters.mediaTypes.includes(type));
   return genreMatches && countryMatches && typeMatches && (filters.year === undefined || candidate.air_year === filters.year);
 }
@@ -103,6 +119,7 @@ export function matchesDiscoveryFilters(candidate: DiscoveryCandidate, input: Di
 export function discoveryMediaType(candidate: DiscoveryCandidate): DiscoveryMediaType | null {
   if (candidate.content_type === "anime" || candidate.category === "anime") return "anime";
   if (candidate.content_type === "movie" || candidate.category === "movie") return "movie";
+  if (hasNonDramaGenre(candidate.genres)) return null;
   if (["kdrama", "jdrama"].includes(candidate.content_type ?? "") || candidate.category === "drama" ||
     (candidate.content_type === "other" && candidate.has_seasons === true)) return "drama";
   return null;

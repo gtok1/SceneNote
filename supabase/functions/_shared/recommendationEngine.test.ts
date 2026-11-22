@@ -732,3 +732,15 @@ it("integrity REC-ID-2 keeps different movie and TV candidates with the same TMD
   const tv = candidate("123", { external_source: "tmdb", content_type: "jdrama", title_primary: "Different Series", air_year: 2026, has_seasons: true });
   assert.equal(getRecommendationBatch([], [movie, tv], { limit: 2, now: NOW }).items.length, 2);
 });
+
+it("85 T-6: same-work title keys normalize, drop short titles and deduplicate", () => {
+  assert.deepEqual(workMatching.recommendationSameWorkTitleKeys({
+    title_primary: " 첫 번째, 작품! ", title_original: "첫번째작품"
+  }), ["첫번째작품"]);
+  assert.deepEqual(workMatching.recommendationSameWorkTitleKeys({
+    title_primary: "A", title_original: null
+  }), []);
+  assert.deepEqual(workMatching.recommendationSameWorkTitleKeys({
+    title_primary: "ＡＢＣ", title_original: "abc"
+  }), ["abc"]);
+});

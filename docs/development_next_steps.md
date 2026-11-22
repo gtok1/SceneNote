@@ -1,5 +1,525 @@
 # SceneNote Development Next Steps
 
+검사 선택은 [변경 종류별 검증](../README.md#변경-종류별-검증)을 따른다. 작업 기록은 저장소 루트에서 `rg -n "^## .*docs/86" docs/development_next_steps.md`처럼 명세 번호나 기능명으로 찾는다.
+
+## 핀 태그 입력 보완 (docs/94, 2026-11-22)
+
+[94번 명세](94_pin_tag_input_fixes_spec.md)에 따라 핀 작성과 편집에서 ‘추가’를 누르지 않은 태그도 저장한다. 추가·Enter·후보 선택·저장이 같은 함수로 앞의 `#`, 두 종류의 쉼표, 줄바꿈, 중복을 처리한다. 길이·개수 제한을 넘으면 입력을 보존하고 태그 칸으로 포커스를 돌린다. ‘내 태그’는 기존 `useTags()` 결과에서 최대 8개를 보여 준다.
+
+시작 시점은 `main`의 `0ca4651`, `git status --short` 112개 항목, Node 24의 `npm test` **1,957/1,957**이었다. STEP 1에서 기존 1,957개는 통과했고 새 6개가 모두 실패했다.
+
+| 테스트 | 구현 전 실제 출력 |
+| --- | --- |
+| 94 T-1~T-4 | `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/pinTagInput'` |
+| 94 T-5 | `AssertionError [ERR_ASSERTION]: missing addTagsFromInput(` |
+| 94 T-6 | `AssertionError [ERR_ASSERTION]: expected tag merge between offline and time checks` |
+
+STEP 2에서 순수 함수 테스트 4개가 통과했다. 최종 검사에서 관련 테스트 48개와 전체 **1,963/1,963**(skip 0), 타입·린트·웹 QA용 정적 빌드가 통과했다. 변경한 UI 줄의 UI-13.2 위반은 0건이다.
+
+| 확인 | 관찰 결과 |
+| --- | --- |
+| M-1 · 웹 1440px | 합성 계정에서 `#액션, 감동，여운`을 입력하고 바로 저장하자 상세에 태그 3개가 표시됐다. 편집에서 입력한 `###감정선`도 저장됐다. 21자·9+2개 입력은 태그 칸에 포커스가 남고 사전 조회와 쓰기가 각각 0건이었다. 구분자·중복만 입력해도 기존 태그를 저장할 수 있었다. 기존 `#보관`이 보존됐고 검증 핀 2개를 삭제해 남은 핀은 0개였다. |
+| M-2 · 웹 375px | 기존 태그 12개 중 최근 8개가 44px 이상 높이로 줄바꿈됐고 가로 넘침은 없었다. `액션, 감`에서 Tab·Enter로 ‘감정선’을 선택하면 `액션, `이 남았다. Enter로 연속 입력할 때 포커스가 유지됐다. 태그 10개, 빈 결과, 조회 대기·오류에서는 후보를 숨겼다. 저장 중 후보 클릭을 차단하고 후보 그룹에 비활성 상태를 표시했으며, 저장 오류의 `aria-live="polite"`를 확인했다. |
+| M-3 · iOS 세로 | Xcode·시뮬레이터·기기 실행 도구가 없어 미실행이다. 설치된 RN 0.81.5 iOS·Android 소스에서 `submitBehavior="submit"`이 제출 시 포커스를 유지하는 경로를 확인했다. 실제 키보드의 자동 대문자와 후보·저장 버튼 가림은 기기 확인이 필요하다. |
+
+375px Chrome에서 합성 태그 3,012개를 한 번 조회한 뒤 입력 10개를 바꾸자 후보 갱신을 7~14ms 안에 확인했다. Node 24에서는 합성 태그 5,000개로 순수 함수의 정렬 시간을 측정했다. 30회 실행의 중앙값은 빈 입력 13.97ms, ‘감정’ 7.57ms, ‘장면42’ 0.44ms였다. 기존 `getTags`는 이름순으로 한 번 조회하며 저장소의 로컬 API 설정은 응답당 1,000행이다. 그 한도가 적용되는 환경에서는 수신한 범위에서만 후보를 고른다. D-3대로 기존 조회를 사용한다.
+
+운영 반영은 웹 재빌드·배포와 앱 클라이언트 업데이트가 필요하다. 기존 `#`·쉼표가 든 태그의 일괄 정리는 별도 결정 사항이다. 로컬 증거는 시스템 임시 폴더의 `scenenote-verify-zpftq285`(기준선), `scenenote-verify-ysmqg7m1`(STEP 1), `scenenote-verify-8te6fdy6`(최종), `scenenote94-opy1__us`(웹·SDK·성능 검사)에 있다.
+
+## 감상·핀 저장 요청 시간 제한 (docs/93, 2026-11-22)
+
+[93번 명세](93_save_request_deadline_fixes_spec.md)에 따라 감상, 본 시기, 핀 생성·수정·삭제에 요청당 15초 제한을 적용했다. 핀 저장 전 작품·회차 확인도 한 번의 15초 안에 끝난다. 제한에 도달하면 요청을 취소하고 기존 오류 자리에 “응답이 늦어 저장 결과를 확인하지 못했어요. 연결을 확인한 뒤 다시 저장해 주세요.”를 표시한다. 사용자가 같은 폼에서 같은 핀을 다시 저장하면 첫 요청의 ID를 쓴다.
+
+시작은 `main`의 `0ca4651`, `git status --short` 105개 항목이었다. 기본 Node의 공유 라이브러리 로드 오류로 저장소 지침의 Node 24를 사용했다. 기준선은 **1,951/1,951**이었다. STEP 1에서 기존 1,951개는 통과했고 새 6개가 모두 실패했다.
+
+| 테스트 | 구현 전 실제 출력 |
+| --- | --- |
+| 93 T-1~T-4, T-6 | `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/saveDeadline'` |
+| 93 T-5 | `AssertionError [ERR_ASSERTION]: saveContentReview missing deadline` |
+
+STEP 2에서 순수 함수 테스트 5개가 통과했다. 서비스와 핀 작성 화면 연결 후 관련 테스트 33개(86·89·92·93, 핀 저장·상세)와 전체 **1,957/1,957**(skip 0), 타입·린트 및 웹 QA용 정적 빌드가 통과했다. UI-13.2에서 변경 줄 위반은 0건이었다. `PinComposer` 파일 전체에는 작업 전부터 글자 크기·굵기를 직접 지정한 11줄이 있었다.
+
+| 확인 | 지연 조건과 관찰 결과 |
+| --- | --- |
+| M-1 · 웹 1440px | 로컬 합성 API가 감상 POST와 본 시기 PATCH 응답을 각각 보류했다. Chrome은 요청을 14.988초·14.998초에 취소했다. 두 경우 모두 한국어 문구가 나오고 버튼과 입력이 풀렸다. 헤더 뒤로는 저장 중에 차단됐고 시간 초과 뒤에는 초안 폐기 확인이 떴다. 재시도와 검증 데이터 원복까지 확인했다. 감상 성공 뒤 날짜 저장만 지연된 경우에는 별점·후기를 유지했고, 날짜 초안만 되돌리면 확인 없이 나갈 수 있었다. |
+| M-2 · 웹 375px | 핀 저장 전 조회 응답을 보류하자 약 15.43초 뒤 오류 문구가 표시됐고 저장 RPC는 0회였다. 이탈 확인에서 취소하면 메모가 남았고, 버리기를 승인하면 핀 목록으로 이동했다. 첫 RPC에서 합성 핀을 저장한 뒤 응답만 보류했을 때 약 15.42초 뒤 다시 저장할 수 있었고, 같은 ID·본문으로 재시도해 핀 1개만 남았다. 핀 목록에서 편집으로 들어가 삭제 응답을 보류하자 약 15.44초 뒤에도 편집 화면과 삭제 버튼이 유지됐다. 다시 삭제한 뒤 검증용 핀은 0개였다. |
+| M-3 · iOS 세로 | 이 Mac에는 Xcode와 시뮬레이터·기기 도구가 없어 미실행이다. 설치된 React Native 0.81.5 소스에서 fetch 취소 신호가 iOS의 URLSession과 Android의 OkHttp 요청 취소로 전달되는 경로를 확인했다. 기기별 네트워크 기본 제한과 실제 연결 종료 시각은 미측정이다. |
+
+실제 서비스와 로컬 HTTP 서버로도 확인했다. 세션을 보류한 감상 저장·핀 생성·수정은 모두 15.002초에 종료됐다. 뒤늦게 세션을 풀자 세 요청 모두 이미 취소된 신호를 받았고 서버에 도달한 쓰기는 0건이었다. 늦게 거부된 Promise의 미처리 오류도 0건이었다. 핀 저장 전 확인은 작품과 회차 조회에 같은 신호를 전달했고, 상세 화면에서는 두 조회 모두 신호 없이 15초 뒤에도 성공했다.
+
+운영 반영에는 웹 재빌드·배포와 앱 클라이언트 업데이트가 필요하다. 서버 배포·마이그레이션은 필요 없다. 로컬 로그는 시스템 임시 폴더의 `scenenote-verify-b_6hlh9v`(기준선), `scenenote-verify-uea_nz6f`(STEP 1), `scenenote-verify-jtbe9rff`(전체), `scenenote93-tpv6sf0d`(웹·서비스·기기 환경 검증)에 있다.
+
+## 본 시기 기본값 저장 정정 (docs/92, 2026-11-22)
+
+[92번 명세](92_watch_date_default_save_fixes_spec.md)에 따라 ‘내 감상’의 처음·마지막 본 시기는 사용자가 기록한 날짜만 표시한다. 공개일·마지막 방영일은 입력 범위와 안내에 쓴다. 원천 스냅샷과 저장 직후 모두 빈 날짜를 유지하므로 별점·후기만 저장하면 날짜 쓰기는 발생하지 않는다. ‘오늘’은 마지막 본 시기 초안에 기기 현지 날짜를 넣는다.
+
+시작은 `main`의 `0ca4651`, `git status --short` 101개 항목이었다. 기준선은 **1,948/1,948**이었다. 테스트만 추가한 STEP 1에서 기존 1,948개가 통과하고 새 3개가 아래와 같이 실패했다.
+
+| 테스트 | 구현 전 실제 출력 |
+| --- | --- |
+| 92 T-1 · today fills the local date | `ERR_MODULE_NOT_FOUND` · `src/utils/watchDateInput` |
+| 92 T-2 · the editor no longer pre-fills watch dates | `AssertionError [ERR_ASSERTION]: missing firstFallback: null` |
+| 92 T-3 · empty year label is configurable and filters keep theirs | `AssertionError [ERR_ASSERTION]: missing default emptyLabel` |
+
+STEP 2의 T-1은 서울·로스앤젤레스 시간대 모두 통과했다. YearSelect와 편집기 연결 후 86·89·92번 관련 테스트 13개와 전체 **1,951/1,951**(skip 0), 타입·린트, 웹 QA용 정적 빌드가 통과했다. 변경한 UI 줄의 UI-13.2 위반은 0건이었다. 파일 전체에 있던 직접 지정 스타일 25줄(편집기 18, YearSelect 7)은 이전과 같았다.
+
+| 확인 | 관찰 결과 |
+| --- | --- |
+| M-1 · 웹 1440px | 합성 계정에서 2013년 작품의 두 날짜가 ‘기록 안 함’과 빈 월·일로 열렸고, 그대로 나가면 경고가 없었다. 별점 6→8→6 저장에서 리뷰 HTTP 200, 날짜 PATCH 0회였다. 새로고침 후 두 날짜는 null이었다. |
+| M-2 · 웹 375px | 서울 11월 22일·UTC 11월 21일에 ‘오늘’은 마지막 본 시기만 11월 22일로 채웠다. 저장 전 쓰기 0건, 이탈 확인 취소 후 초안 유지, 저장 후 `first_watched_at: null`·`last_watched_at: "2026-11-22"`를 확인했다. 프로필 ‘2026년에 본 작품’은 0→1, ‘기록 안 함’으로 지워 저장하면 1→0이었다. 버튼은 48.5×44px, 가로 넘침은 없었다. 미래 공개 작품은 기존 검증 문구와 함께 쓰기 0건이었다. |
+| M-3 · 웹 1440px | 라이브러리·검색 필터 모두 빈 연도 버튼과 목록 첫 항목이 ‘전체 연도’였다. |
+| M-4 · iOS 세로 | Xcode·시뮬레이터가 없어 기기 키보드 가림은 미확인이다. 375pt 합성 렌더에서 실제 편집기로 별점만 저장 시 날짜 쓰기 0회, 현지 연도 경계의 ‘오늘’, 저장 중 버튼 비활성, 기존 날짜 보존, 처음 본 연도만 입력 시 1월 1일·마지막 null을 확인했다. |
+
+설계 결정은 그대로 적용했다. D-3의 ‘오늘’은 월·일을 앞자리 0 없이 채우고, 86번의 이탈 보호는 초안 문자열을 비교한다. 이미 저장된 오늘 날짜가 `01/05`일 때 다시 ‘오늘’을 누르면 `1/5`가 되어 같은 날에도 미저장 변경으로 판정되는 경우를 순수 함수로 확인했다. 이 경우 날짜 저장 판정은 같은 ISO 날짜로 처리한다.
+
+운영 반영은 웹 재빌드·배포가 필요하다. 기존 방영일과 같은 본 시기에는 직접 입력한 값도 있을 수 있으므로 과거 데이터 정리는 별도 판단 사항이다. 로컬 증거는 시스템 임시 폴더의 `scenenote-verify-3zejhrle`(기준선), `scenenote-verify-ibxuq_9e`(STEP 1), `scenenote-verify-kkmtfnme`(전체), `scenenote92.KXPgTUcJpu`(웹·iOS 합성 검증)에 있다.
+
+## 공유 링크에서 스포일러 후기 가리기 (docs/91, 2026-11-22)
+
+[91번 명세](91_shared_review_spoiler_fixes_spec.md)에 따라 공유 링크를 받은 사람에게 스포일러 한줄 후기를 기본으로 가린다. 별점은 그대로 보이고, 작품 이름이 붙은 ‘스포일러 포함 · 보기’ 버튼을 누르면 그 카드만 기존 10자 미리보기로 펼쳐진다. 후기 내용이 없거나 공백이면 버튼이 생기지 않는다.
+
+작업 시작 시점은 `main`의 `0ca4651`, `git status --short` 97개 항목이었다. 기존 테스트 1,944개가 모두 통과했다. STEP 1에서는 이 테스트들이 계속 통과하고 새 테스트 4개만 실패했다.
+
+| 테스트 | 구현 전 실제 출력 |
+| --- | --- |
+| 91 T-1 · spoiler one-liners stay hidden until revealed | `ERR_MODULE_NOT_FOUND` · `src/utils/sharedReviewDisplay` |
+| 91 T-2 · the share function sends the spoiler flag without a contract bump | `AssertionError [ERR_ASSERTION]: review query omits is_spoiler` |
+| 91 T-3 · shared cards use the spoiler view | `AssertionError [ERR_ASSERTION]: shared cards bypass the spoiler view` |
+| 91 T-4 · reveal copy matches pins | `ERR_MODULE_NOT_FOUND` · `src/utils/sharedReviewDisplay` |
+
+STEP 2에서 순수 함수와 문구를 추가해 T-1·T-4가, STEP 3에서 기존 후기 조회에 `is_spoiler`를 추가해 T-2가, STEP 4에서 공유 응답 타입과 카드를 연결해 T-3가 통과했다. 서버 응답은 `library-share-v2`이며 원문과 별점에 `review_is_spoiler`만 더한다. 기존 응답에 필드가 없으면 종전 문구를 표시한다.
+
+변경한 Edge 함수는 Deno 2.9.6의 `deno check --no-lock --no-config`를 통과했다. 실제 핸들러와 Supabase JS 클라이언트에 합성 DB 응답을 주고 같은 링크를 세 번 열어 소유자·작품 필터, 원문과 별점, 누락 후기와 null 플래그, 저장 후 양방향 플래그 변경을 확인했다. 검사는 네트워크 권한 없이 실행했다.
+
+| 확인 | 결과 |
+| --- | --- |
+| M-1 · 웹 1440·375px | 합성 계정으로 검증용 후기를 저장하고 공유 링크를 만들었다. Chrome 비로그인 창에서 펼치기 전 후기 본문은 DOM·접근성 트리 양쪽에 없었다. 별점이 있는 카드는 별점과 버튼, 없는 카드는 버튼만 보였다. Tab·Enter로 선택한 카드만 펼쳐졌고 새로고침하면 모두 다시 가려졌다. 두 폭에서 버튼 높이 44px, 카드 밖 넘침 0건, 직접 열기 React 418 오류 0건이었다. 검사 뒤 검증용 후기를 복원하고 링크를 삭제했다. |
+| M-2 · 웹 1440px | 링크 생성 후 앱에서 스포일러를 끄고 같은 URL을 다시 열어 후기가 바로 표시되는 것을 확인했다. 다시 켜고 새로고침하면 가려졌다. |
+| M-3 · iOS 세로 | Xcode와 iOS 시뮬레이터가 없어 기기 실행은 미확인이다. 375pt iOS 합성 렌더에서 실제 공유 카드 5개로 제목별 펼치기, 별점 유무, 공백 후기, 이전 서버 응답, 화면을 다시 마운트했을 때 가림을 확인했다. |
+
+전체 테스트 **1,948/1,948**(skip 0), 타입·린트, 웹 정적 빌드(37개 라우트)가 통과했다. 변경한 UI 줄의 UI-13.2 위반은 0건이다. 기존 파일 전체의 직접 지정 스타일 20줄은 작업 전후 같았다. 시스템 임시 폴더의 `scenenote-verify-qir432vc`(기준선), `scenenote-verify-o5lmlr45`(STEP 1), `scenenote-verify-235hdyj1`(전체 검사), `scenenote91.yA6ge2xL7i`(웹·Edge·iOS 합성 검증)에 로그가 있다.
+
+운영 반영 전 `reviews.is_spoiler` 컬럼을 확인하고, `get-library-share` 재배포와 웹 재빌드·배포 후 비로그인 창에서 확인한다. 기존 서버나 기존 웹 중 한쪽만 사용하면 종전처럼 후기가 표시된다.
+
+## 앱 공유 진입점과 중지 확인 (docs/90, 2026-11-20)
+
+[90번 명세](90_native_share_availability_and_stop_check_fixes_spec.md)의 D-1~D-5를 적용했다. 웹 주소가 없는 앱은 새 링크를 만들거나 다시 보내는 버튼을 숨긴다. 본인 링크가 있으면 프로필에서 관리 화면을 열고 중지할 수 있다. 웹의 공유 가능 여부는 정적 HTML과 브라우저에서 같은 설정으로 판정한다.
+
+시작 상태는 `main`의 `0ca4651`, `git status --short` 94개 항목이었다. 기존 작업을 포함한 테스트 1,939개가 모두 통과했다. STEP 1에서 5개를 추가하자 기존 1,939개가 통과하고 다음 5개만 실패했다.
+
+| 테스트 | 구현 전 실제 출력 |
+| --- | --- |
+| 90 T-1 · share links need a usable origin | `shareUrl.canBuildLibraryShareUrl is not a function` |
+| 90 T-2 · stopping reports only a real deletion | `management.resolveLibraryShareStop is not a function` |
+| 90 T-3 · app-only copy is fixed | `+ undefined` (기대값은 앱 전용 문구 객체) |
+| 90 T-4 · the profile entry shows only when there is something to do | `management.shouldShowLibrarySharesEntry is not a function` |
+| 90 T-5 · entry points and stop check are wired | `share buttons must check the configured origin`, `2 !== 0` |
+
+STEP 2에서 T-1~T-4가 통과했다. 서비스와 화면을 연결한 뒤 `npm test` **1,944/1,944**(skip 0), 타입·린트, 웹 정적 빌드가 통과했다. Expo는 37개 정적 라우트를 내보낸 뒤 종료 지연 안내를 출력했고 종료 코드는 0이었다. 이 산출물로 웹 QA를 실행했다. 변경한 UI 줄의 UI-13.2 토큰·Alert 위반은 0건이다. 전체 파일 검사에서 기존 토큰 표기 36줄(라이브러리 25·프로필 11)은 작업 전후 같았다.
+
+메모리 PostgreSQL에 0012 마이그레이션을 적용해 삭제 정책이 빠지면 본인 DELETE는 0행이고 같은 ID와 소유자로 조회하면 1행인 것을 재현했다. 정책이 있을 때 첫 삭제는 1행, 같은 링크를 다시 삭제하면 삭제와 확인 조회가 모두 0행이었다.
+
+| 확인 | 결과 |
+| --- | --- |
+| M-1 · Chrome 1440·375 | 합성 계정으로 `/library` 직접 열기, 공유 버튼, 프로필 행, 다시 보내기와 클립보드 URL을 확인했다. 정적 HTML에도 공유 버튼이 있고 React 418은 0건이었다. |
+| M-2 · Chrome 1440 | 로컬 대체 API에서 만든 검증 링크(`40000000…`)를 중지했다. 1행 삭제 후 추가 조회 없이 성공 토스트와 빈 목록이 나타났고 비로그인 창 새로고침은 404였다. 삭제가 0행이면 본인 확인 조회는 1회였다. 행이 남거나 조회가 실패하면 실패 토스트와 목록 행이 유지됐고 공개 링크도 열렸다. 다른 기기에서 이미 삭제한 경우에는 성공했다. |
+| M-3 · iOS 세로 | Xcode·시뮬레이터 부재로 기기 실행은 미확인이다. iOS 플랫폼값으로 실제 화면 JSX를 합성 렌더해 주소 미설정·설정, 링크 수 로딩·0개·1개, 중지 후 빈 상태를 확인했다. |
+| M-4 · Android 세로 | 연결 기기와 에뮬레이터가 없어 기기 실행은 미확인이다. Android 플랫폼값에서도 M-3와 같은 합성 렌더 검사를 통과했다. |
+
+D-4의 0행 확인은 본인 행을 조회할 수 있다는 전제가 있다. 운영에서 `library_shares_delete_own`과 `library_shares_select_own`이 모두 행을 숨기면, 클라이언트는 이미 삭제된 링크와 구별할 수 없다. 운영 정책은 대시보드에서 확인할 항목이다. 정식 HTTPS 공유 웹을 배포하고 `publicWebOrigin`을 설정해 앱을 다시 빌드하면 보내기 버튼이 나타난다. 운영 웹에는 이 변경분으로 빌드한 산출물을 배포해야 한다.
+
+로컬 증거는 시스템 임시 폴더의 `scenenote-verify-0rznseb4`(기준선), `scenenote-verify-bz160gh_`(STEP 1), `scenenote-verify-z2g3fgsj`(전체 검사), `scenenote90.CyHNVAPBtS`(시작 상태, 웹 빌드, 브라우저·네이티브 합성 렌더·격리 DB 로그)에 있다.
+
+## 공유 링크 관리·중지 (docs/88, 2026-11-20)
+
+[88번 명세](88_library_share_link_management_spec.md)의 D-1~D-7을 구현했다. 프로필의 ‘공유 링크’에서 최근 100개를 다시 보내거나 개별 중지할 수 있다. 라이브러리의 공유 성공 안내에는 공개 범위와 중지 경로가 표시된다.
+
+- **변경 파일**. `types/libraryShare.ts`에 관리 행 타입, `services/libraryShare.ts`에 본인 목록 조회·삭제, `lib/query.ts`에 사용자별 키, `hooks/useLibraryShares.ts`에 행별 삭제 상태와 캐시 처리를 추가했다(모두 `src/` 아래). `utils/libraryShareManagement.ts`에 한국 시간 날짜·요약·문구를 두고 같은 이름의 테스트 파일을 추가했다. 화면은 `app/settings/library-shares.tsx`, 스택은 `app/_layout.tsx`, 진입점은 프로필 탭·`AccountSection`·라이브러리 탭이다.
+- **테스트 우선**. 88 T-1 한국 날짜, T-2 작품 수·생성일, T-3 프로필 개수, T-4 제목이 포함된 중지 확인, T-5 입력을 보존하는 행 제거, T-7 안내 문구·조회 제한은 구현 전 `ERR_MODULE_NOT_FOUND`였다. T-6 화면 연결의 첫 실패는 `missing settings route`였다. 구현 후 T-1~T-7 모두 통과했다.
+- **88·89 공통 검사**. Node 24에서 시작 기준선 1,928/1,928 → 테스트만 추가한 전체 실행 1,928개 통과·신규 11개 실패 → 구현 후 **1,939/1,939 통과**, skip 0. 최종 `npm run typecheck`, `npm run lint` 모두 exit 0. 두 작업이 추가한 UI 줄의 UI-13.2 위반 0건. 웹 정적 빌드와 iOS·Android 번들 export가 성공했다.
+
+| 검증 | 관찰 결과 |
+| --- | --- |
+| M-1 · 웹 1440 | 합성 계정·로컬 대체 API를 사용한 Chrome에서 링크 생성, 공개 안내, 프로필 요약 1개, 관리 목록과 비로그인 창의 공개 내용을 확인했다. 같은 링크로 다시 보내기, 중지 취소 후 행 유지, 중지 성공 후 빈 상태·토스트, 비로그인 창 새로고침 후 404 안내까지 확인했다. 검증용 링크 ID 앞 8자 `40000000`. |
+| M-2 · 웹 375 | 두 버튼이 44×44 이상이고 가로 넘침 없이 Tab으로 이동했다. 복사 후 클립보드 URL과 토스트, 삭제 실패 시 행 유지·오류 토스트, 빈 상태에서 라이브러리 이동을 확인했다. |
+| M-3 · 웹 768 | 헤더와 본문 시작선이 일치하고 행동 버튼이 패널 오른쪽 끝으로 밀리지 않았다. |
+| M-4 · iOS 세로 | 시뮬레이터 실행 환경이 없어 실기기·시뮬레이터 동작은 미확인이다. 안전 영역, 글자 확대, 네이티브 중지 확인 창과 공유 시트가 남았다. |
+
+가상 링크 102개로 동시 삭제와 실패, 계정 전환, 늦게 끝난 조회 뒤 목록 보충을 검사했다. 기존 `0012_library_shares.sql`을 메모리 PostgreSQL(PGlite)에 적용해 본인 행만 조회, 본인 삭제 1행, 같은 ID 재삭제 0행, 다른 계정의 행 보존을 확인했다. 운영 RLS 적용은 미확인이다. 앱의 `publicWebOrigin`은 현재 `null`이다. 네이티브 재공유를 검증하려면 정식 HTTPS 주소를 설정한 클라이언트 빌드가 필요하다.
+
+두 작업의 로컬 증거는 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/` 아래에 있다. 전체 검사 로그는 `scenenote-verify-20w8d6mn`(기준선), `scenenote-verify-8wd2oocj`(수정 전), `scenenote-verify-xwl3p9ah`(수정 후)이며, `scenenote-88-89-qa.Vqhutwa6h9`에 `shares.json`·`offline.json`, 격리 SQL 검사, 빌드 로그가 있다.
+
+## 오프라인 저장 갇힘 정정 (docs/89, 2026-11-20)
+
+[89번 명세](89_offline_save_trap_fixes_spec.md)의 D-1~D-4를 구현했다. 기기에서 오프라인이 확인되면 감상·핀 작성이 저장 요청 전에 안내하고 입력을 보존한다. 기기 판정과 Query의 연결 상태가 어긋나도 저장은 실행되어 성공 또는 실패로 끝난다. 조회 정책과 86번의 이탈 보호 계약을 유지했다.
+
+| 테스트 | 구현 전 첫 실패 | 구현 후 |
+| --- | --- | --- |
+| T-1 · 기기의 확실한 오프라인 신호 | `ERR_MODULE_NOT_FOUND` (`networkStatus`) | 통과 |
+| T-2 · 오프라인에서 저장 일시정지 방지 | `Error: still pending` (300ms) | 성공·실패 mutation 모두 일시정지 없이 종료 |
+| T-3 · 감상·핀 저장 전 검사 순서 | `Missing offline guard after clearing the error` | 통과 |
+| T-4 · 공통 오류 문구 | `undefined`와 기대 문구 불일치 | 통과 |
+
+89번 코드의 추가/삭제 줄은 `src/lib/query.ts` +3/−1(저장 기본값), `src/utils/networkStatus.ts` +8/−0, `src/utils/errorCopy.ts` +1/−0, `ContentReviewEditor.tsx` +7/−0, `PinComposer.tsx` +6/−1, `src/utils/offlineSave.test.ts` +86/−0, `src/utils/errorCopy.test.ts` +3/−2다. 68 T-15가 오류 문구 전체를 20개로 고정하던 계약은 89번 명세에 정정했다. 기존 20개 문구의 정확한 값과 객체 전체 일치 검사를 유지하고 `offlineSave`를 21번째 기대값에 포함했다. 86 T-1~T-6도 통과했다. 전체 검사 결과와 로그 위치는 바로 위 88번 기록에 있다.
+
+| 검증 | 관찰 결과 |
+| --- | --- |
+| M-1 · 웹 1440 | 로컬 대체 API와 합성 계정으로 Chrome을 오프라인 전환했다. 감상 저장 안내, 저장 POST 0건, 입력과 버튼 활성 상태를 확인했다. 이탈 확인을 취소하면 초안이 남고 재연결해 저장하면 토스트가 나온 뒤 확인 없이 이동했다. |
+| M-2 · 웹 375 | 핀 저장 전 동일한 오프라인 문구가 나타났고 POST·PATCH는 0건이었다. |
+| M-3 · 웹 1440 | 오프라인 상태 변경 요청에서 기존 실패 토스트가 나타났고 화면을 계속 사용할 수 있었다. |
+| M-4 · iOS 세로 | 기기 환경이 없어 비행기 모드에서의 감지 시점·스와이프 뒤로 확인은 미실행이다. Android 번들도 생성했으며 기기 실행은 미확인이다. |
+
+느린 연결에서 요청 자체가 오래 걸리는 경우와 다른 저장 화면의 오류 처리 전수 점검은 89번 범위 밖에 있다. 실제 단말의 약한 Wi-Fi·비행기 모드와 재연결을 후속 확인한다. 릴리스에는 앱 변경분만 반영하면 되며 DB·Edge 변경은 없다.
+
+## 웹에서 라이브러리·핀 작성·공유 주소 직접 열기 (2026-11-20)
+
+기존 웹 빌드의 `/library`를 Chrome에서 직접 열면 375·768·1440px 모두 React 오류 418로 화면을 다시 그렸다. 정적 HTML과 브라우저에서 아이콘 글꼴의 로드 여부가 달랐고, 넓은 화면에서 처음 그리는 도구 모음도 달랐다. 루트에서 SDK 54에 맞는 `expo-font`로 Ionicons를 등록하고, 라이브러리와 공통 헤더가 정적 HTML을 먼저 사용한 뒤 화면 폭을 적용하도록 수정했다.
+
+핀 작성의 작품 ID와 공유 링크 ID는 웹 주소에서 읽는다. 정적 HTML에는 이 값이 없어 정상 링크에도 ID 누락 문구가 들어가던 문제를 바로잡았다. 공개 공유 HTML은 로딩 안내를 표시하고, 브라우저가 ID를 확인한 후 조회하거나 오류를 표시한다. 앱 내 이동은 주소 매개변수를 즉시 사용한다.
+
+이전 빌드와 같은 세 화면 폭에서 라이브러리 첫 진입, 필터·검색어가 있는 주소, ID가 있거나 없는 핀 작성, ID가 없거나 잘못된 공개 공유 주소를 확인했다. 합성 계정과 비로그인 창에서 유효한 공유 링크를 열고 중지한 뒤 새로고침하는 동작도 확인했다. 최종 실행에서 이 경로들의 React 오류 418은 0건이었다. 위 임시 폴더의 `hydration-final.log`, `deep-final.log`, `shares-final.log`, `offline-final.log`에 결과가 있다. 기능 수정과 웹 보완을 합친 전체 테스트 1,939개·타입·린트는 `scenenote-verify-0bip55g2`에서 통과했고, 웹·iOS·Android export도 성공했다.
+
+## AI 작업 지침과 Cursor 정리 (2026-11-20)
+
+공통 지침에서 반복하던 76개 명세 경로를 문서 목차로 통합했다. Codex와 Claude의 역할 4개·스킬 2개는 각각 같은 원본을 참조한다. Cursor 전용 검증 프롬프트 1개를 폐기했고, 당시 작업 기록은 보존했다.
+
+검증 CLI 격리 테스트 31개, Git 훅 격리 테스트 24개, 안내 문서를 참조하는 83번 회귀 테스트 4개가 통과했다. 훅 설치 상태는 active였다. 역할 설정과 스킬 참조 경로를 검사하고, 공통 지침에서 오프라인 저장 명세와 선행 감상 이탈 보호 명세까지 찾아갈 수 있음을 확인했다. 이번 작업의 검증 범위는 문서와 개발 도구다.
+
+## 감상 작성 중 이탈 보호 (docs/86, 2026-11-20)
+
+상태: **구현·코드 검사 통과, 화면 미확인.** [86](86_review_draft_leave_guard_fixes_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. D-1~D-6 변경 없음. 시작 경로와 git 루트 `/Users/youngilkim/SceneNote`, 실제 기준선은 **1,922개 통과**였다. 시작 git 상태·원문/해시는 `/tmp/scenenote-86-start-{status.txt,snapshot.json}`에 기록했다. 시작 때 존재한 docs/84·85·87 및 공유 링크 관련 명세·다른 세션의 검색 변경을 보존했다. `scenenote-verify`와 해당 명령에만 적용한 Node 24를 사용했다. 브라우저·시청 앱·개발 서버·사용자 감상·운영 DB·Edge·secret·배포·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 실패 출력
+
+새 `src/utils/reviewDraft.test.ts`만 먼저 쓴 뒤 전체 테스트를 실행해 **T-1~T-6이 모두 실패**했다. T-1~T-5는 없는 모듈을 각 테스트 안에서 동적으로 import해 각각 실패했고, T-6은 기존 편집기에 이탈 보호 연결이 없어 실패했다. 아래는 실제 출력의 각 테스트 첫 두 줄이다.
+
+```text
+✖ 86 T-1: an untouched draft is not dirty (7.56275ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/reviewDraft' imported from /Users/youngilkim/SceneNote/src/utils/reviewDraft.test.ts
+✖ 86 T-2: every field change makes the draft dirty (1.849125ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/reviewDraft' imported from /Users/youngilkim/SceneNote/src/utils/reviewDraft.test.ts
+✖ 86 T-3: rebasing keeps user edits and refreshes untouched fields (7.355875ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/reviewDraft' imported from /Users/youngilkim/SceneNote/src/utils/reviewDraft.test.ts
+✖ 86 T-4: snapshot uses saved values, then fallbacks (4.396167ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/reviewDraft' imported from /Users/youngilkim/SceneNote/src/utils/reviewDraft.test.ts
+✖ 86 T-5: a saved snapshot stays clean after the server catches up (4.026583ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/youngilkim/SceneNote/src/utils/reviewDraft' imported from /Users/youngilkim/SceneNote/src/utils/reviewDraft.test.ts
+✖ 86 T-6: the review editor wires the leave guard (4.093292ms)
+  AssertionError [ERR_ASSERTION]: Missing usePreventRemove(
+```
+
+STEP 1 전체 **1,928개 중 1,922개 통과·6개 실패**, skip 0. 원본 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-ymdlq6un/test.log`, 전문 `/tmp/scenenote-86-step1-proof.json`. 예상과 다른 실패는 없었다. 단언을 완화하지 않았다.
+
+### 2. npm test before / after
+
+| 단계 | 전체 | 통과 | 실패 |
+|------|------|------|------|
+| 실제 시작 기준선 | 1,922 | 1,922 | 0 |
+| STEP 1 테스트 우선 | 1,928 | 1,922 | 6(T-1~T-6) |
+| STEP 2 순수 함수(해당 파일만) | 6 | 5 | 1(T-6) |
+| 최종 전체 | 1,928 | 1,928 | 0 |
+
+기존 테스트 파일·assertion 변경 0, 삭제 테스트 0, 신규 6개, 최종 skip 0. 로그 상위 경로는 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/`다. 기준선 `scenenote-verify-clkssoxt/test.log`, STEP 2 `scenenote-verify-ow1xaom7/test.log`, 최종 `scenenote-verify-z1o3y10l/test.log`. `/tmp/scenenote-86-baseline.json`에도 기준선을 남겼다.
+
+### 3. typecheck / lint
+
+최종 전체 테스트 → `npm run typecheck` → `npm run lint`를 순서대로 실행해 모두 **exit 0·오류 0·경고 0**이었다. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-z1o3y10l/{test.log,typecheck.log,lint.log,summary.json}`. 개발 중 새 T-6의 DOM/Node URL 타입 차이(TS2769)는 `fileURLToPath(new URL(...).href)`로 읽기 경로만 보정했고 검사 대상·단언은 유지했다. `git diff --check` 통과. UI-13.2 토큰·Alert·accessibilityState 검사는 수정 줄 기준 0줄이다.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `src/utils/reviewDraft.test.ts`에 있다. Node 모듈과 순수 `reviewDraft`만 사용하며 RN·Expo·Supabase 클라이언트를 가져오지 않는다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 86 T-1: an untouched draft is not dirty |
+| T-2 | 86 T-2: every field change makes the draft dirty |
+| T-3 | 86 T-3: rebasing keeps user edits and refreshes untouched fields |
+| T-4 | 86 T-4: snapshot uses saved values, then fallbacks |
+| T-5 | 86 T-5: a saved snapshot stays clean after the server catches up |
+| T-6 | 86 T-6: the review editor wires the leave guard |
+
+T-1은 날짜 객체 참조가 달라도 값이 같으면 변경 없음, T-2는 6필드 각각과 후기 끝 공백, T-3은 편집 보존·늦은 기본값·같은 값 재조회, T-4는 저장값/기본값/빈값 및 기존 파서 동작, T-5는 저장 후 catch-up clean, T-6은 실제 편집기의 guard 연결을 검사한다. E-1~E-9의 순수 판정·소스 연결을 대응하고 실제 플랫폼 동작은 아래 수동 표로 구분했다.
+
+### 5. 편집기 diff 요약
+
+- `src/utils/reviewDraft.ts` 신규: 기존 날짜 타입·빈 날짜·파서를 동작 그대로 옮겼다. 원천 스냅샷, 문자열 원문·날짜 연/월/일 값에 따른 변경 판정, 필드별 rebase를 제공한다.
+- `ContentReviewEditor.tsx` **이번 작업 시작 원문 대비 +96/-49줄**: 입력 6개를 draft/baseline으로 합치고 원천 4리뷰값·2날짜·2기본값의 memo 스냅샷을 만들었다. 처음 보이는 기본값도 기준에 포함하므로 열기만 해서는 dirty가 아니다.
+- 원천 변경은 편집한 필드를 보존한다. 날짜 저장 훅의 낙관적 props 변경과 실패 rollback이 입력을 지우지 않도록 전체 저장 구간에는 원천 반영을 보류한다. 각 await 성공 직후 리뷰 4필드 또는 날짜 2필드만 draft/baseline에 확정한다.
+- 저장 응답보다 query/props 관측이 늦는 경우도 보완했다. 직전 원천과 같은 스냅샷은 건너뛰고, 실제 원천값이 바뀐 필드만 다음 기준에 반영해 저장 성공한 다른 필드를 오래된 원천값으로 덮지 않는다. 사용자 draft는 그 다음 기준과 필드별로 다시 맞춘다.
+- PinComposer와 같은 `usePreventRemove`·`confirmDiscard`·leaving/leaveAction·웹 beforeunload 패턴을 쓴다. 저장 전체를 saveLock/submitting으로 보호하고 확인 뒤 ref를 비워 한 번만 dispatch한다. push·탭 전환을 가로채는 별도 코드는 추가하지 않았다.
+- 기존 검증 블록, 리뷰→본 시기 저장 인수·순서, 오류 문구, 날짜 기본값 계산·검증 함수, 하위 날짜 입력·스타일 원문은 동일하다. 렌더 구조·문구는 유지하고 draft 연결만 바꿨다. 기존 docs/84의 "한줄 후기"·"소감" 라벨과 named setter 연결도 그대로다. 해당 접근성 가드 및 기존 전체 테스트 assertion을 보존했다.
+
+독립 원문 검토 `/tmp/scenenote-86-review-static-review.json`, 최종 범위 증거 `/tmp/scenenote-86-scope-proof.json`. 문서는 이번 기록 추가와 목차 86행 상태만 수정했다.
+
+추가로 실제 편집기를 메모리에서 bundle하고 navigation·mutation·web 이벤트·React hook을 모의한 저장소 밖 probe **8군이 전부 통과**했다. 미변경 기본값, 늦은 날짜, 취소/확정 한 번 이동, beforeunload 등록/해제, 리뷰 성공+날짜 실패/rollback·저장 중 이탈 차단, 전체 성공 후 catch-up, 리뷰 query 관측 지연, 리뷰만 먼저/날짜 props 나중 반영을 확인했다. 초기 보조 검사에서는 저장 성공한 소감이 구 query에 덮이는 경우(actual 빈 문자열 / expected "늦은 리뷰 응답")를 재현했고 위 원천 반영 보강 뒤 통과했다. `/tmp/scenenote-86-review-hook-probe-summary.json`, 실행기 `/tmp/scenenote-86-review-hook-probe.cjs`, 로그 `/tmp/scenenote-86-review-hook-probe.log`. 이 보조 검사는 저장소 테스트 수에 합산하지 않았고 실제 브라우저·네이티브 QA를 대신하지 않는다.
+
+### 6. M-1~M-4 수동 확인
+
+| ID | 플랫폼 | 결과/미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 1440 | 미실행. 브라우저·시청 화면을 조작하지 않는 사용자 요청을 유지했다. 헤더 뒤로/내 목록/에피소드 왕복/삭제 뒤 확인은 실제 화면 미확인이다. 취소·확정 로직은 위 mock probe 범위다. |
+| M-2 | 웹 375 | 미실행. 같은 이유로 실제 새로고침·닫기 경고는 미확인이다. beforeunload 연결만 mock에서 확인했다. |
+| M-3 | 웹 1440 | 미실행. 실제 감상 저장을 하지 않았다. 성공 직후 clean과 늦은 원천은 mock에서만 확인했다. |
+| M-4 | iOS 세로 | 미실행. 기기·시뮬레이터를 실행하지 않았다. 스와이프 뒤로·네이티브 확인창·키보드는 미확인이다. |
+
+Android 실제 뒤로가기 역시 미실행이다. 웹·앱 수동 검증 완료로 표시하지 않았다.
+
+### 7. D-1~D-6 문제 판단
+
+변경이 필요한 설계 결정은 없었다. 초기 표시값 기준, 필드별 원천 반영, 성공한 부분만 저장 확정, 기존 confirmDiscard/이탈 패턴, 순수 판정, 검증·저장 규칙/화면 보존을 지켰다. 저장 중 원천 보류와 지연된 원천의 필드별 반영은 D-2·D-3을 실제 mutation의 낙관 갱신/관측 순서에서도 지키기 위한 구현이다.
+
+### 8. 사람이 할 후속 작업
+
+테스트용 작품에서 M-1~M-4를 확인한다. 실제 사용자 감상은 바꾸지 않는다. 웹 브라우저 뒤로/헤더·내 목록에서 취소/확정, 변경 없는 이탈·저장 성공 후 이탈, 웹 새로고침 경고, 에피소드 왕복 입력 유지, iOS 스와이프/키보드를 확인하고 Android 뒤로도 별도 확인한다. 서버·DB 변경이나 배포는 필요 없다.
+
+## 애니 검색 제공처 간 중복·방영 단위 구분 (docs/87, 2026-11-20)
+
+- 사용자 무직전생 검색 화면의 2026년 3기가 AniList/TMDB 두 장인 원인을 공개 검색 캐시 SELECT로 확인했다. AniList `178789`는 원제 `無職転生Ⅲ ～異世界行ったら本気だす～`, 2026-07-04, 14화이고 TMDB `94664` 시즌 3은 2026-07-03, 14화다. 기존 문자열 완전 일치가 기본 한국어 제목/III/시즌 3 차이를 놓쳤다. 반면 2027년 AniList `217434`는 3기 파트 2, 2023년 `146065`·2024년 `166873`는 2기의 분할 단위다. TMDB 시즌 2 전체 24화와 같은 카드로 합치지 않는다.
+- 새 순수 `searchResultMerge`를 서버 compactResults·앱 페이지 병합·제목/인물 결과 병합이 공유한다. 다른 제공처의 같은 방영 단위만 합치고, 같은 제공처 다른 ID·서로 다른 raw 시즌·특별편·분할 범위·연도/날짜/화수 충돌은 보존한다. 표시 기수는 원제의 명확한 표기에서 복원하며 SEQUEL 체인/저장 시즌은 바꾸지 않는다. 로마자 고유명 X를 10기로 읽지 않고, 모호한 여러 시즌 별칭은 병합 근거로 쓰지 않는다. 등가 그룹 전체에도 ID/시즌 충돌 보호를 적용한다. 같은 TMDB 숫자의 movie/tv는 정확 병합·필터 annotation·UI 키·라이브러리 맵에서 분리했다.
+- `equivalent_results`는 검색 표시 메타데이터다. 기존 정확한 시즌/전체 등록이 있는 제공처를 앱 대표로 선택해 상태·행동을 유지하며, 다른 등가 등록의 요청 상태도 정확 namespace/시즌으로 확인한다. 확인된 AniList MOVIE/TMDB Animation 영화의 같은 단위는 대표 변경 후에도 애니/영화 필터를 모두 통과한다. 정상 등록값·DB canonical ID는 변경하지 않는다. 공식 제목·anime_format만 기존 요청에 함께 전달하고 `SEARCH_CACHE_VERSION=ko-v17-anime-release`로 분리했다. 새 외부 조회 경로는 없다.
+- 공개 캐시 **888행·461개 검색어·4,142개 결과**(만료된 캐시 포함) 전체를 스냅샷으로 받아 전후 공용 함수를 오프라인 실행했다. 34개 검색어에서 개수가 달랐으며 중복 제거와 기존 오병합 복원을 모두 포함한다. 병합 결과의 등가 그룹 514개에 동일 제공처 다른 identity/명시 시즌 충돌이 없는지 검사했다. 무직전생은 2026년 3기만 2→1, 파트 2·특별편·범위 다른 시즌을 유지했다. 원본 10개를 합친 최종 9개는 1기 전체 23화와 11/12화 분할의 기존 오병합도 복원한 결과다. 증빙 `/tmp/scenenote-search-duplicate-audit-{before,after,summary}.json`. 이는 조회 가능한 캐시 범위의 검사이며 외부 카탈로그 전체 보장은 아니다.
+- 테스트를 먼저 추가해 shared 초기 8개 중 5개 실패(`/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-01ei15ky/test.log`), client pagination 신규 2개 실패(`scenenote-verify-fqn2xunj/test.log`, 같은 상위 경로)를 확인했다. 추가 리뷰에서 등가 그룹 경유 충돌·X/모호 별칭·영화 필터·등가 등록 상태·반복 표시 순서·모바일/영문 기수 라벨을 각각 red→green으로 확인했다. 관련 red 로그는 `qydj0isy`, `ggeho8yv`, `c34kqiev`, `h3baewmu`, `4ybclglz`, `_qyuzjb3`, `ei7bci2a`의 `scenenote-verify-*/test.log`다. 기존 assertion을 줄이지 않았으며 최초에는 전체 기준선을 별도 실행하지 않고 기존 관련 150개 통과를 확인했다(`scenenote-verify-lfjwbvl_/test.log`).
+- 최종 `scenenote-verify` + 명령 한정 Node 24로 **1922/1922**, typecheck·lint 모두 exit 0. 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-dvi2btr9/{test.log,typecheck.log,lint.log,summary.json}`. T-1~T-8은 shared 16개·discovery 영화 필터·기존 normalizer, client pagination/merge/등록/visibility/title/policy 회귀에 대응한다. 순수 shared 2개 strict TypeScript 검사와 search-content/search-person-content 로컬 의존성 esbuild 번들 검사 통과(메모리만, remote/npm external). Deno가 없어 실제 Deno 실행/원격 Edge smoke는 미실행. `search:golden`은 TMDB만 검사하며 추가 외부 호출을 발생시켜 이번에는 실행하지 않았다. diff·문서 링크/14장·변경 UI 토큰/Alert/aria 위반 0줄 검사 통과.
+- M-1/M-2 로그인 웹 8081: 일반 `무직전생` 검색에서 2026년 3기 한 장·2027년 3기 파트 2 별도·2023년 실제 2기 표시·기존 3기 등록됨/버튼 비활성 유지 확인. 1440/768/375의 갤러리와 768 목록을 확인했다. 375에서 긴 제목의 끝 기수가 잘리는 것을 발견해 두 카드의 메타 앞에 순수 release label을 보충했고, 3기/3기 파트 2 및 영문 제목의 2기 파트 2가 보인다. 768 가로 overflow 없음. 증빙 `/tmp/scenenote-mushoku-deduplicated-{1440,768,375}.jpg`. 현재 구 운영 서버 응답은 이전에 병합해 버린 1기 전체를 앱에서 되살릴 수 없어 라이브 화면은 8개이며, raw 캐시를 새 서버 코드로 합친 9개와 구분한다.
+- M-1 중 실제 시즌 검색어/인물 검색·모든 상태 필터·모두 보기 재조작과 실제 TMDB 시즌 단독 등록/애니 영화 카드의 수동 조합은 미실행(자동 회귀로 확인). 무직전생은 마지막 페이지가 없어 추가 페이지 혼입은 자동 테스트로 확인했다. M-3 iOS/Android 실기기·1.3배 글자는 실행 환경 없이 미확인이다. 스타일/접근성 변경은 없고 메타 텍스트 앞에 라벨만 추가했다. 브라우저 뷰포트·검색어·원래 갤러리 선택을 복원했고 계정의 필터는 변경하지 않았다. 검색으로 최근 검색어/일반 Edge 캐시는 갱신될 수 있으나 등록/삭제 행동은 누르지 않았다.
+- 시작 시 8081 listener가 없어 지정 포트로 로컬 서버를 시작했다. 사용자 기록·스키마·RLS·secret·의존성·커밋/푸시·운영 배포는 변경하지 않았다. 운영 사이트 반영에는 **웹 번들 및 search-content 재배포**가 필요하다. 공유 helper를 쓰는 다른 Edge 번들(예: search-person-content)의 동시 반영 여부도 배포 시 확인해야 하며 이번 작업에서는 어떤 Edge도 배포하지 않았다. 정보 부족으로 확증하지 못한 중복 후보와 분할/전체의 실제 범위가 다른 카드는 의도적으로 남긴다.
+
+## 최신 추천 첫 묶음 지연 정정 (docs/85, 2026-11-20)
+
+상태: **구현·코드 검사 통과, 운영 배포 대기·화면 미확인.** [85](85_latest_recommendation_first_batch_latency_fixes_spec.md) 전체와 14장 STEP 0~6을 따랐다. D-1~D-6 변경 없음. 시작 경로와 git 루트는 `/Users/youngilkim/SceneNote`, 실제 기준선은 **1,876개 통과**였다. 시작 git 상태·파일 원문/해시는 `/tmp/scenenote-85-start-{status.txt,snapshot.json}`에 남겼고, 기존 docs/84 미커밋 작업과 사용자가 작성한 docs/85·AGENTS·목차 연결을 보존했다. `scenenote-verify`와 해당 명령에만 적용한 Node 24를 사용했다. 브라우저·시청 앱·개발 서버·사용자 기록·운영 DB·secret·배포·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 실패 테스트의 실제 출력
+
+구현 소스를 바꾸기 전에 T-1~T-9를 모두 썼다. **T-1·T-4·T-5·T-6·T-8·T-9만 실패**, 보존 T-2·T-3·T-7은 통과했다. 아래는 실제 출력에서 스택과 중복 진단 필드를 생략한 내용이다. 전체 로그 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-g865c5_k/test.log`, 실패 전문 `/tmp/scenenote-85-step1-proof.json`.
+
+```text
+✖ 85 T-1: latest first requests use the continuation-size scan budget (11.49425ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   keywordLookups: 16,
+  +   label: 'first',
+  +   maxMonths: 3,
+  +   maxRounds: 3,
+  +   scanMs: 1000
+  -   keywordLookups: 32,
+  -   label: 'latest_first',
+  -   maxMonths: 6,
+  -   maxRounds: 6,
+  -   scanMs: 4000
+    }
+✖ 85 T-4: the handler passes the discovery mode to the scan budget (2.01825ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'constbudget=recommendationScanBudget({hasCursor:Boolean(validated.value.cursor)});'
+  - 'constbudget=recommendationScanBudget({hasCursor:Boolean(validated.value.cursor),discoveryMode:validated.value.discoveryMode});'
+✖ 85 T-5: a latest first request crosses into the previous month within one request (19.722916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  2 !== 12
+✖ 85 T-6: same-work title keys normalize, drop short titles and deduplicate (0.121583ms)
+  TypeError [Error]: workMatching.recommendationSameWorkTitleKeys is not a function
+✖ 85 T-8: the library index is reused per array reference (0.125167ms)
+  TypeError [Error]: visibility.getRecommendationLibraryIndex is not a function
+✖ 85 T-9: same-work candidates come only from matching titles (1.009584ms)
+  TypeError [Error]: visibility.getRecommendationLibraryIndex is not a function
+```
+
+STEP 1은 **1,885개 중 1,879개 통과·6개 실패**였다. T-5의 mixed 비교(2개·scanBudgetReached·hasMore)는 통과한 뒤 최신도 2개라 마지막 단언에서 실패했다. T-6·T-8·T-9는 없는 함수를 각 테스트 안에서 호출해 개별 TypeError로 실패했으며 테스트 모듈 로드 실패로 대체하지 않았다. 테스트를 통과시키려 assertion을 완화하지 않았다.
+
+### 2. npm test before / after
+
+| 단계 | 전체 | 통과 | 실패 |
+|------|------|------|------|
+| 시작 기준선 | 1,876 | 1,876 | 0 |
+| STEP 1 테스트 우선 | 1,885 | 1,879 | 6(T-1·T-4·T-5·T-6·T-8·T-9) |
+| 최종 전체 | 1,885 | 1,885 | 0 |
+
+기존 테스트 삭제 0, 기존 assertion 변경 0, 추가 테스트 9개, 최종 skip 0. 모든 로그 경로의 상위 폴더는 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/`다.
+
+- 기준선: `scenenote-verify-_nau2bax/test.log`, `/tmp/scenenote-85-baseline.json`.
+- STEP 2 예산·핸들러: `scenenote-verify-w7c7g_9k/test.log`에서 해당 두 테스트 파일 전체와 T-1~T-5 통과.
+- STEP 3 제목 키: `scenenote-verify-nsuv5rju/test.log`에서 engine 테스트 전체와 T-6 통과.
+- STEP 4 색인: `scenenote-verify-c6zb7oke/test.log`에서 visibility 테스트 전체와 T-7~T-9 통과.
+- 최종: `scenenote-verify-zk2lei5h/test.log`. SB-1·SB-2, LC 전체(LC-5 포함), V-1·V-2·parity·Y-5, 기존 같은 작품 판정 assertion을 보존한 채 통과했다.
+
+### 3. npm run typecheck / npm run lint
+
+최종 전체 테스트 → typecheck → lint 순서로 실행해 모두 **exit 0·오류 0·경고 0**이었다. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-zk2lei5h/{typecheck.log,lint.log,summary.json}`. `git diff --check`도 통과했다.
+
+앱 검사에서 제외되는 서버 부분은 변경한 공용 `recommendationTasteFill.ts`·`recommendationEngine.ts`를 기존 TypeScript로 별도 strict 검사했다(`--noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution bundler --allowImportingTsExtensions`), exit 0. 로그 `/tmp/scenenote-85-shared-typecheck.log`. 기존 esbuild로 실제 handler의 로컬 의존성을 메모리에서 bundle해 경고 0으로 통과했다(`/tmp/scenenote-85-handler-bundle.json`, remote/npm import external). Deno 실행 파일이 없어 실제 Deno 검사·Edge 런타임 실행은 미실행이다. 순수 테스트·TypeScript·bundle이 운영 요청 검증을 대신한다고 표시하지 않는다.
+
+### 4. 추가 테스트 ID와 이름
+
+| ID | 이름 | 파일 |
+|----|------|------|
+| T-1 | 85 T-1: latest first requests use the continuation-size scan budget | `supabase/functions/_shared/recommendationTasteFill.test.ts` |
+| T-2 | 85 T-2: latest continuations keep the continuation budget | `supabase/functions/_shared/recommendationTasteFill.test.ts` |
+| T-3 | 85 T-3: mixed and unspecified first requests keep the one-second budget | `supabase/functions/_shared/recommendationTasteFill.test.ts` |
+| T-4 | 85 T-4: the handler passes the discovery mode to the scan budget | `supabase/functions/personalized-recommendations/latestFirstBudget.test.ts` |
+| T-5 | 85 T-5: a latest first request crosses into the previous month within one request | `supabase/functions/personalized-recommendations/latestFirstBudget.test.ts` |
+| T-6 | 85 T-6: same-work title keys normalize, drop short titles and deduplicate | `supabase/functions/_shared/recommendationEngine.test.ts` |
+| T-7 | 85 T-7: indexed registration matches the full library scan | `src/utils/recommendationVisibility.test.ts` |
+| T-8 | 85 T-8: the library index is reused per array reference | `src/utils/recommendationVisibility.test.ts` |
+| T-9 | 85 T-9: same-work candidates come only from matching titles | `src/utils/recommendationVisibility.test.ts` |
+
+RN·Expo·Supabase 클라이언트는 import하지 않았다. T-5는 실제 catalog와 budget만 런타임 import하고 handler를 import하지 않는다. T-7은 라이브러리 6개·후보 13개 전부를 기존 fullScan과 비교하고 참 7개/거짓 6개 및 빈 배열을 따로 단언한다. T-9는 무관 제목 2,000개를 후보에서 제외하고 같은 제목 2개만 남기는 것을 확인한다. E-1~E-15는 명세의 테스트 대응 그대로 처리했다.
+
+### 5. 구현 소스 diff 요약
+
+| 파일 | 추가/삭제 줄 | 내용 |
+|------|-------------|------|
+| `supabase/functions/personalized-recommendations/index.ts` | +1/-1 | budget 호출에 `discoveryMode: validated.value.discoveryMode` 전달 한 줄만 변경 |
+| `supabase/functions/_shared/recommendationTasteFill.ts` | +7/-5 | latest 첫 요청만 4,000ms·32·6·6, 진단 `latest_first`. cursor 우선, mixed·모드 생략 first 보존 |
+| `supabase/functions/_shared/recommendationEngine.ts` | +12/-9 | 기존 정규화 그대로 제목 키 helper 공유, 같은 작품 판정의 두 Set만 교체 |
+| `src/utils/recommendationVisibility.ts` | +43/-11 | 배열 참조별 WeakMap 색인, 비수동 외부 키 Set, 제목별 버킷과 중복 없는 후보, 기존 matcher 최종 판정 |
+
+원문 비교로 handler가 지정 한 줄 교체만 적용한 결과와 같고, `isSameRecommendationWork`의 `if (!intersects...)`부터 판정 끝까지 그대로임을 확인했다. visibility의 나머지 내보내기 함수 본문도 동일하다. catalog 소스·전체 테스트, `app/search.tsx`, 추천 훅·feed·호출 집계·앱 서비스, 화면·문구·시간/횟수 한도는 시작 해시와 같다. 기존 세 테스트 파일은 import 추가와 새 테스트만 있고 기존 assertion 원문은 보존했다. 범위 증거 `/tmp/scenenote-85-scope-proof.json`.
+
+독립 읽기 전용 최종 검토도 D-1~D-6 충돌을 찾지 못했다. 저장소 밖 `/tmp/scenenote-85-index-parity-probe.ts`의 추가 320조합도 기존 전체 훑기와 전부 일치했다(등록 302/미등록 18). 양 제목 동시 일치의 후보 중복 제거와 수동 항목 ID만 같은 경우도 확인했다. 이 보조 측정은 저장소 테스트 수에 합산하지 않았다.
+
+### 6. M-1~M-4 및 로컬 계산 전·후
+
+| ID | 결과/미실행 사유 |
+|----|------------------|
+| M-1 웹 8081 수정 전 | 미실행. 브라우저·시청 화면을 조작하지 않는 기존 사용자 요청을 유지했다. 로그인된 화면·운영 요청 수와 시각은 측정하지 않았다. |
+| M-2 웹 배포 뒤 | **배포 대기.** 서버를 배포하지 않아 `latest_first` 운영 진단·요청 수·첫/12번째 카드 시각·elapsedMs는 미확인이다. |
+| M-3 로컬 Node | 실행. 아래 합성 데이터 전·후 측정. |
+| M-4 iOS 세로 | 미실행. 네이티브 개발 빌드·기기를 실행하지 않았다. 스크롤 체감과 Metro 요청 수는 미확인이다. |
+
+M-3은 **Node v24.22.2, 라이브러리 671개(각각 다른 제목), 추천 12/24/36개**, 제목이 겹치지 않는 합성 데이터다. 같은 `/tmp/scenenote-85-benchmark.ts`를 수정 전·후에 실행했다. 각 크기 5회 워밍업 뒤 **20회 평균(ms)**이며, 같은 라이브러리 배열 참조를 재사용했다.
+
+| 추천 수 | 명세 2.2-3 수정 전 참고(ms) | 이번 동일 데이터 수정 전(ms) | 이번 수정 후(ms) |
+|---------|--------------------------|-----------------------------|------------------|
+| 12개 | 21.3 | 13.216 | 0.028 |
+| 24개 | 42.5 | 26.182 | 0.052 |
+| 36개 | 63.7 | 39.009 | 0.054 |
+
+이번 측정의 최초 36개 호출은 **45.271 → 3.098ms**였다(수정 후는 색인 생성 포함). 명세 수치는 다른 합성 데이터의 참고값이며 이번 전·후 비교는 같은 스크립트의 두 열이다. 제목 불일치 후보가 많은 경우의 앱 로컬 계산 개선이며, 네트워크·휴대폰·실제 계정의 전체 체감 시간을 뜻하지 않는다. 측정 원본 `/tmp/scenenote-85-benchmark-{before,after}.json`.
+
+### 7. 설계 결정 문제 판단
+
+D-1~D-6에서 변경이 필요한 항목은 없었다. 최신 첫 요청만 기존 continuation 크기 예산을 쓰며, 다른 요청 한도·정렬/헤드 검증·같은 작품 결과·화면·문구·응답 필드는 유지했다. 진단 label만 명세대로 추가했다. 실제 첫 응답 12개 근접·호출 감소(U-1), 앱 제한 여유(U-4)는 아직 관측하지 못했다.
+
+### 8. 사람이 해야 할 후속 작업
+
+1. [docs/82](82_search_drama_filter_fixes_spec.md)와 아래 82 실행 기록을 먼저 확인하고 `personalized-recommendations`를 재배포한다. 현재 HEAD에는 82의 공용 드라마 필터 변경도 들어 있어 함께 반영된다. 이번 세션은 배포하지 않았다.
+2. 배포 뒤 같은 계정·필터로 M-2를 확인한다. `scan_budget: latest_first`, count·요청 수, total_ms·catalog_ms·keyword_lookups_used·cache_hits/cache_reads, 첫/12번째 카드 시각과 elapsedMs를 남긴다. 14초에 가까우면 D-2 한도를 바꾸지 말고 보고한다.
+3. catalog_ms가 계속 4초 가까이 남고 키워드 조회가 많으면 U-3에 따라 헤드 검증 방식의 별도 후속 명세 여부를 판단한다. 이번에는 병렬화하지 않았다.
+4. iOS 개발 빌드에서 M-4를 확인한다. DB 변경은 필요 없다.
+
+## 버튼 역할·후기 입력칸 이름 정정 (docs/84, 2026-11-20)
+
+상태: **구현·코드 검사 통과, 화면 미확인.** [84](84_button_role_and_review_input_label_fixes_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. D-1~D-4 변경 없음. 시작 경로와 git 루트는 `/Users/youngilkim/SceneNote`였고, 기존 변경은 `AGENTS.md`·`docs/README.md` 수정과 미추적 docs/84뿐이었다. `/tmp/scenenote-84-start-status.txt`·`/tmp/scenenote-84-start-snapshot.json`에 상태와 원문·해시를 기록했다. 기존 변경을 보존했고, Node 24를 해당 명령에만 적용한 `scenenote-verify`로 검사했다. 브라우저·시청 앱·서버·사용자 기록·DB·Edge·secret·의존성·커밋/푸시는 조작하지 않았다.
+
+### 1. STEP 1 실제 실패 출력(T-1~T-5)
+
+새 `scripts/a11yRoleLabelGuard.test.ts`만 먼저 작성한 뒤 실행했다. **T-1~T-5만 실패**했고 T-6은 통과했다. 아래는 실제 출력에서 스택·시간·중복 actual 필드를 생략한 내용이다. 전체 로그는 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-1roisgx3/test.log`, 실패 전문은 `/tmp/scenenote-84-step1-proof.json`에 있다.
+
+```text
+✖ 84 T-1: every pressable has a role or is hidden from accessibility
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  + [
+  +   'app/people/[id].tsx:761',
+  +   'src/components/content/EpisodeProgressCard.tsx:326',
+  +   'src/components/content/EpisodeProgressCard.tsx:330',
+  +   'src/components/content/EpisodeProgressCard.tsx:334',
+  +   'src/components/content/PersonalizedRecommendationListItem.tsx:45',
+  +   'src/components/content/PersonalizedRecommendationListItem.tsx:87',
+  +   'src/components/content/PersonalizedRecommendationListItem.tsx:88',
+  +   'src/components/content/PersonalizedRecommendationListItem.tsx:101',
+  +   'src/components/content/RecommendationExclusionSheet.tsx:76',
+  +   'src/components/content/SimilarContentQuickViewModal.tsx:19',
+  +   'src/components/content/ThemeReductionSheet.tsx:38',
+  +   'src/components/library/LibraryFilterBottomSheet.tsx:80',
+  +   'src/components/library/LibraryFilterBottomSheet.tsx:92'
+  + ]
+  - []
+✖ 84 T-2: episode progress quick buttons keep their handlers
+  AssertionError [ERR_ASSERTION]: onPress={() => changeDraft(0)}
+✖ 84 T-3: personalized recommendation actions keep their labels
+  AssertionError [ERR_ASSERTION]: accessibilityLabel={`${result.title_primary} 관심 없음`}
+✖ 84 T-4: every text input has an accessible name
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  + [
+  +   'src/components/content/ContentReviewEditor.tsx:158',
+  +   'src/components/content/ContentReviewEditor.tsx:171'
+  + ]
+  - []
+✖ 84 T-5: review inputs are named after their visible headings
+  AssertionError [ERR_ASSERTION]: 한줄 후기
+```
+
+T-1의 13곳과 T-4의 2곳은 명세 1장·2장과 정확히 일치했다. 독립 읽기 전용 검토에서도 같은 결과였다. STEP 2에서 역할만 더했을 때 T-4·T-5만 남아 실패했다. 테스트 단언·가드 범위를 완화하지 않았고 허용 목록도 없다.
+
+### 2. npm test before / STEP 1 / STEP 2 / after
+
+| 단계 | 전체 | 통과 | 실패 |
+|------|------|------|------|
+| 시작 기준선 | 1,870 | 1,870 | 0 |
+| STEP 1 테스트 추가 | 1,876 | 1,871 | 5(T-1~T-5) |
+| STEP 2 역할 13곳 추가 | 1,876 | 1,874 | 2(T-4·T-5) |
+| STEP 3 이름 2곳 추가 후 최종 | 1,876 | 1,876 | 0 |
+
+로그 경로는 모두 `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/` 아래다. 기준선 `scenenote-verify-_dtrb4ca/test.log`, STEP 1 `scenenote-verify-1roisgx3/test.log`, STEP 2 `scenenote-verify-d1o4cl85/test.log`, 최종 `scenenote-verify-_5iwmfh2/test.log`. 새 테스트 6개, 기존 테스트 파일·단언 변경 0, 삭제 테스트 0, 최종 skip 0이다. 기준선·중간 증거는 `/tmp/scenenote-84-{baseline,step1-proof,step2-proof}.json`에 있다.
+
+### 3. npm run typecheck / npm run lint
+
+최종 전체 테스트 다음에 순서대로 실행해 모두 **exit 0·오류 0·경고 0**이었다. `/var/folders/zd/0crxd_2n6hg9wg11kn9b04jw0000gn/T/scenenote-verify-_5iwmfh2/{typecheck.log,lint.log,summary.json}`. `git diff --check`도 통과했다. UI-13.2의 토큰·Alert·accessibilityState 검사는 이번 변경 줄 기준 위반 0줄이다. 기존 한 줄 파일의 스타일을 다시 정리하지 않았다.
+
+### 4. 추가 테스트 ID와 이름
+
+모두 `scripts/a11yRoleLabelGuard.test.ts`에 있다. 지정된 Node 모듈과 순수 `findJsxOpeningTags`만 import하며 RN·Expo·Supabase 런타임을 가져오지 않는다.
+
+| ID | 이름 |
+|----|------|
+| T-1 | 84 T-1: every pressable has a role or is hidden from accessibility |
+| T-2 | 84 T-2: episode progress quick buttons keep their handlers |
+| T-3 | 84 T-3: personalized recommendation actions keep their labels |
+| T-4 | 84 T-4: every text input has an accessible name |
+| T-5 | 84 T-5: review inputs are named after their visible headings |
+| T-6 | 84 T-6: guard ignores type arguments and spread inputs |
+
+app·src의 모든 TSX를 정렬해 `ownText`로 검사한다. 버튼은 역할 또는 `accessible={false}`, 입력은 이름 또는 펼침이 있어야 한다. 타입 인자·PasswordInput 펼침·FilterSheet의 기존 접근성 숨김은 명세 규칙 그대로 처리한다. E-1~E-8은 이 검사·핸들러/라벨 보존 검사·아래 원문 비교로 대응했고, 플랫폼 낭독·실제 닫힘은 수동 확인으로 남긴다.
+
+### 5. 소스 파일 diff 요약
+
+| 파일 | 추가/삭제 줄 | 추가 속성 |
+|------|-------------|-----------|
+| `src/components/content/EpisodeProgressCard.tsx` | +3/-2 | button 역할 3개 |
+| `src/components/content/PersonalizedRecommendationListItem.tsx` | +4/-3 | button 역할 4개 |
+| `src/components/library/LibraryFilterBottomSheet.tsx` | +2/-1 | button 역할 2개 |
+| `src/components/content/RecommendationExclusionSheet.tsx` | +1/-0 | button 역할 1개 |
+| `src/components/content/ThemeReductionSheet.tsx` | +1/-0 | button 역할 1개 |
+| `src/components/content/SimilarContentQuickViewModal.tsx` | +1/-1 | button 역할 1개 |
+| `app/people/[id].tsx` | +1/-0 | button 역할 1개 |
+| `src/components/content/ContentReviewEditor.tsx` | +2/-0 | 이름 "한줄 후기"·"소감" |
+
+시작 원문과 비교해 **역할 13속성·입력 이름 2속성을 제외하면 8파일 모두 동일**함을 확인했다. 기존 이름·onPress·disabled·aria-*·ref·스타일·자식·placeholder는 그대로다. `FilterSheet.tsx`·`scripts/a11yAriaStateGuard.ts`·기존 테스트도 시작 해시와 동일하다. 범위 증거 `/tmp/scenenote-84-scope-proof.json`. 문서는 UI-13.2 지정 문장, 현재 기록, 목차 84행 상태만 바꿨다.
+
+### 6. 수동 확인 M-1~M-4
+
+| ID | 플랫폼 | 결과/미실행 사유 |
+|----|--------|------------------|
+| M-1 | 웹 1440 | 미실행. 브라우저·시청 화면을 조작하지 않는 사용자 요청을 유지했다. 소스 역할·입력 이름만 검사했다. 저장/상태 변경 버튼을 누르지 않았다. |
+| M-2 | 웹 1440 | 미실행. 같은 이유로 개인화 추천 목록의 실제 DOM은 확인하지 않았다. |
+| M-3 | 웹 375 | 미실행. 같은 이유로 필터 시트의 실제 역할·배경 닫힘은 확인하지 않았다. |
+| M-4 | iOS 세로 | 미실행. VoiceOver·시뮬레이터를 실행하지 않았고 버튼·입력 낭독과 배경 탐색 순서는 미확인이다. |
+
+Android 기기 낭독도 미실행이다. 화면·플랫폼 동작 검증 완료로 표시하지 않았다.
+
+### 7. 설계 결정 문제 판단
+
+D-1~D-4 중 변경이 필요한 항목은 없었다. 태그별 역할 한 속성 추가, 보이는 제목과 같은 입력 이름, 허용 목록 없는 저장소 전체 가드, 기존 파서 불변을 모두 지켰다.
+
+### 8. 사람이 해야 할 후속 작업
+
+M-1~M-4에서 DOM 속성·VoiceOver 낭독·배경 탐색 순서와 닫힘을 확인한다. 속성 확인 중 저장·상태 변경 버튼은 누르지 않는다. 앱 Android 낭독도 별도 확인한다. DB 변경·Edge 배포는 필요 없다.
+
 ## 쓰지 않는 상태 파일 삭제 (docs/83, 2026-11-19)
 
 상태: **구현·코드 검사 통과, 화면 미확인.** [83](83_unused_state_files_cleanup_spec.md) 전체와 14장 STEP 1→2→3→4를 따랐다. D-1~D-4 변경 없음. 시작 경로 `/Users/youngilkim/SceneNote`의 git 상태·원문은 `/tmp/scenenote-83-start-{status.txt,snapshot.json}`에 기록했고, 실제 테스트 기준선은 **N=1,866**이다. `scenenote-verify`와 명령에만 적용한 Node 24를 사용했다. 기존 docs/74~82 작업을 보존했다. 브라우저·시청 앱·개발 서버·사용자 저장값·DB/Edge/secret·의존성·커밋/푸시는 조작하지 않았다.
@@ -1899,31 +2419,11 @@ D-1~D-12 변경 또는 변경 필요사항 **없음**. 저장은 QueryClient+계
 
 ### 변경 종류별 검증
 
-아래 명령의 실행 위치는 저장소 루트다. 의존성 설치와 환경 선행조건은 [README](../README.md)를 따른다. 필요한 명세의 테스트 표는 모든 행을 자동 테스트 또는 수동 검증에 대응시키고 미실행 행과 이유를 기록한다.
-
-| 변경 | 실행·점검 방법 | 확인 범위와 한계 |
-|------|---------------|------------------|
-| Markdown만 변경 | 저장 후 재독, 상대 링크/앵커·실재 경로·`package.json` 명령 대조, `git diff --check`, 최종 diff/상태 | 문서 정합성. 전체 앱 테스트·빌드를 근거 없이 반복하지 않음 |
-| 순수 로직·캐시·서비스 계약 | 회귀 입력을 기존 `.test.ts`에 연결하고 `npm test`, `npm run typecheck`, `npm run lint` | 테스트는 `node:test`+`node:assert/strict`. React Native/Expo/Supabase 런타임 import 없이 순수 함수 검사 |
-| 화면·라우팅·입력 | 위 검사 + 해당 명세의 실제 화면 수동 QA; 웹 export 영향이 있으면 `npm run build` | 웹·iOS·Android 결과를 따로 기록. 테스트 글롭은 `app/`와 `.tsx`를 실행하지 않음 |
-| Edge Function·외부 응답 | `_shared`·adapter 순수 함수 테스트, 요청/응답 계약과 오류/partial/auth 분기 검토 | `tsconfig.json`과 `eslint.config.js`는 `supabase/functions` 제외. `npm test`의 일부 서버 테스트도 Deno 핸들러·원격 API 동작을 보증하지 않음 |
-| DB·RLS | migration·타입·서비스 사용처 대조 후 별도로 준비한 테스트 DB에서 인증 전/소유자/다른 사용자 권한 QA | 새 schema는 새 migration으로. 실제 DB 검증 환경·명령·결과를 남겨야 완료 |
-
-정상 흐름 외에 세션 없음·만료, 빈 데이터/네트워크 실패, 같은 작품의 여러 시즌, 영화의 `episode_id = NULL`, 시간만/메모만/둘 다 빈 핀, 동일 시간 복수 핀, 스포일러, 저장·삭제 뒤 캐시와 이동을 해당 변경 범위에 맞게 확인한다. 수동 세부 항목은 [11](11_screen_implementation_spec.md), 기능별 후속 명세, 아래 기존 QA 체크리스트를 참고한다.
+[README의 검증표](../README.md#변경-종류별-검증)에서 변경 범위에 맞는 검사를 선택한다.
 
 ### 일반 검사와 구분할 명령
 
-명령이 존재한다는 사실은 실행 허가나 성공 증거가 아니다. 아래 작업은 대상 환경과 목적이 요청 범위에 있을 때만 수행한다. 문서 점검 중에는 실행하지 않는다.
-
-| 명령/경로 | 선행조건·부작용 |
-|-----------|----------------|
-| `npm run smoke:edge -- "Inception" movie` | 전용 테스트 계정 로그인 및 실제 검색·인기 추천 호출. 캐시를 갱신할 수 있음. 관리자 키와 로컬 URL 또는 `SCENENOTE_DELETE_ACCOUNT_SMOKE=1` 조건이 맞으면 임시 사용자/데이터 **생성·삭제**까지 수행 (`shouldRunDeleteAccountSmoke`) |
-| `npm run backend:serve` | Supabase CLI/로컬 서비스 준비 필요. `.env`를 읽고 서버 프로세스 시작 |
-| `npm run backend:deploy` | 대상 프로젝트 확인 및 인증 필요. 원격 함수 14개 변경; 로컬 실행 검사가 아님 |
-| `npm run import:netflix` | 입력 파일·테스트 계정·대상 확인 필요. 옵션과 관계없이 외부 호출 여부부터 코드에서 확인; 실제 등록은 사용자 데이터 변경 |
-| `scripts/backfill-content-air-date.ts` | 관리자 권한으로 메타데이터/회차를 갱신하는 관리 스크립트. 일반 실행 예제로 사용하지 않음 |
-| `supabase db push`, `supabase secrets set`, `supabase db pull` | 원격 schema/secret 또는 로컬 migration 변경. 과거 연결 기록을 믿고 실행하지 말고 대상·이력·출력 파일부터 확인 |
-| `npm run restart`, `npm run web:restart`, `npm run dev:restart` | 광범위한 `pkill -f` 포함. 다른 세션의 서버를 끊을 수 있음. 먼저 8081 프로세스와 공유 여부 확인 |
+[README의 실행 명령과 부작용](../README.md#실행빌드검증-명령)에서 서버·원격 작업의 목적과 대상 환경을 확인한다.
 
 ### 인수인계 기록 방법
 
@@ -1934,7 +2434,7 @@ D-1~D-12 변경 또는 변경 필요사항 **없음**. 저장은 QueryClient+계
 - **검증:** 실행 명령, 결과, 적용 플랫폼/계정 역할; 미실행 이유와 남은 테스트 ID. 비밀값·메일·사용자 데이터는 제외.
 - **다음 작업:** 미해결 증상·재현 조건·관련 명세/심볼, 원격 적용 필요 여부. 담당자·승인·날짜를 추측해 쓰지 않음.
 
-새 Codex 세션에서는 저장소 루트에서 시작해 “현재 작업 경로와 실제 적용한 지침 파일을 나열하고, AGENTS의 해당 작업 명세와 이 문서의 미완료 항목을 확인해라”라고 요청한다. 같은 위치의 override가 있는지 확인하고, 일반 문서가 모두 자동으로 읽혔다고 가정하지 않는다.
+작업 재개 시 [문서 목차](README.md#요구사항과-설계-문서)에서 명세를 고르고, 이 문서에서 해당 번호나 기능명으로 가장 최근 검증 기록을 찾는다.
 
 ## 2026-05-02 후속 작업 기록 (참고 전용)
 

@@ -1,6 +1,6 @@
 # SceneNote — Codex 구현 프롬프트 (복사해서 Codex에 붙여넣기)
 
-> **과거 실행 프롬프트 — 참고 전용.** 아래 초기화·설치·결함 목록·경로·완료 주장은 당시 작업 기준이다. 현재 저장소에서 통째로 재실행하지 않는다. 작업 전 [AGENTS.md](../AGENTS.md), [문서 목차](README.md)의 해당 기능 후속 명세, 실제 코드를 대조한다. 특히 현재 핀 정렬 요구사항은 [31번 명세](31_usability_review_fixes_spec.md)를 함께 읽는다. 원문은 설계·작업 이력 보존을 위해 유지한다.
+> **과거 실행 프롬프트 — 참고 전용.** 아래 초기화·설치·결함 목록·경로·완료 주장은 당시 작업 기준이다. 현재 저장소에서 통째로 재실행하지 않는다. 작업 전 [AGENTS.md](../AGENTS.md), [문서 목차](README.md)의 해당 기능 후속 명세, 실제 코드를 대조한다. 특히 현재 핀 정렬 요구사항은 [31번 명세](31_usability_review_fixes_spec.md)를 함께 읽는다. 당시 별도 체크리스트는 Cursor 사용 종료로 폐기했다. 전체 원문은 Git 커밋 `b476849`에 남아 있다.
 
 
 아래 **전체 블록**을 Codex 에이전트 첫 메시지로 사용하세요.
@@ -19,7 +19,6 @@ You are implementing **design-compliance fixes** for **SceneNote**, an Expo (Rea
 2. `docs/08_frontend_architecture.md`
 3. `docs/09_timeline_pin_ux.md` (TimecodeInput — critical)
 4. `docs/07_edge_functions.md`
-5. `docs/cursor_verification_prompt.md` (full checklist + Rule 1–8)
 
 ---
 
@@ -45,7 +44,7 @@ You are implementing **design-compliance fixes** for **SceneNote**, an Expo (Rea
 
 Add (or align names with the design doc):
 
-- `pinFormAtom.ts` — `pinFormDraftAtom` with `timecodeDisplay`, `timestamp_seconds`, `memo`, `tags`, `emotion`, `is_spoiler` (see `docs/cursor_verification_prompt.md` §2-E).
+- `pinFormAtom.ts` — `pinFormDraftAtom` with `timecodeDisplay`, `timestamp_seconds`, `memo`, `tags`, `emotion`, `is_spoiler`.
 - `spoilerAtom.ts` — `revealedSpoilerPinIdsAtom: Set<string>`
 - `tagFilterAtom.ts` — `selectedTagFilterIdsAtom: Set<string>`
 
@@ -53,10 +52,10 @@ Add (or align names with the design doc):
 
 ### 3) Zustand — global only
 
-- Add **`src/stores/appUIStore.ts`** (toast queue: `addToast`, `removeToast`, `toasts[]`) as in `docs/cursor_verification_prompt.md` §2-D.
+- Add **`src/stores/appUIStore.ts`** (toast queue: `addToast`, `removeToast`, `toasts[]`).
 - **`src/stores/authStore.ts`:** Add **`persist` + `createJSONStorage` + AsyncStorage** for `session`/`user` **if** it matches app bootstrap in `app/_layout.tsx` / `AppProviders`. Preserve existing fields (`isLoading`, `setLoading`, `reset`) and ensure **AuthGate** still works — adjust initialization so loading/session hydration is correct.
 
-### 4) Pin list — Rule 7 (`docs/cursor_verification_prompt.md`)
+### 4) Pin list — Rule 7
 
 - Use **`revealedSpoilerPinIdsAtom`** for spoiler reveal IDs (not local `useState` inside the list if the design says Jotai).
 - On **`app/content/[id]/pins.tsx`** unmount, reset revealed IDs:
@@ -124,7 +123,7 @@ grep 'timestamp_seconds' supabase/migrations/0001_initial_schema.sql
 
 ## DELIVERABLE
 
-- One PR-sized change set: **all checklist items in `docs/cursor_verification_prompt.md` Step 4** satisfied or explicitly reconciled (e.g. `pins/new` as alias).
+- One PR-sized change set: **the implementation steps and the eight rules above** satisfied or explicitly reconciled (e.g. `pins/new` as alias).
 - Short summary of files touched and any auth/session hydration decisions.
 
 ---

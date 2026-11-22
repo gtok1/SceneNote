@@ -1085,17 +1085,20 @@ export interface SameWorkInput {
   release_date?: string | null;
 }
 
+/** Normalized primary/original titles used by same-work matching, without short or duplicate keys. */
+export function recommendationSameWorkTitleKeys(
+  input: Pick<SameWorkInput, "title_primary" | "title_original">
+): string[] {
+  return [...new Set(
+    [input.title_primary, input.title_original]
+      .map((title) => normalizeTitle(title ?? ""))
+      .filter((title) => title.length >= 2)
+  )];
+}
+
 export function isSameRecommendationWork(left: SameWorkInput, right: SameWorkInput): boolean {
-  const leftTitles = new Set(
-    [left.title_primary, left.title_original]
-      .map((title) => normalizeTitle(title ?? ""))
-      .filter((title) => title.length >= 2)
-  );
-  const rightTitles = new Set(
-    [right.title_primary, right.title_original]
-      .map((title) => normalizeTitle(title ?? ""))
-      .filter((title) => title.length >= 2)
-  );
+  const leftTitles = new Set(recommendationSameWorkTitleKeys(left));
+  const rightTitles = new Set(recommendationSameWorkTitleKeys(right));
   if (!intersects(leftTitles, rightTitles)) return false;
 
   const leftType = normalizeContentType(left.content_type);

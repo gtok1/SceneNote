@@ -7,6 +7,7 @@ import { atomicPinSaveArgs, atomicPinSaveError, createPinSaveIdentity } from "@/
 import { enrichLocalizedPinTitles } from "@/utils/pinLocalization";
 import { mapPinRow, PIN_SELECT, type RawPinRow } from "@/utils/pinRow";
 import { sortPinsByScene } from "@/utils/pinSort";
+import { runWithSaveDeadline } from "@/utils/saveDeadline";
 
 const createIdentities = new WeakMap<PinInput, ReturnType<typeof createPinSaveIdentity>>();
 
@@ -88,27 +89,37 @@ export async function getPinsByTag(tagId: string): Promise<TimelinePin[]> {
   );
 }
 
-export async function createPin(input: PinInput): Promise<TimelinePin> {
-  const { userId } = await getSessionUserId();
+export function createPin(input: PinInput): Promise<TimelinePin> {
+  return runWithSaveDeadline(async (signal) => {
+    const { userId } = await getSessionUserId();
 
-  if (!userId) throw new Error("로그인이 필요합니다");
+    if (!userId) throw new Error("로그인이 필요합니다");
 
-  let identity = createIdentities.get(input);
-  if (!identity) {
-    identity = createPinSaveIdentity();
-    createIdentities.set(input, identity);
-  }
-  return savePinAtomically(input.client_request_id ?? identity.getId(), input, true);
+    let identity = createIdentities.get(input);
+    if (!identity) {
+      identity = createPinSaveIdentity();
+      createIdentities.set(input, identity);
+    }
+    return savePinAtomically(input.client_request_id ?? identity.getId(), input, true, signal);
+  });
 }
 
-export async function updatePin(pinId: string, input: Omit<PinInput, "content_id" | "episode_id">) {
-  const { userId } = await getSessionUserId();
-  if (!userId) throw new Error("로그인이 필요합니다");
-  return savePinAtomically(pinId, input, false);
+export function updatePin(pinId: string, input: Omit<PinInput, "content_id" | "episode_id">) {
+  return runWithSaveDeadline(async (signal) => {
+    const { userId } = await getSessionUserId();
+    if (!userId) throw new Error("로그인이 필요합니다");
+    return savePinAtomically(pinId, input, false, signal);
+  });
 }
 
-async function savePinAtomically(pinId: string, input: PinInput | Omit<PinInput, "content_id" | "episode_id">, isCreate: boolean): Promise<TimelinePin> {
-  const { data, error } = await supabase.rpc("save_timeline_pin", atomicPinSaveArgs(pinId, input, isCreate));
+async function savePinAtomically(
+  pinId: string,
+  input: PinInput | Omit<PinInput, "content_id" | "episode_id">,
+  isCreate: boolean,
+  signal: AbortSignal
+): Promise<TimelinePin> {
+  const { data, error } = await supabase.rpc("save_timeline_pin", atomicPinSaveArgs(pinId, input, isCreate))
+    .abortSignal(signal);
   // A missing RPC must not fall back to the former partially committing multi-write path.
   if (error) throw new Error(atomicPinSaveError(error));
   if (!data || typeof data !== "object" || Array.isArray(data) || data.id !== pinId) {
@@ -117,9 +128,11 @@ async function savePinAtomically(pinId: string, input: PinInput | Omit<PinInput,
   return data as unknown as TimelinePin;
 }
 
-export async function deletePin(pinId: string): Promise<void> {
-  const { error } = await supabase.from("timeline_pins").delete().eq("id", pinId);
-  if (error) throw new Error(error.message);
+export function deletePin(pinId: string): Promise<void> {
+  return runWithSaveDeadline(async (signal) => {
+    const { error } = await supabase.from("timeline_pins").delete().eq("id", pinId).abortSignal(signal);
+    if (error) throw new Error(error.message);
+  });
 }
 
 function mapPins(rows: RawPinRow[] | null): TimelinePin[] {

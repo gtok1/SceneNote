@@ -6,9 +6,13 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 01_product_requirements.md, 03_screen_flow.md, 04_architecture.md, 07_edge_functions.md, 09_timeline_pin_ux.md
 
-> **문서 해석:** 번호 절의 라우트·코드 블록은 초기 설계와 구현 예제다. 실제 파일명·API·완료 여부를 보장하지 않는다. 확정 요구사항은 유지하며, 화면 변경 전 [11 화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 명세를 읽는다. 아래 현황은 별도 날짜가 표시된 절을 제외하면 2026-09-26 정적 코드 확인이며 UI 동작 검증 결과가 아니다.
+> **문서 해석:** 번호 절의 라우트·코드 블록은 초기 설계와 구현 예제다. 실제 파일명·API·완료 여부를 보장하지 않는다. 확정 요구사항은 유지하며, 화면 변경 전 [11 화면 구현 명세](11_screen_implementation_spec.md)와 [문서 목차](README.md#요구사항과-설계-문서)의 기능별 명세를 읽는다. 아래 현황은 별도 날짜가 표시된 절을 제외하면 2026-09-26 정적 코드 확인이며 UI 동작 검증 결과가 아니다.
 
 ## 현재 구현과 설계 예제의 구분
+
+### 애니 검색의 같은 방영 단위 병합 (2026-11-20)
+
+[87](87_search_anime_duplicate_fixes_spec.md)의 `supabase/functions/_shared/searchResultMerge.ts`를 서버 `compactResults`, 앱 페이지 병합, 제목·인물 검색 결과 병합이 공유한다. 같은 제공처의 다른 ID와 서로 다른 명시 시즌은 유지하고, 애니의 제목 표기가 달라도 원제/시즌/파트·연도·방영일·화수 근거가 같은 방영 단위만 합친다. TMDB는 영화/TV 숫자 ID 공간을 구분한다. `equivalent_results`는 검색 표시용 identity이며 DB canonical ID를 변경하지 않는다. 앱은 등가 identity 중 실제로 등록된 정확한 시즌/전체 identity를 대표로 골라 기존 기록과 연결하고, 상태 필터는 다른 정확 등가 등록의 상태도 확인한다. 확인된 애니 영화 등가는 대표 제공처와 무관하게 애니·영화 선택에 모두 남는다. 원제에서 해석한 표시 기수·파트는 등록용 SEQUEL 체인 번호와 분리하며 목록/갤러리 메타 앞에도 표시한다. 새 외부 조회·기록 DB 쓰기는 없으며, 운영 웹 번들/Edge 배포 여부와 실제 화면 검증은 개발 기록에서 별도로 관리한다.
 
 ### 검색·추천의 한국 드라마 필터 (2026-11-19)
 
@@ -110,7 +114,11 @@
 
 시청처 캐시는 출처·작품 ID뿐 아니라 선택 시즌·제목/원제·방영일/연도·계약 버전도 구분한다. 화면 포커스 복귀 때 1시간 TTL을 확인하며 같은 포커스 안에서는 요청별 자동 조회를 한 번만 시도한다. 구서버/요청 범위 불일치 응답은 TTL과 관계없이 다음 포커스에서 다시 조회하며 실제 데이터 미확인과 다른 안내를 표시한다. AniList TV의 원제에 명시된 기수는 DB의 가상 시즌 1보다 우선한다. 시즌 문맥의 구서버/시리즈 응답은 확정 제공처에서 제외하며, 실패 뒤에는 사용자가 재시도한다. AniList 극장판은 영화 매칭을 지원하기 전까지 기존 TV 캐시와 원격 조회를 사용하지 않는다. 범위 계약은 [54 §15~16](54_anime_sequel_watch_providers_fixes_spec.md#15-2026-10-20-후속-정정--선택한-시즌의-제공처만-표시)를 따른다.
 
-`src/lib/query.ts`의 기본값은 query `retry: 1`, `staleTime: 30_000`, `gcTime: 5 * 60_000`, mutation `retry: 0`이다. `networkMode` 및 영속 query cache는 이 파일에서 설정하지 않는다. 아래 §9.3의 `offlineFirst` 예제를 현재 오프라인 지원 증거로 사용하지 않는다.
+프로필의 ‘공유 링크’는 `app/settings/library-shares.tsx`에서 열린다. `useLibraryShares.ts`는 본인 링크를 사용자별로 캐시하고, 공유를 중지하면 삭제된 링크의 공개 캐시를 제거하고 최신 100개를 다시 조회한다. [공유 링크 관리 명세](88_library_share_link_management_spec.md)
+
+웹 정적 내보내기 시 루트 레이아웃이 아이콘 폰트를 등록한다. 라이브러리·핀 작성·공개 공유 화면은 `useHydrated`로 첫 렌더를 정적 HTML과 맞춘 뒤 실제 화면 폭이나 URL 검색 매개변수를 적용한다.
+
+`src/lib/query.ts`의 조회 기본값은 `retry: 1`, `staleTime: 30_000`, `gcTime: 5 * 60_000`이다. 저장은 `retry: 0`, `networkMode: "always"`로 실행한다. 감상·핀 폼은 기기에서 오프라인을 확인하면 저장 요청 전에 안내하고 초안을 유지한다. [오프라인 저장 명세](89_offline_save_trap_fixes_spec.md)
 
 | 변경 | 현재 캐시 처리 | 회귀 범위 |
 |---|---|---|
@@ -2087,7 +2095,7 @@ export const queryClient = new QueryClient({
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
     },
     mutations: {
-      networkMode: 'always', // mutation은 네트워크 있을 때만 실행
+      networkMode: 'always', // 연결 상태에 관계없이 mutation 실행
       retry: 1,
     },
   },

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Stack, useGlobalSearchParams, usePathname, useRootNavigationState, useRouter, useSegments } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/common/ScreenHeader";
 import { StatusBar } from "expo-status-bar";
@@ -29,13 +31,20 @@ import { useInputModality } from "@/hooks/useInputModality";
 import { selectionAriaProps } from "@/utils/selectionAria";
 
 export default function RootLayout() {
+  // Include the same icon glyphs in the static web page and the first browser render.
+  useFonts(Ionicons.font);
   return (
     <GestureHandlerRootView style={styles.root}>
       <AppProviders>
         <StatusBar style="dark" />
         <Stack screenOptions={{
           headerShown: true,
-          header: ({ options, route }) => <ScreenHeader title={options.title ?? "SceneNote"} maxWidth={route.name.startsWith("pins/") ? FORM_CONTENT_MAX_WIDTH : HOME_CONTENT_MAX_WIDTH} />,
+          header: ({ options, route }) => (
+            <ScreenHeader
+              title={options.title ?? "SceneNote"}
+              maxWidth={route.name.startsWith("pins/") || route.name === "settings/library-shares" ? FORM_CONTENT_MAX_WIDTH : HOME_CONTENT_MAX_WIDTH}
+            />
+          ),
           contentStyle: { backgroundColor: colors.background }
         }}>
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
@@ -53,6 +62,7 @@ export default function RootLayout() {
           <Stack.Screen name="library/photo-import" options={{ title: "사진에서 작품 찾기" }} />
           <Stack.Screen name="settings/excluded-recommendations" options={{ title: "추천에서 제외한 작품" }} />
           <Stack.Screen name="settings/subscribed-otts" options={{ title: "구독 중인 OTT" }} />
+          <Stack.Screen name="settings/library-shares" options={{ title: "공유 링크" }} />
         </Stack>
         <AuthRedirect />
         <AuthLinkHandler />

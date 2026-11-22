@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
+import { isSameRecommendationWork } from "../../supabase/functions/_shared/recommendationEngine";
+import * as visibility from "./recommendationVisibility";
 import { countVisibleRecommendationCandidates, filterVisibleRecommendationCandidates, findVisibleRecommendationReplacement, isRegisteredRecommendation, summarizeRecommendationVisibility } from "./recommendationVisibility";
 
 const candidate = (overrides: Partial<SearchResult> = {}): SearchResult => ({
@@ -140,4 +142,65 @@ it("Y-5 stale provider responses and replacements never display outside the sele
   const items = [1992, 1981, 2026, 2025, null].map((air_year, index) => candidate({ external_id: String(index), air_year }));
   assert.deepEqual(filterVisibleRecommendationCandidates(items, [], null, { year: 2025 }).map(item => item.air_year), [2025]);
   assert.equal(countVisibleRecommendationCandidates(items, [], null, { year: 2025 }), 1);
+});
+
+it("85 T-7: indexed registration matches the full library scan", () => {
+  const library = [
+    libraryItem({ source_api: "tmdb", source_id: "333", content_type: "kdrama", title_primary: "개인적인 택시", air_year: 2026 }),
+    libraryItem({ source_api: "manual", source_id: "999", content_type: "anime", title_primary: "수동 작품", air_year: null }),
+    libraryItem({ source_api: "anilist", source_id: "10", content_type: "anime", title_primary: "같은 제목", air_year: 2026 }),
+    libraryItem({ source_api: "tmdb", source_id: "20", content_type: "movie", title_primary: "영화 제목", air_year: 2024 }),
+    libraryItem({ source_api: "tmdb", source_id: "30", content_type: "jdrama", title_primary: "원제만", title_original: "オリジナル", air_year: 2025 }),
+    libraryItem({ source_api: "tmdb", source_id: "40", content_type: "anime", title_primary: "A", air_year: 2026 })
+  ];
+  const cases: { id: string; result: SearchResult; expected: boolean }[] = [
+    { id: "a", result: candidate({ external_source: "tmdb", external_id: "333", content_type: "kdrama", title_primary: "다른 제목", air_year: 2026 }), expected: true },
+    { id: "b", result: candidate({ external_source: "tmdb", external_id: "999", content_type: "anime", title_primary: "다른 작품", air_year: 2026 }), expected: false },
+    { id: "c1", result: candidate({ external_source: "anilist", external_id: "11", content_type: "anime", title_primary: "같은 제목", air_year: 2026 }), expected: true },
+    { id: "c2", result: candidate({ external_source: "anilist", external_id: "12", content_type: "anime", title_primary: "같은 제목", air_year: 2025 }), expected: false },
+    { id: "c3", result: candidate({ external_source: "anilist", external_id: "13", content_type: "anime", title_primary: "같은 제목", air_year: null }), expected: true },
+    { id: "d", result: candidate({ external_source: "tmdb", external_id: "14", content_type: "movie", title_primary: "같은 제목", air_year: 2026 }), expected: false },
+    { id: "e1", result: candidate({ external_source: "tmdb", external_id: "21", content_type: "kdrama", title_primary: "영화 제목", air_year: 2025 }), expected: true },
+    { id: "e2", result: candidate({ external_source: "tmdb", external_id: "22", content_type: "kdrama", title_primary: "영화 제목", air_year: 2026 }), expected: false },
+    { id: "e3", result: candidate({ external_source: "tmdb", external_id: "23", content_type: "kdrama", title_primary: "영화 제목", air_year: null }), expected: false },
+    { id: "f", result: candidate({ external_source: "tmdb", external_id: "31", content_type: "jdrama", title_primary: "다른 번역", title_original: "オリジナル", air_year: 2025 }), expected: true },
+    { id: "g", result: candidate({ external_source: "anilist", external_id: "41", content_type: "anime", title_primary: "A", air_year: 2026 }), expected: false },
+    { id: "h", result: candidate({ external_source: "anilist", external_id: "15", content_type: "anime", title_primary: "같은   제목!", air_year: 2026 }), expected: true },
+    { id: "i", result: candidate({ external_source: "anilist", external_id: "77", content_type: "anime", title_primary: "수동 작품", air_year: null }), expected: true }
+  ];
+  const fullScan = (c: SearchResult, lib: readonly LibraryListItem[]) => lib.some((i) =>
+    (i.source_api !== "manual" && `${i.source_api}:${i.source_id}` === `${c.external_source}:${c.external_id}`) ||
+    isSameRecommendationWork(i, c));
+
+  for (const { id, result, expected } of cases) {
+    assert.equal(fullScan(result, library), expected, `${id}: fixed full-scan expectation`);
+    assert.equal(isRegisteredRecommendation(result, library), fullScan(result, library), `${id}: indexed parity`);
+    assert.equal(isRegisteredRecommendation(result, []), false, `${id}: empty library`);
+  }
+});
+
+it("85 T-8: the library index is reused per array reference", () => {
+  const library = [libraryItem()];
+  const first = visibility.getRecommendationLibraryIndex(library);
+  assert.strictEqual(visibility.getRecommendationLibraryIndex(library), first);
+  assert.notStrictEqual(visibility.getRecommendationLibraryIndex([...library]), first);
+});
+
+it("85 T-9: same-work candidates come only from matching titles", () => {
+  const matching = [
+    libraryItem({ content_type: "anime", title_primary: "목표 작품", air_year: 2025 }),
+    libraryItem({ content_type: "movie", title_primary: "목표 작품", air_year: 2025 })
+  ];
+  const library = [
+    ...Array.from({ length: 2_000 }, (_, index) => libraryItem({
+      source_id: String(index), title_primary: `서로 다른 작품 ${index}`
+    })),
+    ...matching
+  ];
+  const index = visibility.getRecommendationLibraryIndex(library);
+  const result = candidate({ title_primary: "목표 작품", content_type: "anime", air_year: 2025 });
+  const matches = visibility.findSameWorkLibraryCandidates(index, result);
+  assert.equal(matches.length, 2);
+  assert.deepEqual(new Set(matches), new Set(matching));
+  assert.deepEqual(visibility.findSameWorkLibraryCandidates(index, candidate({ title_primary: "없는 제목" })), []);
 });

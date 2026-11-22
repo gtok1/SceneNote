@@ -12,6 +12,8 @@ interface AccountSectionProps {
   onOpenExclusions?: (() => void) | undefined;
   subscribedOttSummary?: string | undefined;
   onOpenSubscribedOtts?: (() => void) | undefined;
+  librarySharesSummary?: string | undefined;
+  onOpenLibraryShares?: (() => void) | undefined;
   onSignOut: () => void;
   signingOut: boolean;
   onDeleteAccount: () => void;
@@ -24,6 +26,8 @@ export function AccountSection({
   onOpenExclusions,
   subscribedOttSummary,
   onOpenSubscribedOtts,
+  librarySharesSummary,
+  onOpenLibraryShares,
   onSignOut,
   signingOut,
   onDeleteAccount,
@@ -47,8 +51,21 @@ export function AccountSection({
             <Ionicons accessible={false} color={colors.textMuted} name="chevron-forward" size={20} />
           </Pressable>
         ) : null}
+        {onOpenLibraryShares ? (
+          <Pressable
+            accessibilityLabel={librarySharesSummary ? `공유 링크, ${librarySharesSummary}` : "공유 링크"}
+            accessibilityRole="button"
+            onPress={onOpenLibraryShares}
+            style={({ pressed }) => [styles.row, onOpenSubscribedOtts && styles.divider, pressed && styles.pressed]}
+          >
+            <Ionicons accessible={false} color={colors.textMuted} name="link-outline" size={20} />
+            <Text style={styles.label}>공유 링크</Text>
+            <Text style={styles.meta}>{librarySharesSummary}</Text>
+            <Ionicons accessible={false} color={colors.textMuted} name="chevron-forward" size={20} />
+          </Pressable>
+        ) : null}
         {onOpenExclusions ? (
-          <Pressable accessibilityRole="button" onPress={onOpenExclusions} style={[styles.row, onOpenSubscribedOtts ? styles.divider : null]}>
+          <Pressable accessibilityRole="button" onPress={onOpenExclusions} style={[styles.row, onOpenSubscribedOtts || onOpenLibraryShares ? styles.divider : null]}>
             <Ionicons color={colors.textMuted} name="eye-off-outline" size={20} />
             <Text style={styles.label}>추천에서 제외한 작품</Text>
             <Text style={styles.meta}>{`${exclusionCount ?? 0}개`}</Text>
@@ -59,7 +76,7 @@ export function AccountSection({
           accessibilityRole="button"
           disabled={busy}
           onPress={onSignOut}
-          style={[styles.row, onOpenSubscribedOtts || onOpenExclusions ? styles.divider : null, busy ? styles.disabled : null]}
+          style={[styles.row, onOpenSubscribedOtts || onOpenLibraryShares || onOpenExclusions ? styles.divider : null, busy ? styles.disabled : null]}
         >
           <Ionicons color={colors.textMuted} name="log-out-outline" size={20} />
           <Text style={styles.label}>{signingOut ? "로그아웃 중" : "로그아웃"}</Text>

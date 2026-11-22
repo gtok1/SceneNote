@@ -10,7 +10,11 @@ def blocked(path):
 
 def main():
     try:
-        result = subprocess.run(['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMRT', '-z'], capture_output=True)
+        # Only destination paths matter. A rename is covered by its added side.
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--no-renames', '--name-only', '--diff-filter=AMT', '-z'],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
         if result.returncode:
             print('SceneNote staged check could not read the index.', file=sys.stderr)
             return 1
@@ -18,7 +22,10 @@ def main():
         if any(blocked(p) for p in paths if p):
             print('SceneNote: staged environment/private-key path found. Review staged paths before committing; no file contents printed.', file=sys.stderr)
             return 1
-        result = subprocess.run(['git', 'diff', '--cached', '--check'], capture_output=True)
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--check'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
         if result.returncode:
             print('SceneNote: staged whitespace/conflict-marker check failed. Run git diff --cached --check locally.', file=sys.stderr)
             return 1

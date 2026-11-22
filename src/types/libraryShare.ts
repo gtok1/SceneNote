@@ -19,6 +19,8 @@ export interface LibraryShareSummary {
   createdAt: string;
 }
 
+export type MyLibraryShare = LibraryShareSummary;
+
 export interface CreateLibraryShareInput {
   title: string;
   filters: LibraryShareFilters;
@@ -27,8 +29,10 @@ export interface CreateLibraryShareInput {
   contentIds?: string[];
 }
 
+export type SharedLibraryItem = LibraryListItem & { review_is_spoiler?: boolean };
+
 export interface LibraryShareDetail extends LibraryShareSummary {
   ownerDisplayName: string;
   filters: LibraryShareFilters;
-  items: LibraryListItem[];
+  items: SharedLibraryItem[];
 }

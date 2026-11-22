@@ -56,6 +56,8 @@ import { filterVisibleRecommendationCandidates, summarizeRecommendationVisibilit
 import { getGenreDisplayName } from "@/utils/genre";
 import { createSearchFilterDraft } from "@/utils/searchFilterDraft";
 import { partitionSearchResults } from "@/utils/searchResultVisibility";
+import { mergeSearchResults, preferRegisteredSearchResult } from "@/utils/mergeSearchResults";
+import { getSearchExternalKey } from "../supabase/functions/_shared/searchResultMerge";
 import { discoveryFilterKey, normalizeDiscoveryFilters } from "../supabase/functions/_shared/discoveryFilters";
 import { canShowRecommendationCompletion, recommendationTopUpStatus, shouldAutoLoadNextRecommendationBatch, shouldResumeRecommendationSearchOnScroll, shouldShowRecommendationFeed } from "@/utils/recommendationFeed";
 import { formatPersonName } from "@/utils/japaneseName";
@@ -233,14 +235,17 @@ export default function SearchScreen() {
     const byKey = new Map<string, LibraryListItem[]>();
     for (const item of library.data ?? []) {
       if (item.source_api === "manual") continue;
-      const key = `${item.source_api}:${item.source_id}`;
+      const key = getSearchExternalKey({
+        external_source: item.source_api, external_id: item.source_id, content_type: item.content_type
+      });
       byKey.set(key, [...(byKey.get(key) ?? []), item]);
     }
     return byKey;
   }, [library.data]);
   const baseResults = useMemo(
-    () => mergeSearchResults(search.data?.results ?? [], personSearch.data?.results ?? []),
-    [personSearch.data?.results, search.data?.results]
+    () => mergeSearchResults(search.data?.results ?? [], personSearch.data?.results ?? [])
+      .map(result => preferRegisteredSearchResult(result, libraryItemsByExternalKey)),
+    [personSearch.data?.results, search.data?.results, libraryItemsByExternalKey]
   );
   const genreOptions = useMemo(
     () => baseResults.flatMap((result) => result.genres ?? []),
@@ -1483,7 +1488,7 @@ export default function SearchScreen() {
 }
 
 function createExternalKey(result: SearchResult): string {
-  return `${result.external_source}:${result.external_id}`;
+  return getSearchExternalKey(result);
 }
 
 function isPersonalizedRecommendation(
@@ -1518,123 +1523,6 @@ function isResultAlreadyAdded(
   // whole-work row from before migration 0021 must not disable its add button.
   // A non-season card keeps the old behaviour: any row for the work counts.
   return typeof result.season_number === "number" ? match.kind === "season" : match.kind !== "none";
-}
-
-function mergeSearchResults(titleResults: SearchResult[], personResults: SearchResult[]): SearchResult[] {
-  const mergedResults: SearchResult[] = [];
-
-  for (const result of [...titleResults, ...personResults]) {
-    const duplicateIndex = mergedResults.findIndex(
-      (item) =>
-        isSameExternalResult(item, result) ||
-        isSameWorkResult(item, result)
-    );
-
-    if (duplicateIndex < 0) {
-      mergedResults.push(result);
-      continue;
-    }
-
-    const previous = mergedResults[duplicateIndex];
-    if (!previous) continue;
-    mergedResults[duplicateIndex] = mergeResultFields(previous, result);
-  }
-
-  return mergedResults;
-}
-
-function isSameExternalResult(left: SearchResult, right: SearchResult): boolean {
-  return searchSeasonIdentity(left) === searchSeasonIdentity(right);
-}
-
-function isSameWorkResult(left: SearchResult, right: SearchResult): boolean {
-  if ((left.season_number ?? null) !== (right.season_number ?? null)) return false;
-  if (left.content_type !== right.content_type) return false;
-  if (left.air_year && right.air_year && left.air_year !== right.air_year) return false;
-
-  const leftTitles = normalizedTitleCandidates(left);
-  const rightTitles = normalizedTitleCandidates(right);
-  if (!leftTitles.length || !rightTitles.length) return false;
-
-  return leftTitles.some((title) => rightTitles.includes(title));
-}
-
-function normalizedTitleCandidates(result: SearchResult): string[] {
-  return Array.from(
-    new Set(
-      [result.title_primary, result.title_original]
-        .map((title) => normalizeTitleForDedupe(title ?? ""))
-        .filter((title) => title.length >= 2)
-    )
-  );
-}
-
-function normalizeTitleForDedupe(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, "")
-    .trim();
-}
-
-function mergeResultFields(left: SearchResult, right: SearchResult): SearchResult {
-  const preferred = preferSearchResult(left, right);
-  const fallback = preferred === left ? right : left;
-  const localizedOverview = preferred.localized_overview ?? fallback.localized_overview;
-  const merged: SearchResult = {
-    ...preferred,
-    title_primary: preferred.title_primary || fallback.title_primary,
-    title_original: preferred.title_original ?? fallback.title_original,
-    poster_url: preferred.poster_url ?? fallback.poster_url,
-    overview: preferred.overview ?? fallback.overview,
-    air_year: preferred.air_year ?? fallback.air_year,
-    air_date: preferred.air_date ?? fallback.air_date ?? null,
-    end_date: preferred.end_date ?? fallback.end_date ?? null,
-    episode_count: preferred.episode_count ?? fallback.episode_count,
-    genres: Array.from(new Set([...(preferred.genres ?? []), ...(fallback.genres ?? [])])),
-    has_seasons: preferred.has_seasons || fallback.has_seasons,
-    duplicate_hint: left.duplicate_hint || right.duplicate_hint || !isSameExternalResult(left, right),
-    matched_people: Array.from(new Set([...(left.matched_people ?? []), ...(right.matched_people ?? [])]))
-  };
-
-  if (localizedOverview !== undefined) merged.localized_overview = localizedOverview;
-  return merged;
-}
-
-function preferSearchResult(left: SearchResult, right: SearchResult): SearchResult {
-  const leftScore = sourcePreferenceScore(left);
-  const rightScore = sourcePreferenceScore(right);
-  if (leftScore !== rightScore) return rightScore > leftScore ? right : left;
-
-  const leftCompleteness = completenessScore(left);
-  const rightCompleteness = completenessScore(right);
-  return rightCompleteness > leftCompleteness ? right : left;
-}
-
-function sourcePreferenceScore(result: SearchResult): number {
-  if (result.content_type === "anime") {
-    if (result.external_source === "anilist") return 4;
-    if (result.external_source === "tmdb") return 3;
-    if (result.external_source === "kitsu") return 2;
-    return 1;
-  }
-
-  if (result.external_source === "tmdb") return 4;
-  if (result.external_source === "tvmaze") return 3;
-  return 1;
-}
-
-function completenessScore(result: SearchResult): number {
-  return [
-    result.poster_url,
-    result.overview,
-    result.localized_overview,
-    result.air_year,
-    result.air_date,
-    result.end_date,
-    result.episode_count,
-    result.title_original
-  ].filter(Boolean).length;
 }
 
 const styles = StyleSheet.create({

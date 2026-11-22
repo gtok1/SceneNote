@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { useNavigation, usePreventRemove } from "@react-navigation/native";
+import { useNetworkState } from "expo-network";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { YearSelect } from "@/components/common/YearSelect";
 import { RatingInput } from "@/components/form/RatingInput";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useUpdateLibraryWatchDates } from "@/hooks/useLibrary";
 import { MANUAL_PROGRESS_COPY } from "@/utils/contentDetailView";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import { ERROR_COPY } from "@/utils/errorCopy";
+import { isNetworkOffline } from "@/utils/networkStatus";
 import { useContentReview, useSaveContentReview } from "@/hooks/useReviews";
+import { confirmDiscard } from "@/utils/confirmDiscard";
+import { createReviewDraftSnapshot, isReviewDraftDirty, parseWatchDateParts, rebaseReviewDraft, type ReviewDraft, type WatchDateParts } from "@/utils/reviewDraft";
+import { todayWatchDateParts, WATCH_DATE_INPUT_COPY } from "@/utils/watchDateInput";
 
 interface ContentReviewEditorProps {
   contentId: string;
@@ -21,18 +27,10 @@ interface ContentReviewEditorProps {
   onSaved: () => void;
 }
 
-interface WatchDateParts {
-  year: string;
-  month: string;
-  day: string;
-}
-
 interface ReleaseWatchDate extends WatchDateParts {
   isoDate: string;
   yearNumber: number;
 }
-
-const EMPTY_WATCH_DATE: WatchDateParts = { year: "", month: "", day: "" };
 
 export function ContentReviewEditor({
   contentId,
@@ -44,15 +42,10 @@ export function ContentReviewEditor({
   contentAirYear,
   onSaved
 }: ContentReviewEditorProps) {
+  const network = useNetworkState();
   const review = useContentReview(contentId);
   const saveReview = useSaveContentReview(contentId);
   const saveWatchDates = useUpdateLibraryWatchDates();
-  const [rating, setRating] = useState<number | null>(null);
-  const [oneLineReview, setOneLineReview] = useState("");
-  const [body, setBody] = useState("");
-  const [isSpoiler, setIsSpoiler] = useState(false);
-  const [firstWatchedDate, setFirstWatchedDate] = useState<WatchDateParts>(EMPTY_WATCH_DATE);
-  const [lastWatchedDate, setLastWatchedDate] = useState<WatchDateParts>(EMPTY_WATCH_DATE);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const releaseWatchDate = useMemo(() => createReleaseWatchDate(contentAirDate), [contentAirDate]);
   const completionWatchDate = useMemo(
@@ -60,29 +53,84 @@ export function ContentReviewEditor({
     [contentEndDate, releaseWatchDate]
   );
   const releaseYear = releaseWatchDate?.yearNumber ?? normalizeYear(contentAirYear);
-
-  useEffect(() => {
-    if (review.isLoading) return;
-
-    setRating(review.data?.rating ?? null);
-    setOneLineReview(review.data?.one_line_review ?? "");
-    setBody(review.data?.body ?? "");
-    setIsSpoiler(review.data?.is_spoiler ?? false);
-  }, [
+  const sourceSnapshot = useMemo(() => createReviewDraftSnapshot({
+    review: {
+      rating: review.data?.rating ?? null,
+      one_line_review: review.data?.one_line_review ?? null,
+      body: review.data?.body ?? null,
+      is_spoiler: review.data?.is_spoiler ?? false
+    },
+    firstWatchedAt,
+    lastWatchedAt,
+    firstFallback: null,
+    lastFallback: null
+  }), [
     review.data?.body,
     review.data?.is_spoiler,
     review.data?.one_line_review,
     review.data?.rating,
-    review.isLoading
+    firstWatchedAt,
+    lastWatchedAt
   ]);
+  const [draft, setDraft] = useState<ReviewDraft>(sourceSnapshot);
+  const [baseline, setBaseline] = useState<ReviewDraft>(sourceSnapshot);
+  const baselineRef = useRef(baseline);
+  const sourceRef = useRef(sourceSnapshot);
+  const [submitting, setSubmitting] = useState(false);
+  const saveLock = useRef(false);
+  const saving = submitting || saveReview.isPending || saveWatchDates.isPending;
+  const { rating, oneLineReview, body, isSpoiler, firstWatchedDate, lastWatchedDate } = draft;
+  const setOneLineReview = (oneLineReview: string) => setDraft((current) => ({ ...current, oneLineReview }));
+  const setBody = (body: string) => setDraft((current) => ({ ...current, body }));
 
   useEffect(() => {
-    setFirstWatchedDate(parseWatchDateParts(firstWatchedAt, releaseWatchDate));
-    setLastWatchedDate(parseWatchDateParts(lastWatchedAt, completionWatchDate));
-  }, [completionWatchDate, firstWatchedAt, lastWatchedAt, releaseWatchDate]);
+    // Watch-date mutations publish optimistic props, so only accept source values outside a save.
+    if (review.isLoading || saving || sourceRef.current === sourceSnapshot) return;
+    const previousBaseline = baselineRef.current;
+    // Unchanged source fields may still be waiting to catch up with a successful save.
+    const nextBaseline = rebaseReviewDraft(sourceSnapshot, sourceRef.current, previousBaseline);
+    sourceRef.current = sourceSnapshot;
+    baselineRef.current = nextBaseline;
+    setDraft((current) => rebaseReviewDraft(current, previousBaseline, nextBaseline));
+    setBaseline(nextBaseline);
+  }, [review.isLoading, saving, sourceSnapshot]);
+
+  const navigation = useNavigation();
+  const [leaving, setLeaving] = useState(false);
+  const leaveAction = useRef<(() => void) | null>(null);
+  const dirty = isReviewDraftDirty(draft, baseline);
+  const leave = (action: () => void) => { leaveAction.current = action; setLeaving(true); };
+  usePreventRemove(!leaving && (dirty || saving), ({ data }) => {
+    if (saveLock.current || saving) return;
+    confirmDiscard(() => leave(() => navigation.dispatch(data.action)));
+  });
+  useEffect(() => {
+    if (!leaving) return;
+    const action = leaveAction.current;
+    leaveAction.current = null;
+    action?.();
+  }, [leaving]);
+  useEffect(() => {
+    if (Platform.OS !== "web" || leaving || (!dirty && !saving)) return;
+    const handler = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, saving, leaving]);
+
+  const acceptSaved = (fields: Partial<ReviewDraft>) => {
+    const nextBaseline = { ...baselineRef.current, ...fields };
+    baselineRef.current = nextBaseline;
+    setBaseline(nextBaseline);
+    setDraft((current) => ({ ...current, ...fields }));
+  };
 
   const submit = async () => {
+    if (saveLock.current) return;
     setSubmitError(null);
+    if (isNetworkOffline(network)) {
+      setSubmitError(ERROR_COPY.offlineSave);
+      return;
+    }
     let nextFirstWatchedAt: string | null;
     let nextLastWatchedAt: string | null;
     try {
@@ -109,6 +157,8 @@ export function ContentReviewEditor({
       return;
     }
 
+    saveLock.current = true;
+    setSubmitting(true);
     try {
       if (hasReviewInput) {
         const savedReview = await saveReview.mutateAsync({
@@ -118,10 +168,12 @@ export function ContentReviewEditor({
           body,
           is_spoiler: isSpoiler
         });
-        setRating(savedReview.rating);
-        setOneLineReview(savedReview.one_line_review ?? "");
-        setBody(savedReview.body ?? "");
-        setIsSpoiler(savedReview.is_spoiler);
+        acceptSaved({
+          rating: savedReview.rating,
+          oneLineReview: savedReview.one_line_review ?? "",
+          body: savedReview.body ?? "",
+          isSpoiler: savedReview.is_spoiler
+        });
       }
 
       if (hasWatchDateChange) {
@@ -130,16 +182,23 @@ export function ContentReviewEditor({
           firstWatchedAt: nextFirstWatchedAt,
           lastWatchedAt: nextLastWatchedAt
         });
+        acceptSaved({
+          firstWatchedDate: parseWatchDateParts(nextFirstWatchedAt, null),
+          lastWatchedDate: parseWatchDateParts(nextLastWatchedAt, null)
+        });
       }
 
       onSaved();
     } catch (error) {
       const message = userFacingErrorMessage(error, MANUAL_PROGRESS_COPY.reviewSaveFailed);
       setSubmitError(message);
+    } finally {
+      saveLock.current = false;
+      setSubmitting(false);
     }
   };
 
-  const pending = review.isLoading || saveReview.isPending || saveWatchDates.isPending;
+  const pending = review.isLoading || saving;
 
   return (
     <View style={styles.panel}>
@@ -150,25 +209,27 @@ export function ContentReviewEditor({
 
       <View style={styles.field}>
         <Text style={styles.label}>별점</Text>
-        <RatingInput value={rating} onChange={setRating} />
+        <RatingInput value={draft.rating} onChange={(rating) => setDraft((current) => ({ ...current, rating }))} />
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>한줄 후기</Text>
         <TextInput
+          accessibilityLabel="한줄 후기"
           editable={!pending}
           maxLength={120}
           onChangeText={setOneLineReview}
           placeholder="짧게 남기는 한 문장"
           placeholderTextColor={colors.textMuted}
           style={styles.input}
-          value={oneLineReview}
+          value={draft.oneLineReview}
         />
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>소감</Text>
         <TextInput
+          accessibilityLabel="소감"
           editable={!pending}
           maxLength={2000}
           multiline
@@ -177,7 +238,7 @@ export function ContentReviewEditor({
           placeholderTextColor={colors.textMuted}
           style={[styles.input, styles.bodyInput]}
           textAlignVertical="top"
-          value={body}
+          value={draft.body}
         />
       </View>
 
@@ -187,16 +248,17 @@ export function ContentReviewEditor({
           <WatchDateInput
             disabled={pending}
             label="처음 본 시기"
-            onChange={setFirstWatchedDate}
+            onChange={(firstWatchedDate) => setDraft((current) => ({ ...current, firstWatchedDate }))}
             startYear={releaseYear}
-            value={firstWatchedDate}
+            value={draft.firstWatchedDate}
           />
           <WatchDateInput
             disabled={pending}
             label="마지막 본 시기"
-            onChange={setLastWatchedDate}
+            onChange={(lastWatchedDate) => setDraft((current) => ({ ...current, lastWatchedDate }))}
+            onPickToday={() => setDraft((current) => ({ ...current, lastWatchedDate: todayWatchDateParts(new Date()) }))}
             startYear={completionWatchDate?.yearNumber ?? releaseYear}
-            value={lastWatchedDate}
+            value={draft.lastWatchedDate}
           />
         </View>
         <Text style={styles.dateHint}>{createDateHint(releaseWatchDate, completionWatchDate, releaseYear)}</Text>
@@ -209,10 +271,10 @@ export function ContentReviewEditor({
         </View>
         <Switch
           disabled={pending}
-          onValueChange={setIsSpoiler}
+          onValueChange={(isSpoiler) => setDraft((current) => ({ ...current, isSpoiler }))}
           thumbColor={isSpoiler ? colors.primary : colors.surface}
           trackColor={{ false: colors.border, true: colors.primarySoft }}
-          value={isSpoiler}
+          value={draft.isSpoiler}
         />
       </View>
 
@@ -237,12 +299,14 @@ function WatchDateInput({
   label,
   value,
   onChange,
+  onPickToday,
   disabled,
   startYear
 }: {
   label: string;
   value: WatchDateParts;
   onChange: (value: WatchDateParts) => void;
+  onPickToday?: () => void;
   disabled: boolean;
   startYear?: number | undefined;
 }) {
@@ -254,6 +318,7 @@ function WatchDateInput({
       <Text style={styles.dateInputLabel}>{label}</Text>
       <View style={styles.dateInputRow}>
         <YearSelect
+          emptyLabel={WATCH_DATE_INPUT_COPY.emptyYear}
           endYear={lastSelectableYear}
           startYear={firstSelectableYear}
           value={value.year}
@@ -273,6 +338,18 @@ function WatchDateInput({
           onChange={(day) => onChange({ ...value, day })}
           value={value.day}
         />
+        {onPickToday ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={WATCH_DATE_INPUT_COPY.todayAccessibilityLabel}
+            aria-disabled={disabled}
+            disabled={disabled}
+            onPress={onPickToday}
+            style={[styles.todayButton, disabled && styles.disabled]}
+          >
+            <Text style={styles.todayButtonText}>{WATCH_DATE_INPUT_COPY.today}</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -308,12 +385,6 @@ function DateNumberInput({
       <Text style={styles.dateNumberLabel}>{label}</Text>
     </View>
   );
-}
-
-function parseWatchDateParts(value: string | null, fallback?: WatchDateParts | null): WatchDateParts {
-  if (!value) return fallback ?? EMPTY_WATCH_DATE;
-  const [year = "", month = "", day = ""] = value.split("-");
-  return { year, month, day };
 }
 
 function toIsoWatchDate(value: WatchDateParts, label: string, minimumDate?: string): string | null {
@@ -490,6 +561,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.xs
   },
+  todayButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.pill,
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: spacing.md
+  },
+  todayButtonText: { ...typography.label, color: colors.text },
   dateNumberInput: {
     backgroundColor: colors.background,
     borderColor: colors.border,

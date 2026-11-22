@@ -31,3 +31,14 @@ export function resolveLibraryShareOrigin(input: {
     throw new Error(SHARE_ORIGIN_ERROR);
   }
 }
+
+export function canBuildLibraryShareUrl(input: { platform: string; configuredOrigin?: unknown }): boolean {
+  const configured = typeof input.configuredOrigin === "string" ? input.configuredOrigin.trim() : "";
+  if (!configured) return input.platform === "web";
+  try {
+    resolveLibraryShareOrigin({ platform: input.platform, configuredOrigin: configured });
+    return true;
+  } catch {
+    return false;
+  }
+}

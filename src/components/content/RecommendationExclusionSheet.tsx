@@ -75,6 +75,7 @@ export function RecommendationExclusionSheet({
       <View style={styles.backdrop}>
         <Pressable
           accessibilityLabel="추천 제외 설정 닫기"
+          accessibilityRole="button"
           disabled={isSaving}
           onPress={onClose}
           style={StyleSheet.absoluteFill}

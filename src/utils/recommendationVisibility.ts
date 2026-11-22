@@ -2,23 +2,55 @@ import { matchesDiscoveryFilters, type DiscoveryFilterInput } from "../../supaba
 import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { isExcludedRecommendation, type RecommendationExclusions } from "@/utils/excludedThemes";
-import { createRecommendationIdentityAliases, isSameRecommendationWork } from "../../supabase/functions/_shared/recommendationEngine";
+import { createRecommendationIdentityAliases, isSameRecommendationWork, recommendationSameWorkTitleKeys } from "../../supabase/functions/_shared/recommendationEngine";
+
+export interface RecommendationLibraryIndex {
+  externalKeys: ReadonlySet<string>;
+  byTitleKey: ReadonlyMap<string, readonly LibraryListItem[]>;
+}
+
+const libraryIndexes = new WeakMap<readonly LibraryListItem[], RecommendationLibraryIndex>();
+
+/** Query data is immutable; a new library array gets its own index. */
+export function getRecommendationLibraryIndex(libraryItems: readonly LibraryListItem[]): RecommendationLibraryIndex {
+  const cached = libraryIndexes.get(libraryItems);
+  if (cached) return cached;
+
+  const externalKeys = new Set<string>();
+  const byTitleKey = new Map<string, LibraryListItem[]>();
+  for (const item of libraryItems) {
+    if (item.source_api !== "manual") externalKeys.add(`${item.source_api}:${item.source_id}`);
+    for (const key of recommendationSameWorkTitleKeys(item)) {
+      const items = byTitleKey.get(key);
+      if (items) items.push(item);
+      else byTitleKey.set(key, [item]);
+    }
+  }
+  const index: RecommendationLibraryIndex = { externalKeys, byTitleKey };
+  libraryIndexes.set(libraryItems, index);
+  return index;
+}
+
+/** Only shared title keys can match; keep type/year checks in the existing matcher. */
+export function findSameWorkLibraryCandidates(
+  index: RecommendationLibraryIndex,
+  result: SearchResult
+): LibraryListItem[] {
+  const candidates = new Set<LibraryListItem>();
+  for (const key of recommendationSameWorkTitleKeys(result)) {
+    for (const item of index.byTitleKey.get(key) ?? []) candidates.add(item);
+  }
+  return [...candidates];
+}
 
 /** Keep the feed's library check identical in its UI and refill policy. */
 export function isRegisteredRecommendation(
   result: SearchResult,
   libraryItems: readonly LibraryListItem[]
 ): boolean {
-  return libraryItems.some((item) => {
-    if (
-      item.source_api !== "manual" &&
-      `${item.source_api}:${item.source_id}` === `${result.external_source}:${result.external_id}`
-    ) {
-      return true;
-    }
-
-    return isSameRecommendationWork(item, result);
-  });
+  const index = getRecommendationLibraryIndex(libraryItems);
+  if (index.externalKeys.has(`${result.external_source}:${result.external_id}`)) return true;
+  return findSameWorkLibraryCandidates(index, result).some((item) => isSameRecommendationWork(item, result));
 }
 
 export function countVisibleRecommendationCandidates<T extends SearchResult>(

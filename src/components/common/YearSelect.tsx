@@ -8,6 +8,7 @@ import { selectionAriaProps } from "@/utils/selectionAria";
 interface YearSelectProps {
   value: string;
   onChange: (year: string) => void;
+  emptyLabel?: string;
   startYear?: number;
   endYear?: number;
 }
@@ -15,6 +16,7 @@ interface YearSelectProps {
 export function YearSelect({
   value,
   onChange,
+  emptyLabel = "전체 연도",
   startYear = 1970,
   endYear = new Date().getFullYear() + 1
 }: YearSelectProps) {
@@ -42,7 +44,7 @@ export function YearSelect({
         style={styles.trigger}
       >
         <Text style={[styles.triggerText, !value ? styles.placeholder : null]}>
-          {value ? `${value}년` : "전체 연도"}
+          {value ? `${value}년` : emptyLabel}
         </Text>
         <Text style={styles.chevron}>{open ? "▲" : "▼"}</Text>
       </Pressable>
@@ -52,7 +54,7 @@ export function YearSelect({
             <View ref={focus.panelRef} role="dialog" aria-modal accessibilityViewIsModal accessibilityLabel="연도 선택" style={styles.menu}>
               <ScrollView nestedScrollEnabled style={styles.scroll}>
                 <Pressable ref={focus.firstRef} accessibilityRole="button" onPress={() => selectYear("")} style={styles.option}>
-                  <Text style={[styles.optionText, !value ? styles.optionTextSelected : null]}>전체 연도</Text>
+                  <Text style={[styles.optionText, !value ? styles.optionTextSelected : null]}>{emptyLabel}</Text>
                 </Pressable>
                 {years.map((year) => {
                   const selected = year === value;

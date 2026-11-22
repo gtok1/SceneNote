@@ -9,7 +9,7 @@ import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createLibraryWatchStateLabel } from "@/utils/contentMetaDisplay";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
-import { formatSearchResultTitle } from "@/utils/searchResultTitle";
+import { formatSearchResultTitle, searchResultReleaseLabel } from "@/utils/searchResultTitle";
 import { getGenreDisplayName } from "@/utils/genre";
 
 interface SearchResultGalleryCardProps {
@@ -73,7 +73,7 @@ export const SearchResultGalleryCard = memo(function SearchResultGalleryCard({
             <View style={styles.body}>
               <Text numberOfLines={2} style={styles.title}>{displayTitle}</Text>
               <Text numberOfLines={2} style={styles.meta}>
-                {[airDateLabel, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+                {[searchResultReleaseLabel(result), airDateLabel, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
               </Text>
               <Text numberOfLines={1} style={styles.source}>{result.external_source.toUpperCase()}</Text>
               {expanded ? cast : null}

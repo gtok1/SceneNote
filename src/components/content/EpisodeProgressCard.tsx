@@ -323,15 +323,16 @@ export function EpisodeProgressCard({
 
       {!completedMode ? <>
       <View style={styles.quickActions}>
-        <Pressable disabled={disabled} onPress={() => changeDraft(0)} style={styles.quickButton}>
+        <Pressable accessibilityRole="button" disabled={disabled} onPress={() => changeDraft(0)} style={styles.quickButton}>
           <Text style={styles.quickText}>아직 안 봄</Text>
         </Pressable>
         {totalEpisodes !== null ? (
-          <Pressable disabled={disabled} onPress={() => changeDraft(upperBound)} style={styles.quickButton}>
+          <Pressable accessibilityRole="button" disabled={disabled} onPress={() => changeDraft(upperBound)} style={styles.quickButton}>
             <Text style={styles.quickText}>전부 봤음</Text>
           </Pressable>
         ) : null}
         <Pressable
+          accessibilityRole="button"
           aria-disabled={disabled || item.progress_source !== "manual"}
           disabled={disabled || item.progress_source !== "manual"}
           onPress={reset}

@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNetworkState } from "expo-network";
 
@@ -36,7 +37,9 @@ import { normalizeWatchStatuses, WATCH_STATUS_LABEL } from "@/constants/status";
 import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useLibrary, useUpdateLibraryManualProgress, useUpdateLibraryStatuses } from "@/hooks/useLibrary";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
-import { buildLibraryShareUrl, createLibraryShare, getLibraryShareOrigin, shareLibraryUrl } from "@/services/libraryShare";
+import { useHydrated } from "@/hooks/useHydrated";
+import { queryKeys } from "@/lib/query";
+import { buildLibraryShareUrl, createLibraryShare, getLibraryShareOrigin, LIBRARY_SHARE_LINKS_AVAILABLE, shareLibraryUrl } from "@/services/libraryShare";
 import { useLibraryUiStore } from "@/stores/libraryUiStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAppUIStore } from "@/stores/appUIStore";
@@ -60,6 +63,7 @@ import {
 } from "@/utils/libraryFilters";
 import { createLibraryRouteParams, parseLibraryRouteParams } from "@/utils/libraryRouteParams";
 import { getLibraryResponsiveLayout } from "@/utils/libraryResponsive";
+import { LIBRARY_SHARE_MANAGEMENT_COPY } from "@/utils/libraryShareManagement";
 import { getProgressStatusSuggestion } from "@/utils/progressStatusSuggestion";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
 import { ERROR_COPY } from "@/utils/errorCopy";
@@ -74,6 +78,7 @@ type ShareFeedback =
 
 export default function LibraryScreen() {
   const addToast = useAppUIStore((state) => state.addToast);
+  const queryClient = useQueryClient();
   const params = useLocalSearchParams<{
     status?: string;
     libraryType?: string;
@@ -84,7 +89,8 @@ export default function LibraryScreen() {
     sort?: string;
     view?: string;
   }>();
-  const routeState = parseLibraryRouteParams(params);
+  const hydrated = useHydrated();
+  const routeState = parseLibraryRouteParams(hydrated ? params : {});
   const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(routeState.statusFilter);
   const [contentTypeFilter, setContentTypeFilter] = useState<ContentTypeFilter>(routeState.contentTypeFilter);
   const [genreFilter, setGenreFilter] = useState(routeState.genreFilter);
@@ -102,7 +108,8 @@ export default function LibraryScreen() {
   const loadMoreQueuedRef = useRef(false);
   const viewMode = useLibraryUiStore((state) => state.viewMode);
   const setViewMode = useLibraryUiStore((state) => state.setViewMode);
-  const { width, fontScale } = useWindowDimensions();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const width = hydrated ? windowWidth : 0;
   const galleryLayoutKey = `${width}:${fontScale}`;
   const [galleryBody, setGalleryBody] = useState({ key: galleryLayoutKey, height: 0 });
   const galleryBodyMinHeight = galleryBody.key === galleryLayoutKey ? galleryBody.height : 0;
@@ -350,6 +357,9 @@ export default function LibraryScreen() {
           title,
           filters,
           libraryItemIds: filteredItems.map((item) => item.library_item_id)
+        }).then((created) => {
+          if (userId) void queryClient.invalidateQueries({ queryKey: queryKeys.libraryShares.mine(userId) });
+          return created;
         }),
         15000,
         "공유 링크 생성 요청이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
@@ -404,7 +414,7 @@ export default function LibraryScreen() {
             <LibraryStatusFilterBar compact onChange={(value) => commitFilters({ statusFilter: value })} value={statusFilter} />
             <View style={styles.mobileToolRow}>
               <View style={styles.mobileToolGroup}>
-                {SHARE_FEATURES_ENABLED ? (<Pressable
+                {SHARE_FEATURES_ENABLED && LIBRARY_SHARE_LINKS_AVAILABLE ? (<Pressable
                   accessibilityLabel={isSharing ? "공유 중" : "라이브러리 공유"}
                   accessibilityRole="button"
                   disabled={isSharing || library.isLoading}
@@ -494,7 +504,7 @@ export default function LibraryScreen() {
           </ScrollView>
 
           <View style={styles.toolGroup}>
-            {SHARE_FEATURES_ENABLED ? (<Pressable
+            {SHARE_FEATURES_ENABLED && LIBRARY_SHARE_LINKS_AVAILABLE ? (<Pressable
               accessibilityRole="button"
               disabled={isSharing || library.isLoading}
               onPress={shareCurrentView}
@@ -679,9 +689,12 @@ export default function LibraryScreen() {
               {shareFeedback.message}
             </Text>
             {shareFeedback.url ? (
-              <Text selectable numberOfLines={2} style={styles.shareFeedbackUrl}>
-                {shareFeedback.url}
-              </Text>
+              <>
+                <Text selectable numberOfLines={2} style={styles.shareFeedbackUrl}>
+                  {shareFeedback.url}
+                </Text>
+                <Text style={styles.shareHint}>{LIBRARY_SHARE_MANAGEMENT_COPY.createdHint}</Text>
+              </>
             ) : null}
           </View>
         ) : null}
@@ -1084,6 +1097,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700"
   },
+  shareHint: { ...typography.caption, color: colors.textMuted },
   ratingFilterGroup: {
     gap: spacing.xs
   },

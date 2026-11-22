@@ -2,7 +2,7 @@
 
 SceneNote는 애니메이션·한국/일본 드라마·영화의 감상 기록을 관리하고, 특정 장면에 시간·메모·태그를 붙이는 Expo/React Native 앱이다. iOS·Android·웹을 위한 코드가 있으며, 핵심 데이터는 Supabase에 저장한다. 핀의 시간은 정수 초 `timestamp_seconds`로 저장하고, 영화 핀은 `episode_id = null`로 처리한다.
 
-처음 작업할 때는 [프로젝트 작업 규칙](AGENTS.md)을 확인한다. [문서 목차](docs/README.md)는 기능별 명세·코드 출발점을, [개발·검증 및 작업 재개](docs/development_next_steps.md)는 검증 범위와 미완료 사항을 안내한다.
+처음 작업할 때는 [프로젝트 작업 규칙](AGENTS.md)을 확인한다. 기능별 명세는 [문서 목차](docs/README.md), 검사 선택은 [변경 종류별 검증](#변경-종류별-검증), 실행 결과와 미완료 사항은 [작업 기록](docs/development_next_steps.md)에서 찾는다.
 
 ## 현재 코드의 범위
 
@@ -95,9 +95,9 @@ SceneNote는 애니메이션·한국/일본 드라마·영화의 감상 기록�
 | `npm run lint` | ESLint 검사. `eslint.config.js`에서 Edge Functions와 생성 디렉터리 제외 |
 | `npm test` | `tsx --test` 기반 `src`, `scripts`, Functions 공통 모듈·검색 어댑터의 지정된 `*.test.ts` 패턴 실행 |
 
-테스트는 `node:test`·`node:assert/strict`를 쓰며 React Native/Supabase 런타임이 필요한 모듈을 직접 import하지 않고 순수 함수를 검증한다. 전체 앱 E2E, DB의 실제 RLS, 외부 API, 플랫폼별 UI 검증을 대신하지 않는다. 변경 유형별 검증·결과 기록 방법은 [개발·검증 안내](docs/development_next_steps.md)를 따른다.
+테스트는 `node:test`·`node:assert/strict`를 쓰며 React Native/Supabase 런타임이 필요한 모듈을 직접 import하지 않고 순수 함수를 검증한다. 전체 앱 E2E, DB의 실제 RLS, 외부 API, 플랫폼별 UI 검증을 대신하지 않는다. 검사 선택은 아래 [변경 종류별 검증](#변경-종류별-검증)을 따른다.
 
-AI 작업 중 관련 테스트만 반복하고 완료 시 필요한 전체 검사를 실행하려면 [scenenote-verify](.agents/skills/scenenote-verify/SKILL.md)를 사용한다. 결과는 검사별 한 줄, 전체 로그는 비공개 임시 폴더에 남는다. Git 커밋 전에는 [staged 경로 검사](.githooks/scenenote-staged-guard.py)를 사용할 수 있다. 새 체크아웃에서 `python3 .githooks/install.py`로 설치하고 `python3 .githooks/install.py --check`로 상태를 확인한다. 기존 훅·`core.hooksPath`는 덮어쓰지 않는다. 이 훅은 공백·충돌 표시와 대표 민감 파일명만 확인하며 파일 내용의 비밀값 전수검사는 아니다.
+AI 작업 중 관련 테스트만 반복하고 완료 시 필요한 전체 검사를 실행하려면 [scenenote-verify](.agents/skills/scenenote-verify/SKILL.md)를 사용한다. 결과는 검사별 한 줄, 전체 로그는 비공개 임시 폴더에 남는다. Git 커밋 전에는 [staged 경로 검사](.githooks/scenenote-staged-guard.py)를 사용할 수 있다. 새 체크아웃에서 `python3 .githooks/install.py`로 설치하고 `python3 .githooks/install.py --check`로 상태를 확인한다. 다른 pre-commit 훅·`core.hooksPath` 설정·hooks 디렉터리 심볼릭 링크가 있으면 설치가 중단된다. 설치한 훅은 linked worktree에도 적용되므로 각 체크아웃에 guard 파일이 필요하다. 커밋할 때 Git의 whitespace·attributes 설정에 따른 staged 공백·충돌 표시와 대표 민감 파일명을 검사한다.
 
 기본 Node가 시작되지 않는 환경에서는 검증 도구에 `--node-bin <Node와 npm이 있는 디렉터리>`를 전달할 수 있다. 해당 실행의 하위 프로세스에만 적용하며 전역 PATH를 변경하지 않는다. 실제 명령·런타임 경로는 검사 로그 폴더의 `summary.json`에서 확인한다.
 
@@ -106,11 +106,27 @@ AI 작업 중 관련 테스트만 반복하고 완료 시 필요한 전체 검�
 | 명령/설정 | 주의할 부작용 |
 | --- | --- |
 | `npm run backend:serve` | Supabase Functions 로컬 서버. 현재 `.env`를 읽음. 요청을 받으면 외부 API·DB 작업 가능 |
+| `supabase db push`, `supabase secrets set`, `supabase db pull` | 대상 프로젝트와 이력을 먼저 확인한다. 원격 스키마·secret 또는 로컬 마이그레이션 파일이 바뀐다. |
 | `npm run backend:deploy` | 14개 Edge Function을 대상 프로젝트에 배포. DB 마이그레이션은 적용하지 않음 |
 | `npm run smoke:edge -- "Inception" movie` | 테스트 계정 로그인 후 검색·인기 추천 호출. 캐시 쓰기 등 가능. service role이 있으며 대상이 로컬 URL이거나 원격용 `SCENENOTE_DELETE_ACCOUNT_SMOKE=1`을 지정한 경우 테스트 사용자·데이터 생성/삭제까지 수행 |
 | `npm run import:netflix -- ...` | 관리용 DB 조회·외부 API 호출·로컬 결과 파일 생성. 기본 dry-run도 오프라인 검사가 아니며 `--commit`은 DB를 변경 |
 | [backfill-content-air-date.ts](scripts/backfill-content-air-date.ts) | 외부 메타데이터 조회 후 콘텐츠·시즌·에피소드 쓰기를 수행하는 관리 스크립트. 전용 npm 스크립트 없음 |
 | `restart`, `web:restart`, `dev:restart` npm 스크립트 | `pkill -f`로 기존 Expo/Functions 프로세스를 넓게 종료할 수 있음. 공유 작업 중 무심코 실행하지 않음 |
+
+## 변경 종류별 검증
+
+저장소 루트에서 실행한다. 해당 명세의 테스트 표는 모든 행을 자동 또는 수동 검사에 대응시키고, 미실행 항목은 이유를 기록한다.
+
+| 변경 | 실행·점검 방법 | 확인 범위와 한계 |
+|------|---------------|------------------|
+| Markdown만 변경 | 저장 후 재독, 상대 링크/앵커·실재 경로·`package.json` 명령 대조, `git diff --check`, 최종 diff/상태 | 문서 정합성. 전체 앱 테스트·빌드를 근거 없이 반복하지 않음 |
+| AI 스킬·Git 훅 | 바뀐 진입점에서 원본까지 링크를 확인한다. 검증 CLI는 `python3 .agents/skills/scenenote-verify/scripts/test_verify.py`, 커밋 훅은 `python3 .githooks/test_staged_guard.py`로 격리 검사한다 | 임시 환경에서 실행한 도구의 동작 |
+| 순수 로직·캐시·서비스 계약 | 회귀 입력을 기존 `.test.ts`에 연결하고 `npm test`, `npm run typecheck`, `npm run lint` | 테스트는 `node:test`+`node:assert/strict`. React Native/Expo/Supabase 런타임 import 없이 순수 함수 검사 |
+| 화면·라우팅·입력 | 위 검사 + 해당 명세의 실제 화면 수동 QA. 웹 export 영향이 있으면 `npm run build` | 웹·iOS·Android 결과를 따로 기록. 테스트 글롭은 `app/`와 `.tsx`를 실행하지 않음 |
+| Edge Function·외부 응답 | `_shared`·adapter 순수 함수 테스트, 요청/응답 계약과 오류/partial/auth 분기 검토 | `tsconfig.json`과 `eslint.config.js`는 `supabase/functions` 제외. `npm test`의 일부 서버 테스트도 Deno 핸들러·원격 API 동작을 보증하지 않음 |
+| DB·RLS | migration·타입·서비스 사용처 대조 후 별도로 준비한 테스트 DB에서 인증 전/소유자/다른 사용자 권한 QA | 새 schema는 새 migration으로. 실제 DB 검증 환경·명령·결과를 남겨야 완료 |
+
+정상 흐름 외에 세션 없음·만료, 빈 데이터/네트워크 실패, 같은 작품의 여러 시즌, 영화의 `episode_id = NULL`, 시간만/메모만/둘 다 빈 핀, 동일 시간 복수 핀, 스포일러, 저장·삭제 뒤 캐시와 이동을 해당 변경 범위에 맞게 확인한다. 수동 세부 항목은 [화면 QA 기준](docs/11_screen_implementation_spec.md)과 [기능별 후속 명세](docs/README.md#요구사항과-설계-문서)를 참고한다.
 
 ## 호스팅과 남은 확인
 

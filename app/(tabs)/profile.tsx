@@ -1,4 +1,4 @@
-import { EXTENDED_FEATURES_ENABLED, SUBSCRIBED_OTT_FEATURES_ENABLED } from "@/constants/features";
+import { EXTENDED_FEATURES_ENABLED, SHARE_FEATURES_ENABLED, SUBSCRIBED_OTT_FEATURES_ENABLED } from "@/constants/features";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
@@ -29,13 +29,16 @@ import { colors, radius, spacing, typography } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { useGenreStats } from "@/hooks/useGenreStats";
 import { useLibrary, useLibraryStats } from "@/hooks/useLibrary";
+import { useMyLibraryShares } from "@/hooks/useLibraryShares";
 import { useSubscribedOtts } from "@/hooks/useSubscribedOtts";
 import { queryClient, queryKeys } from "@/lib/query";
+import { LIBRARY_SHARE_LINKS_AVAILABLE } from "@/services/libraryShare";
 import { getProfile, updateProfileDisplayName } from "@/services/profile";
 import { useAppUIStore } from "@/stores/appUIStore";
 import { useRecommendationUiStore } from "@/stores/recommendationUiStore";
 import { confirmDestructive } from "@/utils/confirmDestructive";
 import { HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
+import { describeLibraryShareCount, shouldShowLibrarySharesEntry } from "@/utils/libraryShareManagement";
 import {
   YEAR_CHART_MAX_BARS,
   YEAR_CHART_MAX_BARS_WIDE,
@@ -61,6 +64,7 @@ export default function ProfileScreen() {
   const library = useLibrary("all");
   const genreStats = useGenreStats();
   const subscribedOtts = useSubscribedOtts();
+  const libraryShares = useMyLibraryShares();
   const { width } = useWindowDimensions();
   const layout = getProfileLayout(width);
   const insets = useSafeAreaInsets();
@@ -294,6 +298,12 @@ export default function ProfileScreen() {
           <AccountSection
             subscribedOttSummary={describeSubscribedOtts(subscribedOtts.groups)}
             onOpenSubscribedOtts={SUBSCRIBED_OTT_FEATURES_ENABLED ? () => router.push("/settings/subscribed-otts") : undefined}
+            librarySharesSummary={describeLibraryShareCount(libraryShares.isSuccess && !libraryShares.isFetching ? libraryShares.data.length : null)}
+            onOpenLibraryShares={shouldShowLibrarySharesEntry({
+              featureEnabled: SHARE_FEATURES_ENABLED,
+              linksAvailable: LIBRARY_SHARE_LINKS_AVAILABLE,
+              count: libraryShares.isSuccess ? libraryShares.data.length : null
+            }) ? () => router.push("/settings/library-shares") : undefined}
             deleting={deleteAccount.isPending}
             exclusionCount={recommendationExclusionCount}
             onDeleteAccount={handleDeleteAccount}

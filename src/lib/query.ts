@@ -13,7 +13,9 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60_000
     },
     mutations: {
-      retry: 0
+      retry: 0,
+      // A paused save would keep the draft locked until reconnection (docs/89).
+      networkMode: "always"
     }
   }
 });
@@ -42,6 +44,9 @@ export const queryKeys = {
     byStatus: (userId: string, status: WatchStatus | "all") =>
       ["library", userId, "status", status] as const,
     item: (userId: string, contentId: string) => ["library", userId, contentId] as const
+  },
+  libraryShares: {
+    mine: (userId: string) => ["library-shares", userId, "mine"] as const
   },
   content: {
     watchProviders: (lookupKey: string) => ["content", "watch-providers", "manual-v1", lookupKey] as const,

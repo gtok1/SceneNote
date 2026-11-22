@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PinComposer } from "@/components/pins/PinComposer";
 import { colors } from "@/constants/theme";
+import { useHydrated } from "@/hooks/useHydrated";
 
 export default function NewPinScreen() {
   const params = useLocalSearchParams<{
@@ -12,7 +13,9 @@ export default function NewPinScreen() {
     episodeId?: string;
   }>();
   const router = useRouter();
+  const hydrated = useHydrated();
 
+  if (!hydrated) return null;
   if (!params.contentId) return <EmptyState title="콘텐츠 정보가 필요합니다" />;
 
   return (

@@ -45,6 +45,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
       <Pressable
         accessibilityHint="빠른 보기 창을 엽니다"
         accessibilityLabel={`${result.title_primary} 빠른 보기`}
+        accessibilityRole="button"
         onPress={onOpenQuickView}
         style={styles.mainButton}
       >
@@ -84,8 +85,8 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
       </Pressable>
       <View style={styles.actions}>
         <View style={styles.feedbackActions}>
-          <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} onPress={onNotInterested} style={styles.iconButton}><Ionicons color={colors.textMuted} name="close-circle-outline" size={18} /></Pressable>
-          <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} onPress={onMoreLikeThis} style={styles.iconButton}><Ionicons color={colors.textMuted} name="git-compare-outline" size={18} /></Pressable>
+          <Pressable accessibilityLabel={`${result.title_primary} 관심 없음`} accessibilityRole="button" onPress={onNotInterested} style={styles.iconButton}><Ionicons color={colors.textMuted} name="close-circle-outline" size={18} /></Pressable>
+          <Pressable accessibilityLabel={`${result.title_primary} 비슷한 작품 더 보기`} accessibilityRole="button" onPress={onMoreLikeThis} style={styles.iconButton}><Ionicons color={colors.textMuted} name="git-compare-outline" size={18} /></Pressable>
           <Pressable
             accessibilityHint={onReduceTheme ? "이 작품과 비슷한 테마의 추천을 줄입니다" : "이 작품에는 조절할 수 있는 테마 정보가 없습니다"}
             accessibilityLabel={`${result.title_primary} 이런 요소 줄이기`}
@@ -98,7 +99,7 @@ export const PersonalizedRecommendationListItem = memo(function PersonalizedReco
             <Ionicons color={colors.textMuted} name="options-outline" size={18} />
           </Pressable>
         </View>
-        <Pressable accessibilityLabel={`${result.title_primary} 빠른 보기`} onPress={onOpenQuickView} style={styles.quickButton}>
+        <Pressable accessibilityLabel={`${result.title_primary} 빠른 보기`} accessibilityRole="button" onPress={onOpenQuickView} style={styles.quickButton}>
           <Ionicons color={colors.text} name="eye-outline" size={15} />
           <Text style={styles.quickText}>빠른 보기</Text>
         </Pressable>

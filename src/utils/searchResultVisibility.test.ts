@@ -3,6 +3,7 @@ import { it } from "node:test";
 
 import type { SearchResult } from "../types/content";
 import { partitionSearchResults } from "./searchResultVisibility";
+import { mergeSearchResults, preferRegisteredSearchResult } from "./mergeSearchResults";
 
 const row = (external_id: string, overrides: Partial<SearchResult> = {}): SearchResult => ({
   external_source: "tmdb", external_id, content_type: "kdrama", title_primary: external_id,
@@ -38,6 +39,72 @@ it("V-4 keeps only matching library status", () => {
   });
   assert.deepEqual(ids(result.visible), ["1"]);
   assert.equal(result.hiddenByReason.status, 1);
+});
+
+it("87 status filters distinguish a registered movie from a TV show with the same numeric ID", () => {
+  const result = partitionSearchResults([row("1", { content_type: "movie" }), row("1")], {
+    ...input, statusFilter: "completed", libraryItems: [{ source_api: "tmdb", source_id: "1", content_type: "movie", statuses: ["completed"] }]
+  });
+  assert.deepEqual(result.visible.map(item => item.content_type), ["movie"]);
+});
+
+it("87 a merged card keeps a requested status from an exactly registered equivalent season", () => {
+  const anilist = row("178789", { external_source: "anilist", content_type: "anime",
+    title_primary: "무직전생", title_original: "無職転生Ⅲ", air_date: "2026-07-04", air_year: 2026, episode_count: 14 });
+  const tmdb = row("94664", { content_type: "anime", title_primary: "무직전생 시즌 3", title_original: "無職転生",
+    season_number: 3, air_date: "2026-07-03", air_year: 2026, episode_count: 14 });
+  const merged = mergeSearchResults([anilist], [tmdb])[0]!;
+  const favorite = { source_api: "anilist" as const, source_id: "178789", content_type: "anime" as const,
+    season_number: null, statuses: ["wishlist" as const] };
+  const completed = { source_api: "tmdb" as const, source_id: "94664", content_type: "anime" as const,
+    season_number: 3, statuses: ["completed" as const] };
+  const preferred = preferRegisteredSearchResult(merged, new Map([["anilist:178789", [favorite]]]));
+  assert.equal(preferred.external_source, "anilist");
+  const result = partitionSearchResults([preferred], {
+    ...input, statusFilter: "completed", year: 2026, libraryItems: [favorite, completed]
+  });
+  assert.deepEqual(ids(result.visible), ["178789"]);
+  assert.equal(result.hiddenByReason.status, 0);
+});
+
+it("87 equivalent season status requires known media namespace and the exact raw season", () => {
+  const merged = row("anilist-season", { external_source: "anilist", content_type: "anime", equivalent_results: [
+    { external_source: "tmdb", external_id: "94664", content_type: "anime", season_number: 3 }
+  ] });
+  const completed = { source_api: "tmdb" as const, source_id: "94664", statuses: ["completed" as const] };
+  for (const scope of [
+    { content_type: "anime" as const, season_number: 2 },
+    { content_type: "anime" as const, season_number: null },
+    { content_type: "anime" as const },
+    { season_number: 3 },
+    { content_type: "movie" as const, season_number: 3 }
+  ]) {
+    const result = partitionSearchResults([merged], { ...input, statusFilter: "completed", libraryItems: [{ ...completed, ...scope }] });
+    assert.deepEqual(ids(result.hidden), ["anilist-season"], JSON.stringify(scope));
+    assert.equal(result.hiddenByReason.status, 1);
+  }
+  const exactTv = { ...completed, content_type: "jdrama" as const, season_number: 3 };
+  assert.deepEqual(ids(partitionSearchResults([merged], {
+    ...input, statusFilter: "completed", libraryItems: [exactTv]
+  }).visible), ["anilist-season"], "regional display classification does not split one TMDB TV identity");
+});
+
+it("87 whole-work equivalents require a whole-work status while primary legacy matching remains compatible", () => {
+  const merged = row("anilist-work", { external_source: "anilist", content_type: "anime", equivalent_results: [
+    { external_source: "tmdb", external_id: "94664", content_type: "anime" }
+  ] });
+  const completed = { source_api: "tmdb" as const, source_id: "94664", content_type: "anime" as const, statuses: ["completed" as const] };
+  for (const libraryItem of [{ ...completed, season_number: 3 }, completed]) {
+    assert.deepEqual(ids(partitionSearchResults([merged], {
+      ...input, statusFilter: "completed", libraryItems: [libraryItem]
+    }).hidden), ["anilist-work"]);
+  }
+  assert.deepEqual(ids(partitionSearchResults([merged], {
+    ...input, statusFilter: "completed", libraryItems: [{ ...completed, season_number: null }]
+  }).visible), ["anilist-work"]);
+  assert.deepEqual(ids(partitionSearchResults([row("94664", { season_number: 3 })], {
+    ...input, statusFilter: "completed", libraryItems: [{ source_api: "tmdb", source_id: "94664", statuses: ["completed"] }]
+  }).visible), ["94664"], "existing minimal primary input keeps its historical status scope");
 });
 
 it("V-5 hides other and unknown years", () => {

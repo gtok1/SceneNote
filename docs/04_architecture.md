@@ -6,13 +6,15 @@
 **상태:** 확정 (MVP 기준)
 **기반 문서:** 01_product_requirements.md, 02_user_stories.md, 03_screen_flow.md, 09_timeline_pin_ux.md
 
-> **문서 해석:** 아래 번호 절은 2026-05-02 초기 설계와 예제를 보존한 것이다. `확정`은 설계 상태이며 구현 완료를 뜻하지 않는다. 현재 화면 요구사항은 [화면 구현 명세](11_screen_implementation_spec.md)와 [AGENTS.md](../AGENTS.md)의 기능별 후속 명세를 먼저 확인한다. 코드가 다르다는 이유로 확정 요구사항을 완화하지 않는다.
+> **문서 해석:** 아래 번호 절은 2026-05-02 초기 설계와 예제를 보존한 것이다. `확정`은 설계 상태이며 구현 완료를 뜻하지 않는다. 현재 화면 요구사항은 [화면 구현 명세](11_screen_implementation_spec.md)와 [문서 목차](README.md#요구사항과-설계-문서)의 기능별 후속 명세를 먼저 확인한다. 코드가 다르다는 이유로 확정 요구사항을 완화하지 않는다.
 
 ## 현재 구현 탐색 가이드
 
 2026-09-26 저장소 소스를 정적으로 확인했다. 원격 DB 적용, Edge Function 배포 및 기기별 동작은 이 확인 범위에 포함하지 않는다. 실행·검증 명령은 [README](../README.md), 실제 프론트엔드 경로와 캐시 동작은 [프론트엔드 아키텍처의 현황](08_frontend_architecture.md#현재-구현과-설계-예제의-구분)을 참고한다.
 
 ### 실제 구성과 책임
+
+라이브러리 공유 링크의 생성·공개 열람은 기존 Edge Functions를 사용한다. 본인 링크 목록과 공유 중지는 앱에서 `library_shares`를 조회·삭제하며, DB의 소유자 RLS를 적용한다. [공유 링크 관리 명세](88_library_share_link_management_spec.md)
 
 프로젝트 정합성의 2026-11-16 보완([73](73_project_integrity_fixes_spec.md)): TMDB 식별자는 원본 숫자 ID와 `movie`/`tv` namespace를 함께 사용한다. `contents.source_media_type`·`content_external_ids.media_type`의 unique는 기존 UUID와 사용자 기록을 보존하면서 동번호 영화/TV를 분리한다. 회차 캐시는 전체 동기화 시각과 실제 공개 번호 목록을 함께 저장하고, 알려진 총 화수의 누락을 검사한다. 추천 입력의 라이브러리·피드백도 안정 정렬로 끝까지 읽는다. 새 공유는 콘텐츠가 아니라 선택한 라이브러리 등록 ID를 저장하며, 핀 본문·태그는 소유자 RLS가 적용되는 `save_timeline_pin` 한 트랜잭션으로 저장한다. 새 SQL·서버 함수의 운영 적용 상태와 검증 범위는 development_next_steps에서 확인한다.
 

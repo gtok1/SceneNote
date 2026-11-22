@@ -254,7 +254,7 @@ Deno.serve(async (req: Request) => {
       },
       set: persistentProviderCache.set
     };
-    const budget = recommendationScanBudget({ hasCursor: Boolean(validated.value.cursor) });
+    const budget = recommendationScanBudget({ hasCursor: Boolean(validated.value.cursor), discoveryMode: validated.value.discoveryMode });
     let keywordLookupLimited = false;
     const keywordLookupBudget = { remaining: budget.keywordLookups };
     const scanStartedAt = Date.now();

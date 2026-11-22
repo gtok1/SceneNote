@@ -8,17 +8,17 @@
 |------|-----------|--------------------|
 | 프로젝트 파악·실행 | [README](../README.md), [04 아키텍처](04_architecture.md) | `package.json`, `app/_layout.tsx`, `src/providers/AppProviders.tsx` |
 | 화면·기능 수정 | [11 화면 기준](11_screen_implementation_spec.md), 아래 해당 기능 명세, [08 프론트엔드](08_frontend_architecture.md) | 명세의 D-N·테스트 표와 해당 라우트/훅/서비스 |
-| 결함 수정 | 해당 후속 fixes 명세, [검증 가이드](development_next_steps.md) | 재현 경로, 기존 순수 함수 테스트, 캐시·공통 모듈 사용처 |
+| 결함 수정 | 해당 후속 fixes 명세, [변경 종류별 검증](../README.md#변경-종류별-검증) | 재현 경로, 기존 순수 함수 테스트, 캐시·공통 모듈 사용처 |
 | DB·외부 API 수정 | [05 ERD/RLS](05_erd_rls.md), [07 Edge Functions](07_edge_functions.md), [04 현황](04_architecture.md) | `supabase/migrations/`, `supabase/functions/`, `src/types/database.ts` |
 | 작업 재개·출시 판단 | [development_next_steps](development_next_steps.md) | 마지막 실제 검증의 날짜·리비전·플랫폼·미실행 사유 |
-| 새 명세·작업 지시 작성 | [00 작성 패턴](00_codex_doc_pattern.md) | 명세 파일 + 응답 본문 실행 프롬프트; AGENTS 표도 갱신 |
+| 새 명세·작업 지시 작성 | [00 작성 패턴](00_codex_doc_pattern.md) | 14장 실행 지시를 포함한 명세 파일과 응답 본문의 짧은 프롬프트. 아래 표에 링크와 적용 조건 등록 |
 | 화면·컴포넌트·UI 명세 | [00 UI 스타일 규칙](00_ui_style_rules.md) (웹·앱 공통, AI 작업용) | 토큰·레이아웃 함수·`Alert` 금지·검증 절차·완료 체크리스트 |
 
 ## 요구사항과 설계 문서
 
-설계 결정은 코드와 다르다고 임의로 삭제하지 않는다. 같은 기능에 후속 명세가 있으면 그 문서가 명시적으로 수정한 항목을 적용하고 기존 나머지 계약은 유지한다. 해결 근거가 없는 충돌은 [다음 작업](development_next_steps.md)에 남긴다.
+설계 결정은 코드와 다르다고 임의로 삭제하지 않는다. 같은 기능에 후속 명세가 있으면 그 문서가 명시적으로 수정한 항목을 적용하고 기존 나머지 계약은 유지한다. 해결 근거가 없는 충돌은 [다음 작업](development_next_steps.md)에 남긴다. 마지막 열은 각 문서를 점검한 시점의 기록이다. 작업을 재개할 때는 해당 기능의 최신 기록과 현재 코드를 대조한다.
 
-| 문서 | 역할·적용 조건 | 점검 상태 |
+| 문서 | 역할·적용 조건 | 당시 점검 상태 |
 |------|---------------|-----------|
 | [01 제품 요구사항](01_product_requirements.md), [02 유저 스토리](02_user_stories.md), [03 화면 흐름](03_screen_flow.md) | 초기 MVP 목표·요구사항. 현재 노출 기능 목록은 루트 README 확인 | 유지: 후속 명세와 함께 읽기 |
 | [04 시스템 아키텍처](04_architecture.md), [08 프론트엔드 아키텍처](08_frontend_architecture.md) | 상단은 실제 경로·흐름, 기존 본문은 설계 원칙·예제 | 보완: 현황과 설계 구분 |
@@ -86,6 +86,17 @@
 | [81 라이브러리 작품 유형 필터 정정](81_library_content_type_filter_fixes_spec.md) | 예능·일본어 원제 작품의 한국 드라마 혼입을 공통 표시 분류에서 보정, 영화·애니·전체 보존, 카드 라벨·프로필 통계 일치 | 요구 계약: 실행·검증 결과는 development_next_steps 확인 |
 | [82 검색·추천 드라마 필터 정정](82_search_drama_filter_fixes_spec.md) | 드라마 문맥의 예능·일본 드라마 혼입 방어, 원어/원제와 제작 국가 증거 교집합, 앱 구응답 방어·81 호환 | 요구 계약: 실행·검증 및 운영 배포 상태는 development_next_steps 확인 |
 | [83 쓰지 않는 상태 파일 삭제](83_unused_state_files_cleanup_spec.md) | 아무도 불러오지 않는 store 2개·atom 2개 삭제, 현재 안내 문서의 미사용 경고 정리(동작 변화 없음) | 구현, 화면 미확인 |
+| [84 버튼 역할·후기 입력칸 이름](84_button_role_and_review_input_label_fixes_spec.md) | 낭독기에 버튼으로 알려지지 않던 13곳에 역할, 후기 입력칸 2개에 이름, `Pressable`·`TextInput`을 검사하는 `a11yRoleLabelGuard` | 구현, 화면 미확인 |
+| [85 최신 추천 첫 묶음 지연 정정](85_latest_recommendation_first_batch_latency_fixes_spec.md) | 최신 모드 첫 요청 탐색 예산을 이어 찾기와 같게(짧은 첫 응답·최대 6회 재호출 원인), 등록 작품 판정 라이브러리 색인(결과 동일). `latest_first` 예산은 64 D-3의 최신 첫 요청만 대체 | 구현·코드 검사 통과, 화면 미확인. 서버 반영은 재배포 대기 |
+| [86 감상 작성 중 이탈 보호](86_review_draft_leave_guard_fixes_spec.md) | 저장 안 한 감상이 뒤로가기·새로고침에 경고 없이 사라지는 문제와 늦게 온 기본값이 고친 본 시기를 덮는 문제 정정(`reviewDraft`, `confirmDiscard`) | 구현·코드 검사 통과, 화면 미확인 |
+| [87 애니 검색 제공처 중복 정정](87_search_anime_duplicate_fixes_spec.md) | 같은 방영 단위의 AniList·TMDB 검색 카드 병합, 등가 그룹·분할 방영·movie/tv ID 보호, 정확 등록 상태·애니 영화 필터 유지, 제목·메타 기수 복원 | 요구 계약: 실행·검증 및 운영 배포 상태는 development_next_steps 확인 |
+| [88 공유 링크 관리·중지](88_library_share_link_management_spec.md) | 만료 없이 영구 공개되던 라이브러리 공유 링크를 프로필에서 보고 링크별로 다시 보내거나 공유 중지(공유 링크 행 삭제에 기존 RLS 적용), 공유 성공 안내에 공개 범위 한 줄 | 구현·웹 M-1~M-3(합성 계정)·격리 RLS 확인. 운영 RLS·iOS M-4 미확인. [검증 기록](development_next_steps.md#공유-링크-관리중지-docs88-2026-11-20) |
+| [89 오프라인 저장 갇힘 정정](89_offline_save_trap_fixes_spec.md) | 오프라인에서 감상 저장이 "저장 중"에 멈추고 뒤로가기가 막히던 문제와 모든 저장의 오프라인 일시정지 정정(`networkMode`, `isNetworkOffline`, `ERROR_COPY.offlineSave`) | 구현·웹 M-1~M-3(합성 계정)·코드 검사 통과. iOS M-4 미확인. [검증 기록](development_next_steps.md#오프라인-저장-갇힘-정정-docs89-2026-11-20) |
+| [90 앱 공유 진입점·중지 확인](90_native_share_availability_and_stop_check_fixes_spec.md) | 웹 주소(`publicWebOrigin`)가 없는 앱에서 항상 실패하던 라이브러리 공유 버튼·다시 보내기를 숨기고 공유 중지는 유지, 공유 중지가 실제로 지웠는지 확인 조회로 판정 | 구현·전체 검사·합성 계정 웹 M-1~M-2 통과. iOS·Android 합성 렌더 통과, 기기·운영 정책 미확인. [검증 기록](development_next_steps.md#앱-공유-진입점과-중지-확인-docs90-2026-11-20) |
+| [91 공유 링크 스포일러 후기 가리기](91_shared_review_spoiler_fixes_spec.md) | "스포일러 포함"으로 저장한 한줄 후기가 공유 링크 받는 사람에게 그대로 보이던 문제: `get-library-share`가 `review_is_spoiler`를 함께 보내고(계약 v2 유지) 공유 카드가 핀처럼 "스포일러 포함 · 보기"로 가림 | 구현·전체 검사·Edge 검증·로컬 웹 M-1~M-2 통과. iOS 합성 렌더 통과, 기기·운영 반영 미확인. [검증 기록](development_next_steps.md#공유-링크에서-스포일러-후기-가리기-docs91-2026-11-22) |
+| [92 본 시기 기본값 저장 정정](92_watch_date_default_save_fixes_spec.md) | "내 감상"에서 별점만 저장해도 공개일·마지막 방영일이 본 시기로 저장되어 프로필 "올해 본 작품"·연도별 통계가 방영 연도로 세던 문제: 기록 없는 본 시기는 빈 칸, 마지막 본 시기 "오늘" 버튼, 빈 연도 "기록 안 함" | 구현·전체 검사·로컬 웹 M-1~M-3 통과. iOS 합성 렌더 통과, 기기 키보드 미확인. [검증 기록](development_next_steps.md#본-시기-기본값-저장-정정-docs92-2026-11-22) |
+| [93 저장 응답 지연 시간 제한](93_save_request_deadline_fixes_spec.md) | 응답이 오지 않으면 감상·핀 저장이 "저장 중"에 멈추고 뒤로가기가 막히던 문제: 저장 서비스(감상·본 시기·핀 저장·삭제, 핀 저장 전 확인)에 15초 abort 제한 `runWithSaveDeadline`, 조회·Edge 호출은 제외 | 구현·웹 M-1~M-2(합성 계정)·전체 검사 통과. iOS M-3 미확인. [검증 기록](development_next_steps.md#감상핀-저장-요청-시간-제한-docs93-2026-11-22) |
+| [94 핀 태그 입력 보완](94_pin_tag_input_fixes_spec.md) | 핀 작성·편집에서 "추가" 없이 저장하면 입력 중 태그가 버려지던 오류, "#"·쉼표 처리, 이미 쓴 태그 후보 칩, 연속 입력 키보드·저장 오류 낭독 | 구현·웹 M-1~M-2(합성 계정)·전체 검사 통과. iOS M-3 미확인. [검증 기록](development_next_steps.md#핀-태그-입력-보완-docs94-2026-11-22) |
 | [장르 통계 설계](superpowers/specs/2026-05-03-genre-stats-design.md) | 장르 통계 설계 배경 | 참고: 현재 구현은 `src/hooks/useGenreStats.ts` 등과 대조 |
 
 ## 기록·과거 실행 지시
@@ -93,16 +104,16 @@
 | 문서 | 역할과 주의 |
 |------|------------|
 | [implementation_notes](implementation_notes.md) | 2026-05-02 구현 기록. 당시 미구현·배포 상태를 현재 사실로 재사용하지 않음 |
-| [development_next_steps](development_next_steps.md) | 상단은 현재 검증·후속 작업 기준, 하단 5월 기록은 역사 자료 |
+| [development_next_steps](development_next_steps.md) | 명세·날짜별 검증 증거와 남은 작업. 명세 번호나 기능명으로 해당 절을 찾는다 |
 | [21 모바일 QA](21_mobile_usability_qa_2026-09-09.md) | 2026-09-09 검증 범위와 로그인 이후 미검증 한계를 포함한 기록 |
 | [24 추천 복구 QA](24_search_recommendations_restore_qa_2026-09-10.md), [25 추천 503 QA](25_recommendation_503_fix_qa_2026-09-10.md) | 날짜별 기록. 25는 24 이후 후속 QA이며 현재 서버의 보증이 아님 |
-| [초기 Codex 프롬프트](codex_prompt.md), [설계 준수 수정 프롬프트](codex_implementation_prompt.md), [Cursor 검증 프롬프트](cursor_verification_prompt.md) | 참고 전용·중복 지시. 초기화/설치/과거 결함 단계를 통째로 재실행하지 않음 |
+| [초기 Codex 프롬프트](codex_prompt.md), [설계 준수 수정 프롬프트](codex_implementation_prompt.md) | 참고 전용·중복 지시. 초기화/설치/과거 결함 단계를 통째로 재실행하지 않음 |
 | [7월 로드맵](../migrations/7월/00_7월_개선_로드맵_개요.md)과 연결된 01~08 | 당시 기능 계획·요구사항. `migrations/7월/`은 Markdown 로드맵이며 DB 적용 파일은 `supabase/migrations/`에 있음. 제품 방향 관계는 판단 보류 |
 
 ## AI 지침과 스킬
 
 - [AGENTS.md](../AGENTS.md): 공통 규칙과 작업별 읽기 경로. [CLAUDE.md](../CLAUDE.md): 같은 규칙을 참조하는 Claude용 안내.
-- [.claude/agents](../.claude/agents/): 역할별 전문 지침. `.claude/agent-memory/`는 과거 기억이며 개인 메모를 새 문서로 복사하지 않는다.
+- [Claude 역할 정의](../.claude/agents/)에 역할별 지침을 두고 [Codex 역할 설정](../.codex/agents/)에서 같은 파일을 읽는다. `.claude/agent-memory/`는 역할별 과거 작업 기록이다.
 - [Codex orchestrate](../.agents/skills/orchestrate/SKILL.md): 역할 산출물 통합의 진입점. [공통 절차](../.claude/skills/orchestrate/SKILL.md)를 참조한다. 일반 코드 수정·문서 점검에 강제 적용하지 않는다.
 - [scenenote-verify](../.agents/skills/scenenote-verify/SKILL.md): 작업 중 기능별 선택 테스트와 완료 검사, 짧은 출력·개별 로그. [Claude 진입점](../.claude/skills/scenenote-verify/SKILL.md)은 같은 절차를 참조한다. 커밋 전 경로 검사 설치·상태 확인은 [README](../README.md#실행빌드검증-명령)를 따른다. 검증·작업 재개 증거는 development_next_steps에서 관리한다.
 

@@ -1,4 +1,5 @@
 import { dramaRegionalCountry, hasNonDramaGenre } from "./dramaClassification.ts";
+import type { SearchMergeIdentity } from "./searchResultMerge.ts";
 
 /** Positive discovery choices. Recommendation exclusions remain a separate, stricter rule. */
 export type DiscoveryMediaType = "anime" | "drama" | "movie";
@@ -33,6 +34,9 @@ export interface DiscoveryCandidate {
   matched_countries?: readonly string[] | null;
   matched_genres?: readonly string[] | null;
   content_type?: string;
+  anime_format?: string;
+  /** Confirmed search equivalents of the same release unit, not arbitrary related works. */
+  equivalent_results?: readonly SearchMergeIdentity[] | null;
   category?: string;
   has_seasons?: boolean | null;
 }
@@ -112,7 +116,12 @@ export function matchesDiscoveryFilters(candidate: DiscoveryCandidate, input: Di
   const countries = [...(candidate.countries ?? []), ...(candidate.origin_country ?? [])];
   const countryMatches = filters.countries.length === 0 || countries.some((country) => allowedCountries.includes(country.trim().toUpperCase())) ||
     Boolean(candidate.matched_countries?.length && candidate.matched_countries.every((country) => allowedCountries.includes(country.trim().toUpperCase())));
-  const typeMatches = filters.mediaTypes.length === 0 || (type !== null && filters.mediaTypes.includes(type));
+  const identities = [candidate, ...(candidate.equivalent_results ?? [])];
+  const confirmedAnimeMovie = candidate.anime_format === "MOVIE" &&
+    identities.some(identity => identity.external_source === "anilist" && identity.content_type === "anime") &&
+    identities.some(identity => identity.external_source === "tmdb" && identity.content_type === "movie");
+  const typeMatches = filters.mediaTypes.length === 0 || (type !== null && filters.mediaTypes.includes(type)) ||
+    (confirmedAnimeMovie && filters.mediaTypes.some(mediaType => mediaType === "anime" || mediaType === "movie"));
   return genreMatches && countryMatches && typeMatches && (filters.year === undefined || candidate.air_year === filters.year);
 }
 

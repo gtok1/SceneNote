@@ -387,6 +387,7 @@ export function normalizeAniListItem(
     external_source: "anilist",
     external_id: String(item.id),
     content_type: "anime",
+    ...(item.format ? { anime_format: item.format } : {}),
     title_primary: item.title?.english ?? item.title?.romaji ?? item.title?.native ?? "Untitled",
     title_original: item.title?.native ?? null,
     poster_url: item.coverImage?.large ?? null,
@@ -397,7 +398,7 @@ export function normalizeAniListItem(
     episode_count: item.episodes ?? null,
     genres: Array.from(new Set(item.genres ?? [])),
     origin_country: item.countryOfOrigin ? [item.countryOfOrigin] : [],
-    match_titles: Array.from(new Set([...(item.synonyms ?? []), synthesizedMatchTitle].filter((title): title is string => Boolean(title)))),
+    match_titles: Array.from(new Set([...(item.synonyms ?? []), item.title?.english, item.title?.romaji, item.title?.native, synthesizedMatchTitle].filter((title): title is string => Boolean(title)))),
     matched_via: seasonContext ? "season_relation" : "direct",
     season_number: seasonContext?.seasonNumber,
     resolved_from_id: seasonContext ? String(seasonContext.base.id) : undefined

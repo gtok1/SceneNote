@@ -120,11 +120,13 @@ export interface RecommendationScanBudget {
   keywordLookups: number;
   maxMonths: number;
   maxRounds: number;
-  label: "first" | "continuation";
+  label: "first" | "continuation" | "latest_first";
 }
 
-export function recommendationScanBudget(input: { hasCursor: boolean }): RecommendationScanBudget {
-  return input.hasCursor
-    ? { scanMs: 4_000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation" }
-    : { scanMs: 1_000, keywordLookups: 16, maxMonths: 3, maxRounds: 3, label: "first" };
+// The one-second first scan assumed taste fill would complete the batch (docs/52).
+// Latest mode has no taste fill (docs/70), so its first request uses the continuation budget (docs/85 D-1).
+export function recommendationScanBudget(input: { hasCursor: boolean; discoveryMode?: "latest" | "mixed" }): RecommendationScanBudget {
+  if (input.hasCursor) return { scanMs: 4_000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation" };
+  if (input.discoveryMode === "latest") return { scanMs: 4_000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "latest_first" };
+  return { scanMs: 1_000, keywordLookups: 16, maxMonths: 3, maxRounds: 3, label: "first" };
 }

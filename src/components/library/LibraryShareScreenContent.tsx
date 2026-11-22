@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -10,13 +10,14 @@ import { GenreBadgeList } from "@/components/GenreBadge";
 import { AppImage as Image } from "@/components/common/AppImage";
 import { WatchStatusBadge } from "@/components/content/WatchStatusBadge";
 import { colors, radius, spacing, typography } from "@/constants/theme";
+import { useHydrated } from "@/hooks/useHydrated";
 import { getLibraryShare } from "@/services/libraryShare";
 import { extractShareId } from "@/utils/libraryShareErrors";
-import type { LibraryListItem } from "@/types/library";
+import type { SharedLibraryItem } from "@/types/libraryShare";
 import { createAirDateLabel, createEpisodeCountLabel, createWatchCountLabel } from "@/utils/contentMetaDisplay";
 import { CONTENT_TYPE_LABELS } from "@/utils/libraryFilters";
 import { createCrewShortLine } from "@/utils/contentCrew";
-import { createReviewLabel } from "@/utils/reviewDisplay";
+import { createSharedReviewView, SHARED_REVIEW_COPY } from "@/utils/sharedReviewDisplay";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 import { ERROR_COPY } from "@/utils/errorCopy";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
@@ -28,12 +29,14 @@ interface LibraryShareScreenContentProps {
 
 export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContentProps) {
   const router = useRouter();
-  const { width } = useWindowDimensions();
+  const hydrated = useHydrated();
+  const { width: windowWidth } = useWindowDimensions();
+  const width = hydrated ? windowWidth : 0;
   const { gutter } = getHomeLayout(width);
   const insets = useSafeAreaInsets();
   const columns = width >= 1280 ? 6 : width >= 960 ? 5 : width >= 700 ? 4 : 2;
   const cardWidth = `${100 / columns}%` as const;
-  const normalizedShareId = extractShareId(shareId);
+  const normalizedShareId = hydrated ? extractShareId(shareId) : null;
   const hasShareId = Boolean(normalizedShareId);
   const receivedShareId = shareId?.trim() ?? "";
   const share = useQuery({
@@ -69,7 +72,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
         </View>
       </View>
 
-      {!hasShareId ? (
+      {hydrated && !hasShareId ? (
         <View style={styles.errorPanel}>
           <Ionicons color={colors.danger} name="warning-outline" size={22} />
           <View style={styles.errorTextBox}>
@@ -86,7 +89,7 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
         </View>
       ) : null}
 
-      {share.isLoading ? (
+      {!hydrated || share.isLoading ? (
         <View style={styles.centerPanel}>
           <ActivityIndicator color={colors.primary} />
           <Text style={styles.centerText}>공유 목록을 불러오고 있습니다.</Text>
@@ -123,11 +126,17 @@ export function LibraryShareScreenContent({ shareId }: LibraryShareScreenContent
   );
 }
 
-function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWidth: `${number}%` }) {
+function SharedGalleryItem({ item, cardWidth }: { item: SharedLibraryItem; cardWidth: `${number}%` }) {
+  const [revealed, setRevealed] = useState(false);
   const episodeLabel = createEpisodeCountLabel(item.episode_count);
   const airDateLabel = createAirDateLabel(item.air_date, item.air_year);
   const watchCountLabel = createWatchCountLabel(item.watch_count, { includeZero: true });
-  const reviewLabel = createReviewLabel(item.rating, item.one_line_review);
+  const { label, spoilerHidden } = createSharedReviewView({
+    rating: item.rating,
+    oneLineReview: item.one_line_review,
+    isSpoiler: item.review_is_spoiler,
+    revealed
+  });
   const crew = createCrewShortLine(item.crew);
 
   return (
@@ -145,7 +154,17 @@ function SharedGalleryItem({ item, cardWidth }: { item: LibraryListItem; cardWid
           </Text>
           {crew.text ? <Text accessibilityLabel={crew.accessibilityLabel} numberOfLines={1} style={styles.crew}>{crew.text}</Text> : null}
           <GenreBadgeList genres={item.genres} maxVisible={2} />
-          {reviewLabel ? <Text numberOfLines={1} style={styles.review}>{reviewLabel}</Text> : null}
+          {label ? <Text numberOfLines={1} style={styles.review}>{label}</Text> : null}
+          {spoilerHidden ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`스포일러 포함 한줄 후기 보기, ${item.title_primary}`}
+              onPress={() => setRevealed(true)}
+              style={styles.spoilerBox}
+            >
+              <Text numberOfLines={1} style={styles.spoilerText}>{SHARED_REVIEW_COPY.reveal}</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.badges}>
             {item.statuses.slice(0, 2).map((status) => (
               <WatchStatusBadge key={status} status={status} size="sm" />
@@ -284,6 +303,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800"
   },
+  spoilerBox: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.sm,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: spacing.sm
+  },
+  spoilerText: { ...typography.label, color: colors.textMuted, textAlign: "center" },
   badges: {
     flexDirection: "row",
     flexWrap: "wrap",

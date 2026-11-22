@@ -77,7 +77,7 @@ export function LibraryFilterBottomSheet({
   return (
     <Modal animationType="slide" onShow={modalFocus.focusFirst} onDismiss={onClosed} onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.backdrop}>
-        <Pressable accessibilityLabel="필터 닫기" onPress={onClose} style={StyleSheet.absoluteFill} />
+        <Pressable accessibilityLabel="필터 닫기" accessibilityRole="button" onPress={onClose} style={StyleSheet.absoluteFill} />
         <View
           ref={modalFocus.panelRef}
           accessibilityLabel="라이브러리 필터"
@@ -91,6 +91,7 @@ export function LibraryFilterBottomSheet({
             <Text style={styles.title}>필터</Text>
             <Pressable
               accessibilityLabel="필터 닫기"
+              accessibilityRole="button"
               onPress={onClose}
               ref={modalFocus.firstRef}
               style={styles.iconButton}

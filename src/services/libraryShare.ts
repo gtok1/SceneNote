@@ -6,7 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { getLibraryItems } from "@/services/library";
 import { getSessionUserId } from "@/services/sessionUser";
 import { readBatchedRows } from "@/utils/batchedQuery";
-import { resolveLibraryShareOrigin } from "@/utils/libraryShareUrl";
+import { LIBRARY_SHARE_MANAGEMENT_COPY, resolveLibraryShareStop } from "@/utils/libraryShareManagement";
+import { canBuildLibraryShareUrl, resolveLibraryShareOrigin } from "@/utils/libraryShareUrl";
 import {
   type LibraryShareAction,
   type LibraryShareErrorInfo,
@@ -15,7 +16,7 @@ import {
 } from "@/utils/libraryShareErrors";
 import type { Json } from "@/types/database";
 import type { LibraryListItem } from "@/types/library";
-import type { CreateLibraryShareInput, LibraryShareDetail, LibraryShareFilters, LibraryShareSummary } from "@/types/libraryShare";
+import type { CreateLibraryShareInput, LibraryShareDetail, LibraryShareFilters, LibraryShareSummary, MyLibraryShare } from "@/types/libraryShare";
 
 interface CreateLibraryShareResponse {
   id: string;
@@ -55,6 +56,55 @@ export type LibraryShareDeliveryResult = "shared" | "copied" | "ready";
 
 const SHARE_TABLE_MISSING_MESSAGE =
   "공유 테이블이 아직 DB에 없습니다. Supabase 마이그레이션 0012_library_shares.sql을 적용한 뒤 다시 시도해 주세요.";
+
+export const MY_LIBRARY_SHARE_LIMIT = 100;
+export const LIBRARY_SHARE_LINKS_AVAILABLE = canBuildLibraryShareUrl({
+  platform: Platform.OS,
+  configuredOrigin: Constants.expoConfig?.extra?.publicWebOrigin
+});
+
+async function requireShareOwnerId(expectedOwnerId?: string | null): Promise<string> {
+  const { userId } = await getSessionUserId();
+  if (!userId || (expectedOwnerId !== undefined && userId !== expectedOwnerId)) {
+    throw new Error("로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.");
+  }
+  return userId;
+}
+
+export async function listMyLibraryShares(expectedOwnerId?: string | null, signal?: AbortSignal): Promise<MyLibraryShare[]> {
+  const userId = await requireShareOwnerId(expectedOwnerId);
+  const query = supabase.from("library_shares")
+    .select("id,title,item_count,created_at")
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(MY_LIBRARY_SHARE_LIMIT);
+
+  if (signal) query.abortSignal(signal);
+  const { data, error } = await query;
+  if (error) throw new Error(LIBRARY_SHARE_MANAGEMENT_COPY.loadFailed);
+  return data.map(toLibraryShareSummary);
+}
+
+export async function deleteLibraryShare(id: string, expectedOwnerId?: string): Promise<void> {
+  const userId = await requireShareOwnerId(expectedOwnerId);
+  const { data, error } = await supabase.from("library_shares")
+    .delete()
+    .eq("id", id)
+    .eq("owner_user_id", userId)
+    .select("id");
+  if (error) throw new Error(LIBRARY_SHARE_MANAGEMENT_COPY.stopFailed);
+  if (data.length > 0) return;
+
+  const { data: remaining, error: checkError } = await supabase.from("library_shares")
+    .select("id")
+    .eq("id", id)
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  if (checkError || resolveLibraryShareStop({ deletedCount: 0, stillExists: Boolean(remaining) }) === "denied") {
+    throw new Error(LIBRARY_SHARE_MANAGEMENT_COPY.stopFailed);
+  }
+}
 
 export async function createLibraryShare(params: CreateLibraryShareInput): Promise<LibraryShareSummary> {
   const libraryItemIds = params.libraryItemIds === undefined ? null : Array.from(new Set(params.libraryItemIds));

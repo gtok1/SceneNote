@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { StackBackButton } from "@/components/common/StackBackButton";
 import { colors, spacing, typography } from "@/constants/theme";
+import { useHydrated } from "@/hooks/useHydrated";
 import { getHomeLayout, HOME_CONTENT_MAX_WIDTH } from "@/utils/homeLayout";
 
 interface ScreenHeaderProps {
@@ -13,7 +14,9 @@ interface ScreenHeaderProps {
 
 // Keep this in the navigator's header slot so keyboard offsets still use its measured height.
 export function ScreenHeader({ title, maxWidth = HOME_CONTENT_MAX_WIDTH, showBack = true }: ScreenHeaderProps) {
-  const { width } = useWindowDimensions();
+  const hydrated = useHydrated();
+  const { width: windowWidth } = useWindowDimensions();
+  const width = hydrated ? windowWidth : 0;
   const insets = useSafeAreaInsets();
   const { gutter } = getHomeLayout(width);
 

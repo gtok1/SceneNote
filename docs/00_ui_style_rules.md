@@ -180,7 +180,7 @@ elevation  = { card: boxShadow 2겹, bar: 상단 1px 선 }
    ```
    grep -nE "#[0-9A-Fa-f]{3,6}\b|rgba?\(|fontWeight: \"|fontSize: [0-9]" <파일들>
    ```
-   결과 0줄(UI-1.1 예외 상수 제외). `grep -n "Alert.alert" <파일들>` 0줄(확인 창은 `confirmDestructive` 안에만). 저장소 전체 허용 목록은 `npm test`의 `alertUsageGuard`가 확인한다(docs/78). `grep -n "accessibilityState" <파일들>` 0줄(`npm test`의 `a11yAriaStateGuard` 검사가 저장소 전체를 확인한다).
+   결과 0줄(UI-1.1 예외 상수 제외). `grep -n "Alert.alert" <파일들>` 0줄(확인 창은 `confirmDestructive` 안에만). 저장소 전체 허용 목록은 `npm test`의 `alertUsageGuard`가 확인한다(docs/78). `grep -n "accessibilityState" <파일들>` 0줄(`npm test`의 `a11yAriaStateGuard` 검사가 저장소 전체를 확인한다). `Pressable` 역할·`TextInput` 이름은 `npm test`의 `a11yRoleLabelGuard`가 저장소 전체를 확인한다(docs/84).
 3. **웹**(8081만, `npm run web -- --port 8081 --localhost --clear`, 사용 중이면 기존 서버 재사용): 폭 375·768·1440. 확인 — 시작선 하나, 넓은 화면 빈 공간·끝으로 밀린 버튼 없음, 키보드 포커스 이동, 토스트·확인 창 동작.
 4. **앱**(가능하면 `npm run ios` iOS 시뮬레이터 세로): 안전 영역(노치·홈 인디케이터), 키보드가 입력·저장 버튼을 가리지 않음, 글자 크기 1.3배(설정 > 손쉬운 사용 > 더 큰 텍스트)에서 잘림 없음, 확인 창은 네이티브 Alert로 뜸.
 5. 로그인이 필요한 화면을 AI가 확인할 수 없으면 대신 로그인하지 않는다. 확인하지 못한 항목을 **웹/앱 구분해** 수동 확인 표로 보고한다.

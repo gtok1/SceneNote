@@ -8,7 +8,10 @@ import { usePinContext } from "@/hooks/usePinContext";
 import { getPinContext } from "@/services/pinContext";
 import { confirmDiscard } from "@/utils/confirmDiscard";
 import { confirmDestructive } from "@/utils/confirmDestructive";
+import { ERROR_COPY } from "@/utils/errorCopy";
+import { isNetworkOffline } from "@/utils/networkStatus";
 import { userFacingErrorMessage } from "@/utils/profileDashboard";
+import { runWithSaveDeadline } from "@/utils/saveDeadline";
 import { useNetworkState } from "expo-network";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -18,12 +21,14 @@ import { useAtom } from "jotai";
 import { initialPinFormDraft, pinFormDraftAtom } from "@/atoms/pinFormAtom";
 import { EMOTION_LABELS, EMOTION_OPTIONS } from "@/constants/emotions";
 import { FORM_CONTENT_MAX_WIDTH } from "@/constants/layout";
-import { colors, radius, spacing } from "@/constants/theme";
+import { colors, radius, spacing, typography } from "@/constants/theme";
+import { useTags } from "@/hooks/useTags";
 import { useCreatePin, useDeletePin, useUpdatePin } from "@/hooks/useTimelinePins";
 import type { TimelinePin } from "@/types/pins";
 import { createPinSchema } from "@/utils/validation";
 import { resolveTimecodeInput, formatSecondsToTimecode } from "@/utils/timecode";
 import { getHomeLayout } from "@/utils/homeLayout";
+import { addTagsFromInput, PIN_TAG_COPY, removeLastTagFragment, suggestPinTags } from "@/utils/pinTagInput";
 import { selectionAriaProps } from "@/utils/selectionAria";
 import { SpoilerToggle } from "./SpoilerToggle";
 import { TagChip } from "./TagChip";
@@ -51,6 +56,7 @@ export function PinComposer({
   const addToast = useAppUIStore(state => state.addToast);
   const [draft, setDraft] = useAtom(pinFormDraftAtom);
   const [tagInput, setTagInput] = useState("");
+  const { data: allTags, isFetching: fetchingTags, isSuccess: tagsLoaded } = useTags();
   const [error, setError] = useState<string | null>(null);
   const context = usePinContext(contentId, episodeId);
   const episodeDurationSeconds = context.data?.duration ?? null;
@@ -64,6 +70,7 @@ export function PinComposer({
   const [createIdentity] = useState(() => createPinSaveIdentity());
   const timeRef = useRef<TextInput>(null);
   const memoRef = useRef<TextInput>(null);
+  const tagRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [timeError, setTimeError] = useState<string | undefined>();
   const [tagError, setTagError] = useState<string | null>(null);
@@ -110,6 +117,10 @@ export function PinComposer({
     () => draft.tags.map((name) => ({ id: name, name, user_id: "", created_at: "" })),
     [draft.tags]
   );
+  const suggestions = useMemo(
+    () => tagsLoaded && !fetchingTags ? suggestPinTags(allTags, draft.tags, tagInput) : [],
+    [allTags, draft.tags, fetchingTags, tagInput, tagsLoaded]
+  );
 
   const changeTimestampSeconds = useCallback(
     (seconds: number | null) => {
@@ -131,19 +142,36 @@ export function PinComposer({
     [setDraft]
   );
 
-  const addTag = () => {
+  const addTag = (raw: string, remainingInput = "") => {
     if (isSaving) return;
-    const normalized = tagInput.trim().replace(/,$/, "");
-    const reason = !normalized ? "태그를 입력해 주세요." : normalized.length > 20 ? "태그는 20자까지 입력할 수 있어요." : draft.tags.includes(normalized) ? "이미 추가한 태그입니다." : draft.tags.length >= 10 ? "태그는 10개까지 추가할 수 있어요." : null;
-    setTagError(reason);
-    if (reason) return;
-    setDraft((current) => ({ ...current, tags: [...current.tags, normalized] }));
-    setTagInput("");
+    const { tags, error } = addTagsFromInput(draft.tags, raw);
+    setTagError(error);
+    if (error) return;
+    setDraft((current) => ({ ...current, tags }));
+    setTagInput(remainingInput);
   };
 
   const save = async () => {
     if (saveLock.current || isSaving) return;
-    if (network.isConnected === false || network.isInternetReachable === false) { setError("인터넷 연결 후 다시 저장해 주세요."); return; }
+    if (isNetworkOffline(network)) {
+      setError(ERROR_COPY.offlineSave);
+      return;
+    }
+    let tagNames = draft.tags;
+    if (tagInput.trim()) {
+      const { tags, error } = addTagsFromInput(draft.tags, tagInput);
+      if (error === PIN_TAG_COPY.tooLong || error === PIN_TAG_COPY.tooMany) {
+        setTagError(error);
+        tagRef.current?.focus();
+        return;
+      }
+      if (!error) {
+        tagNames = tags;
+        setDraft((current) => ({ ...current, tags }));
+      }
+    }
+    setTagInput("");
+    setTagError(null);
     const timecode = resolveTimecodeInput(draft.timecodeDisplay, "save");
     if (timecode.kind === "invalid_nonempty") {
       setTimeError("시간은 MM:SS 또는 HH:MM:SS 형식으로 입력해 주세요");
@@ -153,7 +181,7 @@ export function PinComposer({
     const result = createPinSchema.safeParse({
       timestamp_seconds: timecode.seconds,
       memo: draft.memo.trim() ? draft.memo.trim() : null,
-      tagNames: draft.tags,
+      tagNames,
       emotion: draft.emotion,
       is_spoiler: draft.is_spoiler,
       episodeDurationSeconds: null
@@ -172,7 +200,7 @@ export function PinComposer({
     saveLock.current = true;
     setChecking(true);
     try {
-      const latestContext = await getPinContext(contentId, episodeId);
+      const latestContext = await runWithSaveDeadline((signal) => getPinContext(contentId, episodeId, signal));
       const checked = createPinSchema.safeParse({ ...result.data, episodeDurationSeconds: latestContext.duration });
       if (!checked.success) { setTimeError(checked.error.issues[0]?.message); scrollRef.current?.scrollTo({ y: 0, animated: true }); timeRef.current?.focus(); return; }
       changeTimecodeDisplay(timecode.text);
@@ -253,6 +281,7 @@ export function PinComposer({
           multiline
           onChangeText={(memo) => setDraft((current) => ({ ...current, memo }))}
           placeholder="이 장면을 어떻게 기억하고 싶나요?"
+          placeholderTextColor={colors.textSubtle}
           style={[styles.input, styles.memo]}
           value={draft.memo}
         />
@@ -264,15 +293,22 @@ export function PinComposer({
         {tagError ? <Text accessibilityRole="alert" style={styles.error}>{tagError}</Text> : null}
         <View style={styles.tagInputRow}>
           <TextInput
-          editable={!isSaving}
+            editable={!isSaving}
             accessibilityLabel="새 태그"
+            ref={tagRef}
+            returnKeyType="done"
+            autoCapitalize="none"
+            autoCorrect={false}
+            submitBehavior="submit"
+            blurOnSubmit={false}
             onChangeText={(text) => { setTagInput(text); setTagError(null); }}
-            onSubmitEditing={addTag}
-            placeholder="태그 입력 후 Enter"
+            onSubmitEditing={() => addTag(tagInput)}
+            placeholder={PIN_TAG_COPY.placeholder}
+            placeholderTextColor={colors.textSubtle}
             style={[styles.input, styles.tagInput]}
             value={tagInput}
           />
-          <Pressable accessibilityRole="button" aria-disabled={isSaving} disabled={isSaving} onPress={addTag} style={[styles.smallButton, isSaving && styles.disabled]}>
+          <Pressable accessibilityRole="button" aria-disabled={isSaving} disabled={isSaving} onPress={() => addTag(tagInput)} style={[styles.smallButton, isSaving && styles.disabled]}>
             <Text style={styles.smallButtonText}>추가</Text>
           </Pressable>
         </View>
@@ -291,6 +327,21 @@ export function PinComposer({
             />
           ))}
         </View>
+        {suggestions.length > 0 && (
+          <>
+            <Text style={styles.suggestionsLabel}>{PIN_TAG_COPY.suggestionsLabel}</Text>
+            <View role="group" accessibilityLabel="내 태그 후보" aria-disabled={isSaving} style={[styles.tags, isSaving && styles.disabled]}>
+              {suggestions.map((name) => (
+                <TagChip
+                  key={name}
+                  tag={{ id: name, name }}
+                  disabled={isSaving}
+                  onPress={() => addTag(name, removeLastTagFragment(tagInput))}
+                />
+              ))}
+            </View>
+          </>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -324,7 +375,7 @@ export function PinComposer({
         onToggle={(is_spoiler) => { if (!isSaving) setDraft((current) => ({ ...current, is_spoiler })); }}
       />
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
 
 
       {mode === "edit" ? (
@@ -426,6 +477,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.xs
+  },
+  suggestionsLabel: {
+    ...typography.caption,
+    color: colors.textMuted
   },
   emotions: {
     flexDirection: "row",

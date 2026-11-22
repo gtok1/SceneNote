@@ -97,3 +97,21 @@ it("SB-2 expands the continuation recommendation scan budget", async () => {
     scanMs: 4000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation"
   });
 });
+
+it("85 T-1: latest first requests use the continuation-size scan budget", () => {
+  assert.deepEqual(firstBatchFill.recommendationScanBudget({ hasCursor: false, discoveryMode: "latest" }), {
+    scanMs: 4000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "latest_first"
+  });
+});
+
+it("85 T-2: latest continuations keep the continuation budget", () => {
+  assert.deepEqual(firstBatchFill.recommendationScanBudget({ hasCursor: true, discoveryMode: "latest" }), {
+    scanMs: 4000, keywordLookups: 32, maxMonths: 6, maxRounds: 6, label: "continuation"
+  });
+});
+
+it("85 T-3: mixed and unspecified first requests keep the one-second budget", () => {
+  const expected = { scanMs: 1000, keywordLookups: 16, maxMonths: 3, maxRounds: 3, label: "first" };
+  assert.deepEqual(firstBatchFill.recommendationScanBudget({ hasCursor: false, discoveryMode: "mixed" }), expected);
+  assert.deepEqual(firstBatchFill.recommendationScanBudget({ hasCursor: false }), expected);
+});

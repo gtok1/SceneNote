@@ -2,6 +2,7 @@ import { readAllRows, readBatchedRows } from "@/utils/batchedQuery";
 import { contentIdsNeedingEpisodeAirDates } from "@/utils/libraryAirDates";
 import { getSessionUserId } from "@/services/sessionUser";
 import { assertLibraryWriteApplied } from "@/utils/libraryWrite";
+import { runWithSaveDeadline } from "@/utils/saveDeadline";
 import { hasKnownEpisodeCount, isEpisodeListReusable } from "../../supabase/functions/_shared/episodeCache";
 import { requestMediaType } from "../../supabase/functions/_shared/contentIdentity";
 import { getLibraryProgressFields, type LibraryProgressRow } from "@/utils/libraryProgress";
@@ -330,20 +331,23 @@ export async function updateLibraryManualProgress(
   assertLibraryWriteApplied(result, "시청 위치를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
 }
 
-export async function updateLibraryWatchDates(
+export function updateLibraryWatchDates(
   libraryItemId: string,
   dates: { firstWatchedAt: string | null; lastWatchedAt: string | null }
 ): Promise<void> {
-  const result = await supabase
-    .from("user_library_items")
-    .update({
-      first_watched_at: dates.firstWatchedAt,
-      last_watched_at: dates.lastWatchedAt
-    })
-    .eq("id", libraryItemId)
-    .select("id");
+  return runWithSaveDeadline(async (signal) => {
+    const result = await supabase
+      .from("user_library_items")
+      .update({
+        first_watched_at: dates.firstWatchedAt,
+        last_watched_at: dates.lastWatchedAt
+      })
+      .eq("id", libraryItemId)
+      .select("id")
+      .abortSignal(signal);
 
-  assertLibraryWriteApplied(result, "본 시기를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
+    assertLibraryWriteApplied(result, "본 시기를 저장하지 못했어요. 작품과 로그인 상태를 다시 확인해 주세요.");
+  });
 }
 
 export async function deleteLibraryItem(libraryItemId: string): Promise<void> {

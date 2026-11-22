@@ -1,4 +1,5 @@
 import type { UnsupportedDiscoveryFilter } from "../../supabase/functions/_shared/discoveryFilters";
+import { getSearchResultKey } from "../../supabase/functions/_shared/searchResultMerge";
 
 export function canRunSearchRecommendations(input: {
   enabled: boolean; signedIn: boolean; focused: boolean; online: boolean;
@@ -47,8 +48,8 @@ export function recommendationProviderError(blocked: boolean, count: number): st
     : null;
 }
 
-export function searchSeasonIdentity(result: {external_source: string; external_id: string; season_number?: number | null}): string {
-  return `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
+export function searchSeasonIdentity(result: {external_source: string; external_id: string; content_type?: string; season_number?: number | null}): string {
+  return getSearchResultKey(result);
 }
 
 

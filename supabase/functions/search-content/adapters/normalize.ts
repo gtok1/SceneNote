@@ -1,3 +1,4 @@
+import { compactSearchResults, getSearchResultKey } from "../../_shared/searchResultMerge.ts";
 import type { AdapterSearchResponse, SearchResult } from "./types.ts";
 
 const MAX_QUERY_VARIANTS = 5;
@@ -15,7 +16,7 @@ export interface SeasonQuery {
   seasonNumber: number;
 }
 
-export function searchResultIdentity(result: Pick<SearchResult, "external_source" | "external_id" | "season_number">): string {
+export function searchResultIdentity(result: Pick<SearchResult, "external_source" | "external_id" | "season_number"> & Partial<Pick<SearchResult, "content_type">>): string {
   return `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
 }
 
@@ -23,10 +24,10 @@ export function annotateFilterMatches(
   all: readonly SearchResult[], matched: readonly SearchResult[], hasFilters: boolean
 ): { results: SearchResult[]; filteredOutCount: number } {
   if (!hasFilters) return { results: [...all], filteredOutCount: 0 };
-  const matchedByIdentity = new Map(matched.map(result => [searchResultIdentity(result), result]));
+  const matchedByIdentity = new Map(matched.map(result => [getSearchResultKey(result), result]));
   let filteredOutCount = 0;
   const results = all.map(result => {
-    const match = matchedByIdentity.get(searchResultIdentity(result));
+    const match = matchedByIdentity.get(getSearchResultKey(result));
     if (match) return { ...match, filter_match: true };
     filteredOutCount += 1;
     return { ...result, filter_match: false };
@@ -47,40 +48,7 @@ export function filterResponseForVariant(
 }
 
 export function compactResults(results: SearchResult[]): SearchResult[] {
-  const byExactKey = new Map<string, SearchResult>();
-
-  for (const result of results) {
-    const exactKey = `${result.external_source}:${result.external_id}:${result.season_number ?? "whole"}`;
-    const previous = byExactKey.get(exactKey);
-    byExactKey.set(exactKey, previous ? mergeSearchResult(previous, result) : result);
-  }
-
-  const showsWithSeasons = new Set(
-    [...byExactKey.values()]
-      .filter(result => result.season_number != null)
-      .map(result => `${result.external_source}:${result.external_id}`)
-  );
-  const compacted: SearchResult[] = [];
-
-  for (const result of byExactKey.values()) {
-    if (result.season_number == null && showsWithSeasons.has(`${result.external_source}:${result.external_id}`)) continue;
-    const duplicateIndex = compacted.findIndex((item) => areSameWork(item, result));
-
-    if (duplicateIndex < 0) {
-      compacted.push({ ...result, duplicate_hint: false });
-      continue;
-    }
-
-    const previous = compacted[duplicateIndex];
-    if (!previous) continue;
-
-    const merged = mergeSearchResult(previous, result);
-    compacted[duplicateIndex] = preferSearchResult(previous, result) === result
-      ? { ...merged, ...pickPreferredFields(result, merged), duplicate_hint: true }
-      : { ...merged, duplicate_hint: true };
-  }
-
-  return compacted;
+  return compactSearchResults(results);
 }
 
 export function cleanText(value: unknown): string | null {
@@ -175,95 +143,6 @@ export function yearFromDate(value: unknown): number | null {
   if (typeof value !== "string" || value.length < 4) return null;
   const year = Number.parseInt(value.slice(0, 4), 10);
   return Number.isFinite(year) ? year : null;
-}
-
-function areSameWork(left: SearchResult, right: SearchResult): boolean {
-  if (left.season_number != null && right.season_number != null && left.season_number !== right.season_number) return false;
-  if (left.content_type !== right.content_type) return false;
-  if (left.air_year && right.air_year && left.air_year !== right.air_year) return false;
-
-  const leftTitles = compactTitleCandidates(left);
-  const rightTitles = compactTitleCandidates(right);
-  if (!leftTitles.length || !rightTitles.length) return false;
-
-  return leftTitles.some((leftTitle) => rightTitles.includes(leftTitle));
-}
-
-function compactTitleCandidates(result: SearchResult): string[] {
-  return Array.from(
-    new Set(
-      [result.title_primary, result.title_original]
-        .map((title) => compactSearchText(title ?? ""))
-        .filter((title) => title.length >= 2)
-    )
-  );
-}
-
-function mergeSearchResult(left: SearchResult, right: SearchResult): SearchResult {
-  const preferred = preferSearchResult(left, right);
-  const fallback = preferred === left ? right : left;
-
-  return {
-    ...preferred,
-    title_primary: preferred.title_primary || fallback.title_primary,
-    title_original: preferred.title_original ?? fallback.title_original,
-    poster_url: preferred.poster_url ?? fallback.poster_url,
-    overview: preferred.overview ?? fallback.overview,
-    localized_overview: preferred.localized_overview ?? fallback.localized_overview,
-    air_year: preferred.air_year ?? fallback.air_year,
-    air_date: preferred.air_date ?? fallback.air_date,
-    end_date: preferred.end_date ?? fallback.end_date,
-    episode_count: preferred.episode_count ?? fallback.episode_count,
-    genres: Array.from(new Set([...(preferred.genres ?? []), ...(fallback.genres ?? [])])),
-    has_seasons: preferred.has_seasons || fallback.has_seasons
-  };
-}
-
-function preferSearchResult(left: SearchResult, right: SearchResult): SearchResult {
-  const leftScore = sourcePreferenceScore(left);
-  const rightScore = sourcePreferenceScore(right);
-  if (leftScore !== rightScore) return rightScore > leftScore ? right : left;
-
-  const leftCompleteness = completenessScore(left);
-  const rightCompleteness = completenessScore(right);
-  return rightCompleteness > leftCompleteness ? right : left;
-}
-
-function sourcePreferenceScore(result: SearchResult): number {
-  if (result.content_type === "anime") {
-    if (result.external_source === "anilist") return 4;
-    if (result.external_source === "tmdb") return 3;
-    if (result.external_source === "kitsu") return 2;
-    return 1;
-  }
-
-  if (result.external_source === "tmdb") return 4;
-  if (result.external_source === "tvmaze") return 3;
-  return 1;
-}
-
-function completenessScore(result: SearchResult): number {
-  return [
-    result.poster_url,
-    result.overview,
-    result.localized_overview,
-    result.air_year,
-    result.air_date,
-    result.end_date,
-    result.episode_count,
-    result.title_original
-  ].filter(Boolean).length;
-}
-
-function pickPreferredFields(preferred: SearchResult, merged: SearchResult): SearchResult {
-  return {
-    ...merged,
-    external_source: preferred.external_source,
-    external_id: preferred.external_id,
-    content_type: preferred.content_type,
-    title_primary: preferred.title_primary || merged.title_primary,
-    title_original: preferred.title_original ?? merged.title_original
-  };
 }
 
 function collapseWhitespace(value: string): string {

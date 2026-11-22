@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { it } from "node:test";
 import * as discoveryContract from "./discoveryFilters.ts";
 import { discoveryFilterKey, matchesDiscoveryFilters, normalizeDiscoveryFilters } from "./discoveryFilters";
+import { mergeSearchResults, preferRegisteredSearchResult } from "../../../src/utils/mergeSearchResults";
 
 test("positive filter defaults, Korean aliases and country casing share a cache identity", () => {
   assert.deepEqual(normalizeDiscoveryFilters(), { genres: [], countries: [], mediaTypes: [] });
@@ -142,6 +143,52 @@ test("movie and anime country filters keep coproduction OR semantics even with J
     assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [content_type], countries: ["KR"] }), true);
     assert.equal(matchesDiscoveryFilters(candidate, { genres: ["Drama"], countries: ["KR"] }), true);
     assert.equal(matchesDiscoveryFilters(candidate, { countries: ["KR"] }), true);
+  }
+});
+
+test("87 confirmed AniList movie equivalents retain both movie and anime filter visibility", () => {
+  const candidate = { external_source: "anilist", content_type: "anime", anime_format: "MOVIE",
+    title_original: "ガス人間", original_language: "ja", air_year: 2026,
+    genres: ["Animation", "Drama"], origin_country: ["JP", "KR"],
+    equivalent_results: [{ external_source: "tmdb", external_id: "123", content_type: "movie" }] };
+  assert.equal(discoveryContract.discoveryMediaType(candidate), "anime", "the primary classification remains unchanged");
+  for (const mediaType of ["movie", "anime"] as const) {
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [mediaType], countries: ["KR"], genres: ["Drama"], year: 2026 }), true);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [mediaType], countries: ["US"] }), false);
+    assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: [mediaType], year: 2025 }), false);
+  }
+  assert.equal(matchesDiscoveryFilters(candidate, { mediaTypes: ["drama"] }), false);
+});
+
+test("87 arbitrary equivalent types do not turn TV anime or unconfirmed films into movie matches", () => {
+  const candidate = { external_source: "anilist", content_type: "anime", anime_format: "MOVIE",
+    equivalent_results: [{ external_source: "tmdb", external_id: "123", content_type: "movie" }] };
+  for (const patch of [
+    { anime_format: "TV" }, { anime_format: undefined }, { external_source: "kitsu" },
+    { equivalent_results: [] },
+    { equivalent_results: [{ external_source: "tmdb", external_id: "123", content_type: "anime" }] },
+    { equivalent_results: [{ external_source: "tvmaze", external_id: "123", content_type: "movie" }] }
+  ]) assert.equal(matchesDiscoveryFilters({ ...candidate, ...patch }, { mediaTypes: ["movie"] }), false, JSON.stringify(patch));
+});
+
+test("87 registered TMDB movie representatives retain both type filters after an actual anime-film merge", () => {
+  const common = { title_primary: "애니 영화", title_original: "映画", air_year: 2026,
+    air_date: "2026-07-01", has_seasons: false, poster_url: null, overview: null };
+  const anilist = { ...common, external_source: "anilist" as const, external_id: "ani-film", content_type: "anime" as const,
+    anime_format: "MOVIE", episode_count: 1 };
+  const movie = { ...common, external_source: "tmdb" as const, external_id: "tmdb-film", content_type: "movie" as const,
+    episode_count: null, genres: ["Animation"] };
+  const merged = mergeSearchResults([anilist], [movie])[0]!;
+  const preferred = preferRegisteredSearchResult(merged, new Map([
+    ["tmdb:movie:tmdb-film", [{ content_type: "movie" as const, season_number: null }]]
+  ]));
+  assert.equal(preferred.external_source, "tmdb");
+  assert.equal(preferred.content_type, "movie");
+  assert.equal(preferred.anime_format, "MOVIE");
+  assert.equal(discoveryContract.discoveryMediaType(preferred), "movie");
+  for (const mediaType of ["anime", "movie"] as const) {
+    assert.equal(matchesDiscoveryFilters(merged, { mediaTypes: [mediaType] }), true);
+    assert.equal(matchesDiscoveryFilters(preferred, { mediaTypes: [mediaType] }), true);
   }
 });
 

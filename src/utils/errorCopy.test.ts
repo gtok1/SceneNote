@@ -5,9 +5,10 @@ import { ERROR_COPY } from "./errorCopy";
 import { userFacingErrorMessage } from "./profileDashboard";
 
 describe("screen error copy", () => {
-  it("T-15 matches all twenty specified keys and their exact Korean messages", () => {
-    assert.equal(Object.keys(ERROR_COPY).length, 20);
+  it("T-15 matches all specified keys and their exact Korean messages", () => {
+    assert.equal(Object.keys(ERROR_COPY).length, 21);
     assert.deepEqual(ERROR_COPY, {
+      offlineSave: "인터넷 연결 후 다시 저장해 주세요.",
       searchFilterSave: "검색 조건을 저장하지 못했어요. 다시 시도해 주세요.",
       anchorResolve: "기준 작품을 찾지 못했어요. 잠시 후 다시 시도해 주세요.",
       personAdd: "등록하지 못했어요. 잠시 후 다시 시도해 주세요.",

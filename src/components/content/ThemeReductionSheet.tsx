@@ -37,6 +37,7 @@ export function ThemeReductionSheet({
       <View style={styles.backdrop}>
         <Pressable
           accessibilityLabel="테마 선택 닫기"
+          accessibilityRole="button"
           disabled={isSubmitting}
           onPress={onClose}
           style={StyleSheet.absoluteFill}

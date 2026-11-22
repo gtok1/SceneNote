@@ -66,7 +66,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 const ADAPTER_TIMEOUT_MS = 5000;
-const SEARCH_CACHE_VERSION = "ko-v16-season-base";
+const SEARCH_CACHE_VERSION = "ko-v17-anime-release";
 
 Deno.serve(async (req: Request) => {
   // The app waits 14s (docs/65). 11s leaves room for the fallback stages after a

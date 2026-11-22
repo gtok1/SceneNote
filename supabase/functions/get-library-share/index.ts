@@ -56,6 +56,7 @@ interface ReviewRow {
   content_id: string;
   rating: number | null;
   one_line_review: string | null;
+  is_spoiler: boolean | null;
 }
 
 interface SeasonRow {
@@ -121,7 +122,7 @@ Deno.serve(async (req: Request) => {
     selectInChunks(idChunks, (ids, from, to) =>
       adminClient
         .from("reviews")
-        .select("content_id,rating,one_line_review")
+        .select("content_id,rating,one_line_review,is_spoiler")
         .eq("user_id", share.owner_user_id)
         .in("content_id", ids)
         .order("id")
@@ -181,6 +182,7 @@ Deno.serve(async (req: Request) => {
       crew: parseStoredCrew(row.contents?.crew),
       rating: review?.rating ?? null,
       one_line_review: review?.one_line_review ?? null,
+      review_is_spoiler: review?.is_spoiler === true,
       watched_episode_count: 0,
       derived_watched_through: null,
       next_episode_number: null,

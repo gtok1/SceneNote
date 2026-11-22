@@ -8,7 +8,7 @@ import type { SearchResult } from "@/types/content";
 import type { LibraryListItem } from "@/types/library";
 import { createAirDateLabel, createEpisodeCountLabel, createLibraryWatchStateLabel } from "@/utils/contentMetaDisplay";
 import { matchLibraryItemForSeason } from "@/utils/seasonLibraryMatch";
-import { formatSearchResultTitle } from "@/utils/searchResultTitle";
+import { formatSearchResultTitle, searchResultReleaseLabel } from "@/utils/searchResultTitle";
 
 interface SearchResultItemProps {
   result: SearchResult;
@@ -67,7 +67,7 @@ export const SearchResultItem = memo(function SearchResultItem({
             </Text>
           ) : null}
           <Text numberOfLines={1} style={styles.meta}>
-            {[airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
+            {[searchResultReleaseLabel(result), airDateLabel, result.content_type, episodeLabel, watchCountLabel].filter(Boolean).join(" · ")}
           </Text>
           <GenreBadgeList genres={result.genres} maxVisible={2} />
           {recommendationReason !== undefined ? (

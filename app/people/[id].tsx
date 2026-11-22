@@ -760,6 +760,7 @@ function StatusMenu({
       <View style={[styles.modalBackdrop, isWide ? styles.modalBackdropWide : null]}>
         <Pressable
           accessibilityLabel="상태 메뉴 닫기"
+          accessibilityRole="button"
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />

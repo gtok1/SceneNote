@@ -27,6 +27,12 @@ export interface SearchResult {
   matched_countries?: string[];
   /** Genre-set proof when a provider query can verify any selected alternative. */
   matched_genres?: string[];
+  /** Public provider format, needed to distinguish anime movies from TV/OVA entries. */
+  anime_format?: string;
+  match_titles?: string[];
+  title_is_synthesized?: boolean;
+  /** Search-only equivalents of the same release unit; never a DB canonical-ID rewrite. */
+  equivalent_results?: Pick<SearchResult, "external_source" | "external_id" | "content_type" | "season_number">[];
   /** 시즌별로 펼쳐진 카드일 때만 존재. 작품 전체 카드면 undefined. */
   season_number?: number;
   duplicate_hint?: boolean;
